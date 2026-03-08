@@ -21,7 +21,7 @@ INSERT INTO `users` (`username`, `email`, `password_hash`, `role`, `must_change_
 VALUES (
     'citadel_site_admin',
     'admin@localhost',
-    '$2y$12$R6rThwzq5MGxsuJsmhBMaORS5OdsrLzfoHUapxqnAUEA8JXnPKAJG',
+    '$2y$12$7wv8yGgAxWFTFultxJtvuONCO2uENuqsuicY37eal958TRwkf665S',
     'site_admin',
     1,
     1

@@ -8,4 +8,4 @@ __pycache__/
 *.pyc
 .claude/
 CLAUDE.md
-SECURITY_AUDIT_*.md
+SECURITY_AUDIT*.md
