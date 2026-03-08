@@ -99,7 +99,7 @@ export default function FeaturesPage() {
   const content = activeTab === 'readme' ? readme : changelog;
 
   return (
-    <div className="auth-page" style={{ minHeight: '100vh', padding: '24px 16px' }}>
+    <div className="auth-page" style={{ minHeight: '100vh', height: 'auto', padding: '24px 16px', alignItems: 'flex-start' }}>
       <div style={{ maxWidth: 860, width: '100%', margin: '0 auto' }}>
         {/* Nav bar */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>

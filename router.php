@@ -47,15 +47,9 @@ if ($uri !== '/' && file_exists($publicFile) && !is_dir($publicFile)) {
     return true;
 }
 
-// SPA fallback — serve index.html for all other routes
-$index = __DIR__ . '/public/index.html';
-if (file_exists($index)) {
-    header('Content-Type: text/html');
-    header('Cache-Control: no-cache, must-revalidate');
-    header("Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'");
-    readfile($index);
-    return true;
-}
+// SPA fallback — serve built index.html via index.php
+require __DIR__ . '/index.php';
+return true;
 
 http_response_code(404);
 echo 'Not found';
