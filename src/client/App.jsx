@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { EncryptionProvider } from './contexts/EncryptionContext';
@@ -12,15 +12,13 @@ import RegisterPage from './pages/RegisterPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import VerifyEmailPage from './pages/VerifyEmailPage';
 import DashboardPage from './pages/DashboardPage';
-import AccountsPage from './pages/AccountsPage';
-import AssetsPage from './pages/AssetsPage';
-import InsurancePage from './pages/InsurancePage';
-import PortfolioPage from './pages/PortfolioPage';
 import VaultPage from './pages/VaultPage';
-import LicensesPage from './pages/LicensesPage';
+import PortfolioPage from './pages/PortfolioPage';
 import SharingPage from './pages/SharingPage';
-import ExportPage from './pages/ExportPage';
+import ImportExportPage from './pages/ImportExportPage';
+import SecurityPage from './pages/SecurityPage';
 import ProfilePage from './pages/ProfilePage';
+import TemplatesPage from './pages/TemplatesPage';
 import AdminPage from './pages/AdminPage';
 import HomePage from './pages/HomePage';
 import HelpPage from './pages/HelpPage';
@@ -94,37 +92,50 @@ function ForceChangePasswordModal() {
         {error && <div className="alert alert-danger">{error}</div>}
         <div className="form-group">
           <label htmlFor="fcpm-new-password">New Password</label>
-          <input
-            id="fcpm-new-password"
-            type="password"
-            className="form-control"
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-            required
-            autoFocus
-          />
+          <input id="fcpm-new-password" type="password" className="form-control" value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)} required autoFocus />
         </div>
         <div className="form-group">
           <label htmlFor="fcpm-confirm-password">Confirm Password</label>
-          <input
-            id="fcpm-confirm-password"
-            type="password"
-            className="form-control"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            required
-          />
+          <input id="fcpm-confirm-password" type="password" className="form-control" value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)} required />
         </div>
         <div className="form-actions">
           <button type="submit" className="btn btn-primary" disabled={saving}>
             {saving ? 'Saving...' : 'Change Password'}
           </button>
-          <button type="button" className="btn btn-outline" onClick={logout}>
-            Sign Out
-          </button>
+          <button type="button" className="btn btn-outline" onClick={logout}>Sign Out</button>
         </div>
       </form>
     </Modal>
+  );
+}
+
+// --- Offline Banner ---
+function OfflineBanner() {
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  if (isOnline) return null;
+
+  return (
+    <div style={{
+      position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9999,
+      background: '#f59e0b', color: '#000', textAlign: 'center',
+      padding: '6px 12px', fontSize: 13, fontWeight: 600,
+    }}>
+      You are offline. Viewing cached data. Changes require an internet connection.
+    </div>
   );
 }
 
@@ -138,20 +149,12 @@ function AppRoutes() {
 
   return (
     <>
+      <OfflineBanner />
       <Routes>
         {/* Public routes */}
-        <Route
-          path="/login"
-          element={user ? <Navigate to="/" replace /> : <LoginPage />}
-        />
-        <Route
-          path="/register"
-          element={user ? <Navigate to="/" replace /> : <RegisterPage />}
-        />
-        <Route
-          path="/forgot-password"
-          element={user ? <Navigate to="/" replace /> : <ForgotPasswordPage />}
-        />
+        <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
+        <Route path="/register" element={user ? <Navigate to="/" replace /> : <RegisterPage />} />
+        <Route path="/forgot-password" element={user ? <Navigate to="/" replace /> : <ForgotPasswordPage />} />
         <Route path="/home" element={user ? <Navigate to="/" replace /> : <HomePage />} />
         <Route path="/verify-email" element={<VerifyEmailPage />} />
         <Route path="/features" element={<FeaturesPage />} />
@@ -159,35 +162,19 @@ function AppRoutes() {
         <Route path="/dev-guide" element={<DevGuidePage />} />
 
         {/* Protected routes with Layout */}
-        <Route
-          path="/"
-          element={
-            <ProtectedRoute>
-              <Layout />
-            </ProtectedRoute>
-          }
-        >
+        <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
           <Route index element={<DashboardPage />} />
-          <Route path="accounts" element={<AccountsPage />} />
-          <Route path="assets" element={<AssetsPage />} />
-          <Route path="insurance" element={<InsurancePage />} />
-          <Route path="portfolio" element={<PortfolioPage />} />
           <Route path="vault" element={<VaultPage />} />
-          <Route path="licenses" element={<LicensesPage />} />
+          <Route path="portfolio" element={<PortfolioPage />} />
           <Route path="sharing" element={<SharingPage />} />
-          <Route path="export" element={<ExportPage />} />
+          <Route path="import-export" element={<ImportExportPage />} />
+          <Route path="templates" element={<TemplatesPage />} />
+          <Route path="security" element={<SecurityPage />} />
           <Route path="profile" element={<ProfilePage />} />
-          <Route
-            path="admin"
-            element={
-              <ProtectedRoute adminOnly>
-                <AdminPage />
-              </ProtectedRoute>
-            }
-          />
+          <Route path="admin" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
         </Route>
 
-        {/* Catch-all: authenticated users go to dashboard, others go to home */}
+        {/* Catch-all */}
         <Route path="*" element={<Navigate to={user ? '/' : '/home'} replace />} />
       </Routes>
 
@@ -203,7 +190,6 @@ function AppRoutes() {
 }
 
 // --- EncryptionWrapper ---
-// Bridges AuthContext -> EncryptionProvider by passing `user` as a prop
 function EncryptionWrapper({ children }) {
   const { user } = useAuth();
   return <EncryptionProvider user={user}>{children}</EncryptionProvider>;

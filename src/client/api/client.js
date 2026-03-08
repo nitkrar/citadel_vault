@@ -5,16 +5,16 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
-// Attach JWT and data token to every request
+// Attach JWT to every request (no more X-Data-Token — encryption is client-side)
 api.interceptors.request.use((config) => {
+  // Offline check: block mutations when offline
+  if (!navigator.onLine && config.method !== 'get') {
+    return Promise.reject(new Error('You are offline. Changes require an internet connection.'));
+  }
+
   const token = localStorage.getItem('pv_token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
-  }
-  // Send X-Data-Token header as fallback for mobile / non-cookie clients
-  const dataToken = sessionStorage.getItem('pv_data_token');
-  if (dataToken) {
-    config.headers['X-Data-Token'] = dataToken;
   }
   return config;
 });
@@ -25,8 +25,6 @@ api.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       localStorage.removeItem('pv_token');
-      sessionStorage.removeItem('pv_data_token');
-      sessionStorage.removeItem('pv_data_token_expiry');
       if (window.location.pathname !== '/login') {
         window.location.href = '/login';
       }

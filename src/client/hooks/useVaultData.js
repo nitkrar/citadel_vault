@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useEncryption } from '../contexts/EncryptionContext';
-import { isTruthy } from '../lib/checks';
 
 /**
  * useVaultData — Centralized hook for vault-aware data fetching.
@@ -20,14 +19,12 @@ import { isTruthy } from '../lib/checks';
  */
 export default function useVaultData(fetchFn, initialValue = null, options = {}) {
   const { requireVault = true } = options;
-  const { vaultUnlocked } = useEncryption();
-  const isUnlocked = isTruthy(vaultUnlocked);
+  const { isUnlocked } = useEncryption();
 
   const [data, setData] = useState(initialValue);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Use a ref so the fetch function always sees the latest vault state
   const isUnlockedRef = useRef(isUnlocked);
   isUnlockedRef.current = isUnlocked;
 
@@ -58,12 +55,10 @@ export default function useVaultData(fetchFn, initialValue = null, options = {})
     }
   }, [requireVault]);
 
-  // Re-fetch whenever vault state changes
   useEffect(() => {
     refetch();
   }, [isUnlocked, refetch]);
 
-  // Extract a human-readable error message from axios/API errors
   const errorMessage = error
     ? error.response?.data?.error || error.message || 'An unexpected error occurred.'
     : null;

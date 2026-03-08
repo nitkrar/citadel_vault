@@ -1,20 +1,23 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { PieChart as RechartsPieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import {
-  TrendingUp, Landmark, KeyRound, FileText, DollarSign, Lock,
-  AlertTriangle, PieChart as PieChartIcon, Briefcase, ShieldCheck, Layers,
+  KeyRound, Landmark, Briefcase, FileText, Shield, Layers,
+  Lock, Users, Clock, AlertTriangle, Info,
 } from 'lucide-react';
 import api from '../api/client';
-import { useHideAmounts } from '../components/Layout';
 import { useAuth } from '../contexts/AuthContext';
+import { useEncryption } from '../contexts/EncryptionContext';
 import useVaultData from '../hooks/useVaultData';
-import BulkWizard from '../components/BulkWizard';
-import { fmtCurrency, MASKED } from '../lib/checks';
-import useSort from '../hooks/useSort';
-import SortableTh from '../components/SortableTh';
+import { apiData } from '../lib/checks';
 
-const PIE_COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
+const TYPE_META = {
+  password:  { icon: KeyRound,  label: 'Passwords',  color: '#3b82f6' },
+  account:   { icon: Landmark,  label: 'Accounts',   color: '#22c55e' },
+  asset:     { icon: Briefcase, label: 'Assets',      color: '#f59e0b' },
+  license:   { icon: FileText,  label: 'Licenses',    color: '#8b5cf6' },
+  insurance: { icon: Shield,    label: 'Insurance',   color: '#ec4899' },
+  custom:    { icon: Layers,    label: 'Custom',      color: '#06b6d4' },
+};
 
 function getGreeting() {
   const h = new Date().getHours();
@@ -23,257 +26,117 @@ function getGreeting() {
 
 export default function DashboardPage() {
   const { user } = useAuth();
-  const { hideAmounts } = useHideAmounts();
-  const [showWizard, setShowWizard] = useState(false);
+  const { isUnlocked, pageNotices } = useEncryption();
 
-  const fetchDashboard = useCallback(async () => {
-    const results = await Promise.allSettled([
-      api.get('/portfolio.php'),
-      api.get('/vault.php'),
-      api.get('/licenses.php'),
-      api.get('/assets.php'),
-    ]);
-
-    const dash = { portfolio: null, vaultCount: 0, licenseCount: 0, assetCount: 0, expiringLicenses: [] };
-
-    if (results[0].status === 'fulfilled') {
-      dash.portfolio = results[0].value.data?.data || null;
-    }
-    if (results[1].status === 'fulfilled') {
-      const d = results[1].value.data?.data;
-      if (Array.isArray(d)) dash.vaultCount = d.length;
-    }
-    if (results[2].status === 'fulfilled') {
-      const d = results[2].value.data?.data;
-      if (Array.isArray(d)) {
-        dash.licenseCount = d.length;
-        const now = new Date();
-        const cutoff = new Date(now.getTime() + 30 * 86400000);
-        dash.expiringLicenses = d.filter((l) => {
-          if (!l.expiry_date) return false;
-          const exp = new Date(l.expiry_date);
-          return exp >= now && exp <= cutoff;
-        });
-      }
-    }
-    if (results[3].status === 'fulfilled') {
-      const d = results[3].value.data?.data;
-      if (Array.isArray(d)) dash.assetCount = d.length;
-    }
-    return dash;
+  const fetchStats = useCallback(async () => {
+    const { data: resp } = await api.get('/dashboard.php?action=stats');
+    return apiData({ data: resp });
   }, []);
 
-  const emptyDash = { portfolio: null, vaultCount: 0, licenseCount: 0, assetCount: 0, expiringLicenses: [] };
-  const { data: dash, loading, errorMessage } = useVaultData(fetchDashboard, emptyDash);
-  const { portfolio, vaultCount, licenseCount, assetCount, expiringLicenses } = dash || emptyDash;
+  const { data: stats, loading, errorMessage } = useVaultData(fetchStats, null);
 
-  const bc = portfolio?.summary?.base_currency;
-  const sym = bc === 'USD' ? '$' : bc === 'EUR' ? '\u20ac' : bc === 'GBP' ? '\u00a3' : bc ? `${bc} ` : '';
-
-  // Country data computed early for useSort (must be before conditional returns)
-  const countryData = useMemo(() => (portfolio?.by_country || []).map((c) => ({
-    name: c.country_name, value: Math.abs(c.total), flag: c.flag_emoji,
-    code: c.country_code, total: c.total, assets: c.assets,
-    liabilities: c.liabilities, count: c.count,
-  })), [portfolio]);
-
-  const { sorted: sortedCountryData, sortKey: countrySortKey, sortDir: countrySortDir, onSort: onCountrySort } = useSort(countryData, 'total', 'desc');
-
-  if (loading) {
+  if (!isUnlocked) {
     return (
       <div className="page-content">
-        <div className="loading-center"><div className="spinner" /></div>
-      </div>
-    );
-  }
-
-  if (errorMessage) {
-    return (
-      <div className="page-content">
-        <div className="alert alert-danger mb-3">
-          <AlertTriangle size={16} />
-          <span>{errorMessage}</span>
+        <div className="page-header">
+          <div>
+            <h1 className="page-title">{getGreeting()}, {user?.username}</h1>
+            <p className="page-subtitle">Unlock your vault to see your dashboard</p>
+          </div>
+        </div>
+        <div className="empty-state">
+          <Lock size={40} className="empty-icon" />
+          <h3>Vault is locked</h3>
+          <p>Unlock your vault to view entry counts and activity.</p>
         </div>
       </div>
     );
   }
 
-  const statCards = [
-    { label: 'Net Worth', value: portfolio?.summary?.net_worth, icon: <TrendingUp size={20} />, color: 'var(--primary)' },
-    { label: 'Liquid Assets', value: portfolio?.summary?.total_liquid, icon: <DollarSign size={20} />, color: 'var(--success)' },
-    { label: 'Assets', value: assetCount || (portfolio?.assets?.length ?? 0), icon: <Briefcase size={20} />, color: 'var(--info)', isMoney: false },
-    { label: 'Vault Entries', value: vaultCount, icon: <KeyRound size={20} />, color: 'var(--warning)', isMoney: false },
-  ];
-
-  const quickLinks = [
-    { to: '/accounts', icon: <Landmark size={22} />, title: 'Accounts', desc: 'Manage financial accounts' },
-    { to: '/assets', icon: <Briefcase size={22} />, title: 'Assets', desc: 'Track assets & liabilities' },
-    { to: '/insurance', icon: <ShieldCheck size={22} />, title: 'Insurance', desc: 'Insurance policies' },
-    { to: '/vault', icon: <KeyRound size={22} />, title: 'Vault', desc: 'Passwords & credentials' },
-    { to: '/licenses', icon: <FileText size={22} />, title: 'Licenses', desc: 'Software license keys' },
-    { to: '/portfolio', icon: <PieChartIcon size={22} />, title: 'Portfolio', desc: 'Portfolio overview & snapshots' },
-  ];
-
-  const gridStyle = (min) => ({
-    display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${min}, 1fr))`,
-    gap: 'var(--space-md)', marginBottom: 'var(--space-lg)',
-  });
+  const entryCounts = stats?.entry_counts || {};
+  const totalEntries = Object.values(entryCounts).reduce((a, b) => a + b, 0);
 
   return (
     <div className="page-content">
-      {/* Greeting */}
       <div className="page-header">
         <div>
-          <h1 className="page-title">{getGreeting()}, {user?.username || 'User'}</h1>
-          <p className="page-subtitle">
-            Here is your personal vault overview.
-            {portfolio?.rates_last_updated && (
-              <span className="badge badge-info" style={{ marginLeft: 8 }}>
-                Rates as of {new Date(portfolio.rates_last_updated + 'Z').toLocaleDateString()}
-              </span>
-            )}
-          </p>
+          <h1 className="page-title">{getGreeting()}, {user?.username}</h1>
+          <p className="page-subtitle">Your vault at a glance</p>
         </div>
-        <button className="btn btn-secondary" onClick={() => setShowWizard(true)}>
-          <Layers size={16} /> Bulk Setup Wizard
-        </button>
       </div>
 
+      {/* Page notices */}
+      {pageNotices?.global && (
+        <div className={`alert alert-${pageNotices.global.severity || 'info'} mb-4`}>
+          <Info size={16} />
+          <span>{pageNotices.global.message}</span>
+        </div>
+      )}
+      {pageNotices?.dashboard && (
+        <div className={`alert alert-${pageNotices.dashboard.severity || 'info'} mb-4`}>
+          <Info size={16} />
+          <span>{pageNotices.dashboard.message}</span>
+        </div>
+      )}
 
-      {/* Stat Cards */}
-      <div style={gridStyle('220px')}>
-        {statCards.map((card) => {
-          const isMoney = card.isMoney !== false;
-          let display;
-          if (isMoney && !portfolio) display = <span style={{ color: 'var(--text-muted)' }}>Locked</span>;
-          else if (isMoney && hideAmounts) display = MASKED;
-          else if (isMoney) display = fmtCurrency(card.value, sym);
-          else display = card.value;
+      {errorMessage ? (
+        <div className="alert alert-danger"><AlertTriangle size={16} /><span>{errorMessage}</span></div>
+      ) : loading ? (
+        <div className="loading-center"><div className="spinner" /></div>
+      ) : (
+        <>
+          {/* Entry count cards */}
+          <div className="grid grid-cols-3 gap-4 mb-6" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 16 }}>
+            {Object.entries(TYPE_META).map(([type, meta]) => {
+              const Icon = meta.icon;
+              const count = entryCounts[type] || 0;
+              return (
+                <Link key={type} to="/vault" className="card" style={{ textDecoration: 'none', padding: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ background: meta.color + '15', borderRadius: 8, padding: 10 }}>
+                    <Icon size={20} style={{ color: meta.color }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 24, fontWeight: 700 }}>{count}</div>
+                    <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>{meta.label}</div>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
 
-          return (
-            <div key={card.label} className="card" style={{ padding: 'var(--space-lg)' }}>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm text-muted">{card.label}</span>
-                <span style={{ color: card.color }}>{card.icon}</span>
+          {/* Stats row */}
+          <div className="grid grid-cols-3 gap-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16 }}>
+            {/* Total */}
+            <div className="card" style={{ padding: 16 }}>
+              <div className="flex items-center gap-2 mb-2">
+                <Layers size={16} style={{ color: 'var(--text-muted)' }} />
+                <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Total Entries</span>
               </div>
-              <div style={{ fontSize: 24, fontWeight: 700 }}>{display}</div>
+              <div style={{ fontSize: 28, fontWeight: 700 }}>{totalEntries}</div>
             </div>
-          );
-        })}
-      </div>
 
-      {/* Expiring Licenses Alert */}
-      {expiringLicenses.length > 0 && (
-        <div className="card mb-4" style={{ borderColor: 'rgba(245,158,11,0.4)' }}>
-          <div className="card-header" style={{ borderBottom: '1px solid rgba(245,158,11,0.2)' }}>
-            <div className="flex items-center gap-2">
-              <AlertTriangle size={18} style={{ color: 'var(--warning)' }} />
-              <span className="card-title" style={{ color: 'var(--warning)' }}>Licenses Expiring Soon</span>
+            {/* Shared with me */}
+            <div className="card" style={{ padding: 16 }}>
+              <div className="flex items-center gap-2 mb-2">
+                <Users size={16} style={{ color: 'var(--text-muted)' }} />
+                <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Shared With Me</span>
+              </div>
+              <div style={{ fontSize: 28, fontWeight: 700 }}>{stats?.shared_with_me_count || 0}</div>
             </div>
-            <span className="badge badge-warning">{expiringLicenses.length}</span>
+
+            {/* Last activity */}
+            <div className="card" style={{ padding: 16 }}>
+              <div className="flex items-center gap-2 mb-2">
+                <Clock size={16} style={{ color: 'var(--text-muted)' }} />
+                <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Last Login</span>
+              </div>
+              <div style={{ fontSize: 14 }}>
+                {stats?.last_login ? new Date(stats.last_login).toLocaleString() : 'Never'}
+              </div>
+            </div>
           </div>
-          <div className="card-body" style={{ padding: 'var(--space-md) var(--space-lg)' }}>
-            <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-              {expiringLicenses.map((lic) => (
-                <li key={lic.id} className="flex items-center justify-between"
-                  style={{ padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
-                  <span>{lic.product_name || 'Unnamed License'}</span>
-                  <span className="text-sm text-muted">Expires: {new Date(lic.expiry_date).toLocaleDateString()}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
+        </>
       )}
-
-      {/* Chart + Quick Access */}
-      <div style={{ ...gridStyle('320px'), gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))' }}>
-        {/* Pie Chart */}
-        <div className="card">
-          <div className="card-header"><span className="card-title">Portfolio by Country</span></div>
-          <div className="card-body">
-            {countryData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={260}>
-                <RechartsPieChart>
-                  <Pie data={countryData} cx="50%" cy="50%" innerRadius={55} outerRadius={100}
-                    dataKey="value" nameKey="name" paddingAngle={2}>
-                    {countryData.map((_, i) => (
-                      <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)',
-                      borderRadius: 'var(--radius-md)', color: 'var(--text)', fontSize: 13 }}
-                    formatter={(v) => fmtCurrency(v, sym, hideAmounts)}
-                  />
-                </RechartsPieChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="empty-state"><p>No portfolio data available.</p></div>
-            )}
-          </div>
-        </div>
-
-        {/* Quick Access */}
-        <div className="card">
-          <div className="card-header"><span className="card-title">Quick Access</span></div>
-          <div className="card-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 'var(--space-md)' }}>
-            {quickLinks.map((link) => (
-              <Link key={link.to} to={link.to}
-                style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-sm)',
-                  padding: 'var(--space-md)', background: 'var(--bg)', border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius-md)', textDecoration: 'none', color: 'var(--text)',
-                  transition: 'background var(--transition-fast), border-color var(--transition-fast)' }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-hover)'; e.currentTarget.style.borderColor = 'var(--primary)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg)'; e.currentTarget.style.borderColor = 'var(--border)'; }}>
-                <span style={{ color: 'var(--primary)' }}>{link.icon}</span>
-                <span className="font-medium">{link.title}</span>
-                <span className="text-sm text-muted" style={{ textAlign: 'center' }}>{link.desc}</span>
-              </Link>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Country Breakdown Table */}
-      {countryData.length > 0 && (
-        <div className="card">
-          <div className="card-header"><span className="card-title">Country Breakdown</span></div>
-          <div className="table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  <SortableTh sortKey="name" current={countrySortKey} dir={countrySortDir} onSort={onCountrySort}>Country</SortableTh>
-                  <SortableTh sortKey="total" current={countrySortKey} dir={countrySortDir} onSort={onCountrySort} style={{ textAlign: 'right' }}>Total</SortableTh>
-                  <th style={{ textAlign: 'right' }}>Liquid</th>
-                  <SortableTh sortKey="count" current={countrySortKey} dir={countrySortDir} onSort={onCountrySort} style={{ textAlign: 'right' }}>Assets</SortableTh>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedCountryData.map((c) => {
-                  const liq = (portfolio?.assets || [])
-                    .filter((a) => a.country_code === c.code && a.is_liquid && !a.is_liability)
-                    .reduce((s, a) => s + (a.base_amount || 0), 0);
-                  return (
-                    <tr key={c.code}>
-                      <td><span className="flex items-center gap-2"><span>{c.flag}</span><span>{c.name}</span></span></td>
-                      <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                        {fmtCurrency(c.total, sym, hideAmounts)}
-                      </td>
-                      <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                        {fmtCurrency(liq, sym, hideAmounts)}
-                      </td>
-                      <td style={{ textAlign: 'right' }}>{c.count}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      <BulkWizard isOpen={showWizard} onClose={() => setShowWizard(false)} />
     </div>
   );
 }

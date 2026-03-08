@@ -1,0 +1,488 @@
+<?php
+/**
+ * Citadel Vault — MariaDB Storage Adapter
+ *
+ * Production storage backend using PDO prepared statements against the
+ * MariaDB / MySQL schema defined in database/01-schema.sql.
+ */
+require_once __DIR__ . '/StorageAdapter.php';
+require_once __DIR__ . '/../../config/database.php';
+
+class MariaDbAdapter implements StorageAdapter {
+
+    private const VALID_ENTRY_TYPES = ['password', 'account', 'asset', 'license', 'insurance', 'custom'];
+
+    /**
+     * Allowed columns for vault key upserts.
+     */
+    private const VAULT_KEY_COLUMNS = [
+        'vault_key_salt', 'encrypted_dek', 'recovery_key_salt',
+        'encrypted_dek_recovery', 'recovery_key_encrypted',
+        'public_key', 'encrypted_private_key', 'must_reset_vault_key',
+    ];
+
+    private PDO $db;
+
+    public function __construct() {
+        $this->db = Database::getInstance();
+    }
+
+    // =========================================================================
+    // Vault Entries
+    // =========================================================================
+
+    public function getEntries(int $userId, ?string $entryType = null): array {
+        // Cleanup: permanently delete entries that have been soft-deleted for more than 1 day
+        $this->purgeExpiredSoftDeletes($userId);
+
+        $sql = 'SELECT ve.id, ve.entry_type, ve.template_id, ve.schema_version,
+                       ve.encrypted_data, ve.created_at, ve.updated_at,
+                       et.template_key, et.name AS template_name, et.icon AS template_icon,
+                       et.fields AS template_fields
+                FROM vault_entries ve
+                LEFT JOIN entry_templates et ON ve.template_id = et.id
+                WHERE ve.user_id = ? AND ve.deleted_at IS NULL';
+        $params = [$userId];
+
+        if ($entryType !== null) {
+            $sql .= ' AND ve.entry_type = ?';
+            $params[] = $entryType;
+        }
+
+        $sql .= ' ORDER BY ve.updated_at DESC';
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll();
+
+        // Shape template data inline
+        return array_map([$this, 'shapeEntryRow'], $rows);
+    }
+
+    public function getEntry(int $userId, int $entryId): ?array {
+        $stmt = $this->db->prepare(
+            'SELECT ve.id, ve.entry_type, ve.template_id, ve.schema_version,
+                    ve.encrypted_data, ve.created_at, ve.updated_at,
+                    et.template_key, et.name AS template_name, et.icon AS template_icon,
+                    et.fields AS template_fields
+             FROM vault_entries ve
+             LEFT JOIN entry_templates et ON ve.template_id = et.id
+             WHERE ve.id = ? AND ve.user_id = ? AND ve.deleted_at IS NULL'
+        );
+        $stmt->execute([$entryId, $userId]);
+        $row = $stmt->fetch();
+        return $row ? $this->shapeEntryRow($row) : null;
+    }
+
+    public function createEntry(int $userId, string $entryType, string $encryptedData, ?int $templateId = null, int $schemaVersion = 1): int {
+        // Server-side entry_type validation
+        if (!in_array($entryType, self::VALID_ENTRY_TYPES, true)) {
+            throw new InvalidArgumentException(
+                "Invalid entry type: '{$entryType}'. Allowed: " . implode(', ', self::VALID_ENTRY_TYPES)
+            );
+        }
+
+        $stmt = $this->db->prepare(
+            'INSERT INTO vault_entries (user_id, entry_type, template_id, schema_version, encrypted_data)
+             VALUES (?, ?, ?, ?, ?)'
+        );
+        $stmt->execute([$userId, $entryType, $templateId, $schemaVersion, $encryptedData]);
+        return (int)$this->db->lastInsertId();
+    }
+
+    public function updateEntry(int $userId, int $entryId, string $encryptedData): bool {
+        $stmt = $this->db->prepare(
+            'UPDATE vault_entries SET encrypted_data = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL'
+        );
+        $stmt->execute([$encryptedData, $entryId, $userId]);
+        return $stmt->rowCount() > 0;
+    }
+
+    public function deleteEntry(int $userId, int $entryId): bool {
+        // Soft delete: set deleted_at timestamp
+        $stmt = $this->db->prepare(
+            'UPDATE vault_entries SET deleted_at = NOW() WHERE id = ? AND user_id = ? AND deleted_at IS NULL'
+        );
+        $stmt->execute([$entryId, $userId]);
+        return $stmt->rowCount() > 0;
+    }
+
+    // =========================================================================
+    // User Vault Keys
+    // =========================================================================
+
+    public function getVaultKeys(int $userId): ?array {
+        $stmt = $this->db->prepare(
+            'SELECT vault_key_salt, encrypted_dek, recovery_key_salt,
+                    encrypted_dek_recovery, recovery_key_encrypted,
+                    public_key, encrypted_private_key, must_reset_vault_key
+             FROM user_vault_keys WHERE user_id = ?'
+        );
+        $stmt->execute([$userId]);
+        $row = $stmt->fetch();
+        return $row ?: null;
+    }
+
+    public function setVaultKeys(int $userId, array $keyData): bool {
+        // Filter to only allowed columns
+        $filtered = array_intersect_key($keyData, array_flip(self::VAULT_KEY_COLUMNS));
+        if (empty($filtered)) {
+            return false;
+        }
+
+        // Check if row exists
+        $stmt = $this->db->prepare('SELECT id FROM user_vault_keys WHERE user_id = ?');
+        $stmt->execute([$userId]);
+        $exists = $stmt->fetch();
+
+        if ($exists) {
+            // Update
+            $setClauses = [];
+            $params = [];
+            foreach ($filtered as $col => $val) {
+                $setClauses[] = "`{$col}` = ?";
+                $params[] = $val;
+            }
+            $params[] = $userId;
+            $sql = 'UPDATE user_vault_keys SET ' . implode(', ', $setClauses) . ' WHERE user_id = ?';
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute($params);
+        } else {
+            // Insert
+            $filtered['user_id'] = $userId;
+            $cols = array_keys($filtered);
+            $placeholders = array_fill(0, count($cols), '?');
+            $sql = 'INSERT INTO user_vault_keys (`' . implode('`, `', $cols) . '`) VALUES (' . implode(', ', $placeholders) . ')';
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute(array_values($filtered));
+        }
+
+        return true;
+    }
+
+    // =========================================================================
+    // Preferences (KV Store)
+    // =========================================================================
+
+    public function getPreferences(int $userId): array {
+        $stmt = $this->db->prepare(
+            'SELECT setting_key, setting_value FROM user_preferences WHERE user_id = ?'
+        );
+        $stmt->execute([$userId]);
+        $rows = $stmt->fetchAll();
+
+        $prefs = [];
+        foreach ($rows as $row) {
+            $prefs[$row['setting_key']] = $row['setting_value'];
+        }
+        return $prefs;
+    }
+
+    public function setPreference(int $userId, string $key, string $value): bool {
+        $stmt = $this->db->prepare(
+            'INSERT INTO user_preferences (user_id, setting_key, setting_value)
+             VALUES (?, ?, ?)
+             ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)'
+        );
+        $stmt->execute([$userId, $key, $value]);
+        return true;
+    }
+
+    // =========================================================================
+    // Sharing
+    // =========================================================================
+
+    public function getSharedByMe(int $userId): array {
+        $stmt = $this->db->prepare(
+            'SELECT si.id, si.recipient_identifier, si.recipient_id, si.source_entry_id,
+                    si.entry_type, si.template_id, si.is_ghost, si.created_at, si.updated_at,
+                    u.username AS recipient_username,
+                    et.template_key, et.name AS template_name, et.icon AS template_icon,
+                    et.fields AS template_fields
+             FROM shared_items si
+             LEFT JOIN users u ON si.recipient_id = u.id
+             LEFT JOIN entry_templates et ON si.template_id = et.id
+             WHERE si.sender_id = ?
+             ORDER BY si.created_at DESC'
+        );
+        $stmt->execute([$userId]);
+        $rows = $stmt->fetchAll();
+
+        return array_map(function ($row) {
+            return [
+                'id'                   => (int)$row['id'],
+                'recipient_identifier' => $row['recipient_identifier'],
+                'recipient_username'   => $row['recipient_username'],
+                'source_entry_id'      => (int)$row['source_entry_id'],
+                'entry_type'           => $row['entry_type'],
+                'is_ghost'             => (bool)$row['is_ghost'],
+                'template'             => $this->buildTemplateObject($row),
+                'created_at'           => $row['created_at'],
+                'updated_at'           => $row['updated_at'],
+            ];
+        }, $rows);
+    }
+
+    public function getSharedWithMe(int $userId): array {
+        $stmt = $this->db->prepare(
+            'SELECT si.id, si.sender_id, si.entry_type, si.template_id,
+                    si.encrypted_data, si.is_ghost, si.created_at, si.updated_at,
+                    u.username AS sender_username,
+                    et.template_key, et.name AS template_name, et.icon AS template_icon,
+                    et.fields AS template_fields
+             FROM shared_items si
+             LEFT JOIN users u ON si.sender_id = u.id
+             LEFT JOIN entry_templates et ON si.template_id = et.id
+             WHERE si.recipient_id = ?
+             ORDER BY si.created_at DESC'
+        );
+        $stmt->execute([$userId]);
+        $rows = $stmt->fetchAll();
+
+        return array_map(function ($row) {
+            return [
+                'id'              => (int)$row['id'],
+                'sender_username' => $row['sender_username'],
+                'entry_type'      => $row['entry_type'],
+                'encrypted_data'  => $row['encrypted_data'],
+                'is_ghost'        => (bool)$row['is_ghost'],
+                'template'        => $this->buildTemplateObject($row),
+                'created_at'      => $row['created_at'],
+                'updated_at'      => $row['updated_at'],
+            ];
+        }, $rows);
+    }
+
+    public function createShare(array $shareData): int {
+        $stmt = $this->db->prepare(
+            'INSERT INTO shared_items (sender_id, recipient_identifier, recipient_id, source_entry_id,
+                                       entry_type, template_id, encrypted_data, is_ghost)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        $stmt->execute([
+            $shareData['sender_id'],
+            $shareData['recipient_identifier'],
+            $shareData['recipient_id'] ?? null,
+            $shareData['source_entry_id'],
+            $shareData['entry_type'],
+            $shareData['template_id'] ?? null,
+            $shareData['encrypted_data'],
+            $shareData['is_ghost'] ?? 0,
+        ]);
+        return (int)$this->db->lastInsertId();
+    }
+
+    public function updateShare(int $shareId, string $encryptedData): bool {
+        $stmt = $this->db->prepare(
+            'UPDATE shared_items SET encrypted_data = ? WHERE id = ?'
+        );
+        $stmt->execute([$encryptedData, $shareId]);
+        return $stmt->rowCount() > 0;
+    }
+
+    public function deleteShare(int $senderId, int $shareId): bool {
+        // Ownership check: only the sender can revoke
+        $stmt = $this->db->prepare(
+            'DELETE FROM shared_items WHERE id = ? AND sender_id = ?'
+        );
+        $stmt->execute([$shareId, $senderId]);
+        return $stmt->rowCount() > 0;
+    }
+
+    // =========================================================================
+    // Snapshots
+    // =========================================================================
+
+    public function getSnapshots(int $userId, ?string $fromDate = null, ?string $toDate = null): array {
+        $sql = 'SELECT id, snapshot_date, snapshot_time, encrypted_data
+                FROM portfolio_snapshots
+                WHERE user_id = ?';
+        $params = [$userId];
+
+        if ($fromDate !== null) {
+            $sql .= ' AND snapshot_date >= ?';
+            $params[] = $fromDate;
+        }
+        if ($toDate !== null) {
+            $sql .= ' AND snapshot_date <= ?';
+            $params[] = $toDate;
+        }
+
+        $sql .= ' ORDER BY snapshot_date ASC, snapshot_time ASC';
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetchAll();
+    }
+
+    public function createSnapshot(int $userId, string $date, string $encryptedData): int {
+        $stmt = $this->db->prepare(
+            'INSERT INTO portfolio_snapshots (user_id, snapshot_date, encrypted_data)
+             VALUES (?, ?, ?)'
+        );
+        $stmt->execute([$userId, $date, $encryptedData]);
+        return (int)$this->db->lastInsertId();
+    }
+
+    // =========================================================================
+    // Audit Log
+    // =========================================================================
+
+    public function logAction(int $userId, string $action, ?string $resourceType = null, ?int $resourceId = null, ?string $ipHash = null): void {
+        // Check user's audit_ip_mode preference — if 'none', discard the IP hash
+        $prefs = $this->getPreferences($userId);
+        $ipMode = $prefs['audit_ip_mode'] ?? 'hashed';
+        if ($ipMode === 'none') {
+            $ipHash = null;
+        }
+
+        $stmt = $this->db->prepare(
+            'INSERT INTO audit_log (user_id, action, resource_type, resource_id, ip_hash)
+             VALUES (?, ?, ?, ?, ?)'
+        );
+        $stmt->execute([$userId, $action, $resourceType, $resourceId, $ipHash]);
+    }
+
+    public function getAuditLog(int $userId, ?string $fromDate = null, ?string $toDate = null): array {
+        $sql = 'SELECT id, action, resource_type, resource_id, created_at
+                FROM audit_log
+                WHERE user_id = ?';
+        $params = [$userId];
+
+        if ($fromDate !== null) {
+            $sql .= ' AND created_at >= ?';
+            $params[] = $fromDate;
+        }
+        if ($toDate !== null) {
+            $sql .= ' AND created_at <= ?';
+            $params[] = $toDate . ' 23:59:59';
+        }
+
+        $sql .= ' ORDER BY created_at DESC';
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetchAll();
+    }
+
+    // =========================================================================
+    // Templates
+    // =========================================================================
+
+    public function getTemplates(int $userId): array {
+        // Return global templates (owner_id IS NULL) and user's own custom templates
+        $stmt = $this->db->prepare(
+            'SELECT id, template_key, owner_id, name, icon, country_code, subtype,
+                    schema_version, fields, is_active, promotion_requested,
+                    promotion_requested_at, created_at, updated_at
+             FROM entry_templates
+             WHERE (owner_id IS NULL OR owner_id = ?) AND is_active = 1
+             ORDER BY template_key ASC, country_code ASC, subtype ASC'
+        );
+        $stmt->execute([$userId]);
+        $rows = $stmt->fetchAll();
+
+        // Decode the JSON fields column for each row
+        return array_map(function ($row) {
+            $row['fields'] = json_decode($row['fields'], true) ?? [];
+            $row['is_global'] = $row['owner_id'] === null;
+            return $row;
+        }, $rows);
+    }
+
+    public function createTemplate(int $userId, array $templateData): int {
+        $stmt = $this->db->prepare(
+            'INSERT INTO entry_templates (template_key, owner_id, name, icon, country_code, subtype, schema_version, fields)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        $stmt->execute([
+            $templateData['template_key'],
+            $userId,
+            $templateData['name'],
+            $templateData['icon'] ?? null,
+            $templateData['country_code'] ?? null,
+            $templateData['subtype'] ?? null,
+            $templateData['schema_version'] ?? 1,
+            is_string($templateData['fields']) ? $templateData['fields'] : json_encode($templateData['fields']),
+        ]);
+        return (int)$this->db->lastInsertId();
+    }
+
+    public function updateTemplate(int $userId, int $templateId, array $data): bool {
+        // Only allow updating own templates (owner_id = userId)
+        // Build dynamic SET clause from allowed fields
+        $allowedFields = ['name', 'icon', 'fields', 'is_active', 'promotion_requested', 'promotion_requested_at'];
+        $setClauses = [];
+        $params = [];
+
+        foreach ($data as $key => $value) {
+            if (!in_array($key, $allowedFields, true)) {
+                continue;
+            }
+            if ($key === 'fields' && !is_string($value)) {
+                $value = json_encode($value);
+            }
+            $setClauses[] = "`{$key}` = ?";
+            $params[] = $value;
+        }
+
+        if (empty($setClauses)) {
+            return false;
+        }
+
+        $params[] = $templateId;
+        $params[] = $userId;
+
+        $sql = 'UPDATE entry_templates SET ' . implode(', ', $setClauses) . ' WHERE id = ? AND owner_id = ?';
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->rowCount() > 0;
+    }
+
+    // =========================================================================
+    // Private Helpers
+    // =========================================================================
+
+    /**
+     * Permanently delete soft-deleted entries older than 1 day for a given user.
+     */
+    private function purgeExpiredSoftDeletes(int $userId): void {
+        $stmt = $this->db->prepare(
+            'DELETE FROM vault_entries
+             WHERE user_id = ? AND deleted_at IS NOT NULL AND deleted_at < NOW() - INTERVAL 1 DAY'
+        );
+        $stmt->execute([$userId]);
+    }
+
+    /**
+     * Shape a raw entry row into the API response format with inline template.
+     */
+    private function shapeEntryRow(array $row): array {
+        return [
+            'id'             => (int)$row['id'],
+            'entry_type'     => $row['entry_type'],
+            'template_id'    => $row['template_id'] ? (int)$row['template_id'] : null,
+            'schema_version' => (int)$row['schema_version'],
+            'encrypted_data' => $row['encrypted_data'],
+            'template'       => $this->buildTemplateObject($row),
+            'created_at'     => $row['created_at'],
+            'updated_at'     => $row['updated_at'],
+        ];
+    }
+
+    /**
+     * Build a template sub-object from a JOINed row.
+     * Returns null if no template was joined.
+     */
+    private function buildTemplateObject(array $row): ?array {
+        if (empty($row['template_name'])) {
+            return null;
+        }
+        return [
+            'name'   => $row['template_name'],
+            'icon'   => $row['template_icon'] ?? null,
+            'key'    => $row['template_key'] ?? null,
+            'fields' => isset($row['template_fields']) ? (json_decode($row['template_fields'], true) ?? []) : [],
+        ];
+    }
+}

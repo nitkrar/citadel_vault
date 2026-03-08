@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
-import { Database, Eye, EyeOff, Lock, User, Mail, ShieldAlert, Check, Send, ChevronDown, ChevronRight } from 'lucide-react';
+import { Database, Eye, EyeOff, Lock, User, Mail, ShieldAlert, Check, Send, ChevronDown, ChevronRight, Shield } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../api/client';
 
@@ -49,6 +49,8 @@ export default function RegisterPage() {
   const [requestSending, setRequestSending] = useState(false);
   const [requestResult, setRequestResult] = useState(null); // { type: 'success'|'error', text }
   const [howToOpen, setHowToOpen] = useState(false);
+  const [ipDisclosureAcknowledged, setIpDisclosureAcknowledged] = useState(false);
+  const [disableIpLogging, setDisableIpLogging] = useState(false);
 
   // Invite link handling
   const [searchParams] = useSearchParams();
@@ -132,6 +134,10 @@ export default function RegisterPage() {
       }
       if (data.token) {
         localStorage.setItem('pv_token', data.token);
+        // Set IP logging preference if user opted out
+        if (disableIpLogging) {
+          try { await api.put('/preferences.php', { audit_ip_mode: 'none' }); } catch {}
+        }
         window.location.href = '/';
       } else {
         navigate('/login');
@@ -420,11 +426,34 @@ export default function RegisterPage() {
             </div>
           </div>
 
+          {/* IP Disclosure — required acknowledgment */}
+          <div style={{
+            background: 'var(--card-bg)', border: '1px solid var(--border-color)', borderRadius: 8,
+            padding: '14px 16px', marginTop: 12, marginBottom: 12, fontSize: '0.84rem', lineHeight: 1.6,
+          }}>
+            <div className="flex items-center gap-2" style={{ marginBottom: 8, fontWeight: 600 }}>
+              <Shield size={16} style={{ color: '#2563eb' }} /> Security & Privacy
+            </div>
+            <p style={{ color: 'var(--text-muted)', marginBottom: 10 }}>
+              To protect your account, we log security-related actions (logins, vault access, key changes, sharing)
+              with a hashed fingerprint of your IP address. This helps detect unauthorized access.
+              We never log your day-to-day data activity.
+            </p>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: 6 }}>
+              <input type="checkbox" checked={ipDisclosureAcknowledged} onChange={(e) => setIpDisclosureAcknowledged(e.target.checked)} />
+              <span>I understand <span style={{ color: '#dc2626' }}>*</span></span>
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: 'var(--text-muted)' }}>
+              <input type="checkbox" checked={disableIpLogging} onChange={(e) => setDisableIpLogging(e.target.checked)} />
+              <span>Disable IP logging (changeable later in Settings)</span>
+            </label>
+          </div>
+
           <button
             type="submit"
             className="btn btn-primary w-full btn-lg"
-            disabled={!canRegister || submitting}
-            style={{ marginTop: 8, ...(!canRegister ? { opacity: 0.5, cursor: 'not-allowed' } : {}) }}
+            disabled={!canRegister || submitting || !ipDisclosureAcknowledged}
+            style={{ marginTop: 8, ...(!canRegister || !ipDisclosureAcknowledged ? { opacity: 0.5, cursor: 'not-allowed' } : {}) }}
           >
             {submitting ? 'Creating account...' : canRegister ? 'Create Account' : 'Invite Required'}
           </button>

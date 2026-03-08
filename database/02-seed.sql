@@ -1,7 +1,7 @@
 -- =============================================================================
--- Citadel Vault — Seed Data
+-- Citadel Vault — Seed Data (Client-Side Encryption)
 -- =============================================================================
--- System users, currencies, countries, account types, and asset types.
+-- System users, entry templates, currencies, and countries.
 -- Run after 01-schema.sql.
 -- =============================================================================
 
@@ -11,21 +11,250 @@ SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
 -- SYSTEM USERS
 -- =============================================================================
 
--- Ghost user (id=0): sentinel for global templates and unresolvable share recipients
-INSERT INTO `users` (`id`, `username`, `email`, `password_hash`, `role`, `is_active`, `public_key`)
-VALUES (0, '__ghost__', 'ghost@system.internal', '', 'ghost', 0, NULL);
+-- Ghost user (id=0): sentinel for ghost shares (private key discarded)
+INSERT INTO `users` (`id`, `username`, `email`, `password_hash`, `role`, `is_active`)
+VALUES (0, '__ghost__', 'ghost@system.internal', '', 'ghost', 0);
 
 -- Site admin (id=1): default administrator, must change password on first login
 -- Default password: Citadel@2024 (bcrypt cost 12)
-INSERT INTO `users` (`username`, `email`, `password_hash`, `role`, `must_change_password`, `is_active`)
+INSERT INTO `users` (`username`, `email`, `password_hash`, `role`, `must_reset_password`, `is_active`)
 VALUES (
     'citadel_site_admin',
     'admin@localhost',
     '$2y$12$7wv8yGgAxWFTFultxJtvuONCO2uENuqsuicY37eal958TRwkf665S',
-    'site_admin',
+    'admin',
     1,
     1
 );
+
+-- =============================================================================
+-- ENTRY TEMPLATES — Global (owner_id = NULL)
+-- =============================================================================
+
+-- ── Passwords ───────────────────────────────────────────────────────────
+INSERT INTO `entry_templates` (`template_key`, `owner_id`, `name`, `icon`, `country_code`, `subtype`, `fields`) VALUES
+('password', NULL, 'Password', 'key', NULL, NULL, JSON_ARRAY(
+    JSON_OBJECT('key', 'title',    'label', 'Title',    'type', 'text',     'required', true),
+    JSON_OBJECT('key', 'url',      'label', 'Website',  'type', 'url',      'required', false),
+    JSON_OBJECT('key', 'username', 'label', 'Username', 'type', 'text',     'required', false),
+    JSON_OBJECT('key', 'password', 'label', 'Password', 'type', 'secret',   'required', true),
+    JSON_OBJECT('key', 'notes',    'label', 'Notes',    'type', 'textarea', 'required', false)
+));
+
+-- ── Accounts — Generic ──────────────────────────────────────────────────
+INSERT INTO `entry_templates` (`template_key`, `owner_id`, `name`, `icon`, `country_code`, `subtype`, `fields`) VALUES
+('account', NULL, 'Bank Account', 'bank', NULL, NULL, JSON_ARRAY(
+    JSON_OBJECT('key', 'title',          'label', 'Account Name',    'type', 'text',     'required', true),
+    JSON_OBJECT('key', 'institution',    'label', 'Institution',     'type', 'text',     'required', false),
+    JSON_OBJECT('key', 'account_number', 'label', 'Account Number',  'type', 'secret',   'required', false),
+    JSON_OBJECT('key', 'currency',       'label', 'Currency',        'type', 'text',     'required', false),
+    JSON_OBJECT('key', 'balance',        'label', 'Balance',         'type', 'number',   'required', false),
+    JSON_OBJECT('key', 'notes',          'label', 'Notes',           'type', 'textarea', 'required', false)
+));
+
+-- Account subtypes
+INSERT INTO `entry_templates` (`template_key`, `owner_id`, `name`, `icon`, `country_code`, `subtype`, `fields`) VALUES
+('account', NULL, 'Savings Account', 'piggy-bank', NULL, 'savings', JSON_ARRAY(
+    JSON_OBJECT('key', 'title',          'label', 'Account Name',    'type', 'text',     'required', true),
+    JSON_OBJECT('key', 'institution',    'label', 'Institution',     'type', 'text',     'required', false),
+    JSON_OBJECT('key', 'account_number', 'label', 'Account Number',  'type', 'secret',   'required', false),
+    JSON_OBJECT('key', 'interest_rate',  'label', 'Interest Rate %', 'type', 'number',   'required', false),
+    JSON_OBJECT('key', 'currency',       'label', 'Currency',        'type', 'text',     'required', false),
+    JSON_OBJECT('key', 'balance',        'label', 'Balance',         'type', 'number',   'required', false),
+    JSON_OBJECT('key', 'notes',          'label', 'Notes',           'type', 'textarea', 'required', false)
+)),
+('account', NULL, 'Checking Account', 'bank', NULL, 'checking', JSON_ARRAY(
+    JSON_OBJECT('key', 'title',          'label', 'Account Name',    'type', 'text',     'required', true),
+    JSON_OBJECT('key', 'institution',    'label', 'Institution',     'type', 'text',     'required', false),
+    JSON_OBJECT('key', 'account_number', 'label', 'Account Number',  'type', 'secret',   'required', false),
+    JSON_OBJECT('key', 'routing_number', 'label', 'Routing Number',  'type', 'secret',   'required', false),
+    JSON_OBJECT('key', 'currency',       'label', 'Currency',        'type', 'text',     'required', false),
+    JSON_OBJECT('key', 'balance',        'label', 'Balance',         'type', 'number',   'required', false),
+    JSON_OBJECT('key', 'notes',          'label', 'Notes',           'type', 'textarea', 'required', false)
+)),
+('account', NULL, 'Brokerage Account', 'trending-up', NULL, 'brokerage', JSON_ARRAY(
+    JSON_OBJECT('key', 'title',          'label', 'Account Name',    'type', 'text',     'required', true),
+    JSON_OBJECT('key', 'institution',    'label', 'Broker',          'type', 'text',     'required', false),
+    JSON_OBJECT('key', 'account_number', 'label', 'Account Number',  'type', 'secret',   'required', false),
+    JSON_OBJECT('key', 'currency',       'label', 'Currency',        'type', 'text',     'required', false),
+    JSON_OBJECT('key', 'balance',        'label', 'Balance',         'type', 'number',   'required', false),
+    JSON_OBJECT('key', 'notes',          'label', 'Notes',           'type', 'textarea', 'required', false)
+)),
+('account', NULL, '401(k) / Retirement', 'lock', NULL, '401k', JSON_ARRAY(
+    JSON_OBJECT('key', 'title',             'label', 'Account Name',        'type', 'text',     'required', true),
+    JSON_OBJECT('key', 'institution',       'label', 'Provider',            'type', 'text',     'required', false),
+    JSON_OBJECT('key', 'account_number',    'label', 'Account Number',      'type', 'secret',   'required', false),
+    JSON_OBJECT('key', 'employer_match',    'label', 'Employer Match %',    'type', 'number',   'required', false),
+    JSON_OBJECT('key', 'currency',          'label', 'Currency',            'type', 'text',     'required', false),
+    JSON_OBJECT('key', 'balance',           'label', 'Balance',             'type', 'number',   'required', false),
+    JSON_OBJECT('key', 'notes',             'label', 'Notes',               'type', 'textarea', 'required', false)
+)),
+('account', NULL, 'Credit Card', 'credit-card', NULL, 'credit_card', JSON_ARRAY(
+    JSON_OBJECT('key', 'title',          'label', 'Card Name',       'type', 'text',     'required', true),
+    JSON_OBJECT('key', 'institution',    'label', 'Issuer',          'type', 'text',     'required', false),
+    JSON_OBJECT('key', 'card_number',    'label', 'Card Number',     'type', 'secret',   'required', false),
+    JSON_OBJECT('key', 'credit_limit',   'label', 'Credit Limit',    'type', 'number',   'required', false),
+    JSON_OBJECT('key', 'currency',       'label', 'Currency',        'type', 'text',     'required', false),
+    JSON_OBJECT('key', 'balance',        'label', 'Balance',         'type', 'number',   'required', false),
+    JSON_OBJECT('key', 'notes',          'label', 'Notes',           'type', 'textarea', 'required', false)
+)),
+('account', NULL, 'Wallet / Prepaid', 'wallet', NULL, 'wallet', JSON_ARRAY(
+    JSON_OBJECT('key', 'title',          'label', 'Wallet Name',    'type', 'text',     'required', true),
+    JSON_OBJECT('key', 'provider',       'label', 'Provider',       'type', 'text',     'required', false),
+    JSON_OBJECT('key', 'account_id',     'label', 'Account ID',     'type', 'secret',   'required', false),
+    JSON_OBJECT('key', 'currency',       'label', 'Currency',       'type', 'text',     'required', false),
+    JSON_OBJECT('key', 'balance',        'label', 'Balance',        'type', 'number',   'required', false),
+    JSON_OBJECT('key', 'notes',          'label', 'Notes',          'type', 'textarea', 'required', false)
+));
+
+-- Account country variants (UK, US, India)
+INSERT INTO `entry_templates` (`template_key`, `owner_id`, `name`, `icon`, `country_code`, `subtype`, `fields`) VALUES
+('account', NULL, 'UK Bank Account', 'bank', 'GB', NULL, JSON_ARRAY(
+    JSON_OBJECT('key', 'title',          'label', 'Account Name',   'type', 'text',     'required', true),
+    JSON_OBJECT('key', 'institution',    'label', 'Bank',           'type', 'text',     'required', false),
+    JSON_OBJECT('key', 'sort_code',      'label', 'Sort Code',      'type', 'secret',   'required', false),
+    JSON_OBJECT('key', 'account_number', 'label', 'Account Number', 'type', 'secret',   'required', false),
+    JSON_OBJECT('key', 'balance',        'label', 'Balance',        'type', 'number',   'required', false),
+    JSON_OBJECT('key', 'notes',          'label', 'Notes',          'type', 'textarea', 'required', false)
+)),
+('account', NULL, 'US Bank Account', 'bank', 'US', NULL, JSON_ARRAY(
+    JSON_OBJECT('key', 'title',          'label', 'Account Name',   'type', 'text',     'required', true),
+    JSON_OBJECT('key', 'institution',    'label', 'Bank',           'type', 'text',     'required', false),
+    JSON_OBJECT('key', 'routing_number', 'label', 'Routing Number', 'type', 'secret',   'required', false),
+    JSON_OBJECT('key', 'account_number', 'label', 'Account Number', 'type', 'secret',   'required', false),
+    JSON_OBJECT('key', 'balance',        'label', 'Balance',        'type', 'number',   'required', false),
+    JSON_OBJECT('key', 'notes',          'label', 'Notes',          'type', 'textarea', 'required', false)
+)),
+('account', NULL, 'India Bank Account', 'bank', 'IN', NULL, JSON_ARRAY(
+    JSON_OBJECT('key', 'title',          'label', 'Account Name',   'type', 'text',     'required', true),
+    JSON_OBJECT('key', 'institution',    'label', 'Bank',           'type', 'text',     'required', false),
+    JSON_OBJECT('key', 'ifsc_code',      'label', 'IFSC Code',      'type', 'text',     'required', false),
+    JSON_OBJECT('key', 'account_number', 'label', 'Account Number', 'type', 'secret',   'required', false),
+    JSON_OBJECT('key', 'balance',        'label', 'Balance',        'type', 'number',   'required', false),
+    JSON_OBJECT('key', 'notes',          'label', 'Notes',          'type', 'textarea', 'required', false)
+));
+
+-- ── Assets ──────────────────────────────────────────────────────────────
+INSERT INTO `entry_templates` (`template_key`, `owner_id`, `name`, `icon`, `country_code`, `subtype`, `fields`) VALUES
+('asset', NULL, 'Asset', 'circle', NULL, NULL, JSON_ARRAY(
+    JSON_OBJECT('key', 'title',    'label', 'Asset Name', 'type', 'text',     'required', true),
+    JSON_OBJECT('key', 'currency', 'label', 'Currency',   'type', 'text',     'required', false),
+    JSON_OBJECT('key', 'value',    'label', 'Value',      'type', 'number',   'required', false),
+    JSON_OBJECT('key', 'notes',    'label', 'Notes',      'type', 'textarea', 'required', false)
+)),
+('asset', NULL, 'Real Estate', 'home', NULL, 'real_estate', JSON_ARRAY(
+    JSON_OBJECT('key', 'title',          'label', 'Property Name',  'type', 'text',     'required', true),
+    JSON_OBJECT('key', 'address',        'label', 'Address',        'type', 'textarea', 'required', false),
+    JSON_OBJECT('key', 'purchase_price', 'label', 'Purchase Price', 'type', 'number',   'required', false),
+    JSON_OBJECT('key', 'current_value',  'label', 'Current Value',  'type', 'number',   'required', false),
+    JSON_OBJECT('key', 'currency',       'label', 'Currency',       'type', 'text',     'required', false),
+    JSON_OBJECT('key', 'notes',          'label', 'Notes',          'type', 'textarea', 'required', false)
+)),
+('asset', NULL, 'Vehicle', 'car', NULL, 'vehicle', JSON_ARRAY(
+    JSON_OBJECT('key', 'title',         'label', 'Vehicle',         'type', 'text',     'required', true),
+    JSON_OBJECT('key', 'make_model',    'label', 'Make / Model',    'type', 'text',     'required', false),
+    JSON_OBJECT('key', 'year',          'label', 'Year',            'type', 'number',   'required', false),
+    JSON_OBJECT('key', 'vin',           'label', 'VIN',             'type', 'secret',   'required', false),
+    JSON_OBJECT('key', 'current_value', 'label', 'Current Value',   'type', 'number',   'required', false),
+    JSON_OBJECT('key', 'currency',      'label', 'Currency',        'type', 'text',     'required', false),
+    JSON_OBJECT('key', 'notes',         'label', 'Notes',           'type', 'textarea', 'required', false)
+)),
+('asset', NULL, 'Stock / Equity', 'trending-up', NULL, 'stock', JSON_ARRAY(
+    JSON_OBJECT('key', 'title',           'label', 'Name',             'type', 'text',   'required', true),
+    JSON_OBJECT('key', 'ticker',          'label', 'Ticker Symbol',    'type', 'text',   'required', false),
+    JSON_OBJECT('key', 'shares',          'label', 'Shares',           'type', 'number', 'required', false),
+    JSON_OBJECT('key', 'price_per_share', 'label', 'Price per Share',  'type', 'number', 'required', false),
+    JSON_OBJECT('key', 'currency',        'label', 'Currency',         'type', 'text',   'required', false),
+    JSON_OBJECT('key', 'notes',           'label', 'Notes',            'type', 'textarea', 'required', false)
+)),
+('asset', NULL, 'Bond', 'file-text', NULL, 'bond', JSON_ARRAY(
+    JSON_OBJECT('key', 'title',         'label', 'Bond Name',       'type', 'text',   'required', true),
+    JSON_OBJECT('key', 'issuer',        'label', 'Issuer',          'type', 'text',   'required', false),
+    JSON_OBJECT('key', 'face_value',    'label', 'Face Value',      'type', 'number', 'required', false),
+    JSON_OBJECT('key', 'coupon_rate',   'label', 'Coupon Rate %',   'type', 'number', 'required', false),
+    JSON_OBJECT('key', 'maturity_date', 'label', 'Maturity Date',   'type', 'date',   'required', false),
+    JSON_OBJECT('key', 'currency',      'label', 'Currency',        'type', 'text',   'required', false),
+    JSON_OBJECT('key', 'notes',         'label', 'Notes',           'type', 'textarea', 'required', false)
+)),
+('asset', NULL, 'Cryptocurrency', 'bitcoin', NULL, 'crypto', JSON_ARRAY(
+    JSON_OBJECT('key', 'title',          'label', 'Name',            'type', 'text',   'required', true),
+    JSON_OBJECT('key', 'coin',           'label', 'Coin / Token',    'type', 'text',   'required', false),
+    JSON_OBJECT('key', 'quantity',       'label', 'Quantity',        'type', 'number', 'required', false),
+    JSON_OBJECT('key', 'wallet_address', 'label', 'Wallet Address',  'type', 'secret', 'required', false),
+    JSON_OBJECT('key', 'currency',       'label', 'Currency',        'type', 'text',   'required', false),
+    JSON_OBJECT('key', 'notes',          'label', 'Notes',           'type', 'textarea', 'required', false)
+));
+
+-- ── Licenses ────────────────────────────────────────────────────────────
+INSERT INTO `entry_templates` (`template_key`, `owner_id`, `name`, `icon`, `country_code`, `subtype`, `fields`) VALUES
+('license', NULL, 'Software License', 'file-text', NULL, NULL, JSON_ARRAY(
+    JSON_OBJECT('key', 'title',         'label', 'Product Name',  'type', 'text',     'required', true),
+    JSON_OBJECT('key', 'vendor',        'label', 'Vendor',        'type', 'text',     'required', false),
+    JSON_OBJECT('key', 'license_key',   'label', 'License Key',   'type', 'secret',   'required', false),
+    JSON_OBJECT('key', 'purchase_date', 'label', 'Purchase Date', 'type', 'date',     'required', false),
+    JSON_OBJECT('key', 'expiry_date',   'label', 'Expiry Date',   'type', 'date',     'required', false),
+    JSON_OBJECT('key', 'seats',         'label', 'Seats',         'type', 'number',   'required', false),
+    JSON_OBJECT('key', 'notes',         'label', 'Notes',         'type', 'textarea', 'required', false)
+));
+
+-- ── Insurance ───────────────────────────────────────────────────────────
+INSERT INTO `entry_templates` (`template_key`, `owner_id`, `name`, `icon`, `country_code`, `subtype`, `fields`) VALUES
+('insurance', NULL, 'Insurance Policy', 'shield', NULL, NULL, JSON_ARRAY(
+    JSON_OBJECT('key', 'title',             'label', 'Policy Name',       'type', 'text',     'required', true),
+    JSON_OBJECT('key', 'provider',          'label', 'Provider',          'type', 'text',     'required', false),
+    JSON_OBJECT('key', 'policy_number',     'label', 'Policy Number',     'type', 'secret',   'required', false),
+    JSON_OBJECT('key', 'premium_amount',    'label', 'Premium Amount',    'type', 'number',   'required', false),
+    JSON_OBJECT('key', 'coverage_amount',   'label', 'Coverage Amount',   'type', 'number',   'required', false),
+    JSON_OBJECT('key', 'start_date',        'label', 'Start Date',        'type', 'date',     'required', false),
+    JSON_OBJECT('key', 'maturity_date',     'label', 'Maturity Date',     'type', 'date',     'required', false),
+    JSON_OBJECT('key', 'payment_frequency', 'label', 'Payment Frequency', 'type', 'text',     'required', false),
+    JSON_OBJECT('key', 'notes',             'label', 'Notes',             'type', 'textarea', 'required', false)
+)),
+('insurance', NULL, 'Life Insurance', 'heart', NULL, 'life', JSON_ARRAY(
+    JSON_OBJECT('key', 'title',             'label', 'Policy Name',       'type', 'text',     'required', true),
+    JSON_OBJECT('key', 'provider',          'label', 'Provider',          'type', 'text',     'required', false),
+    JSON_OBJECT('key', 'policy_number',     'label', 'Policy Number',     'type', 'secret',   'required', false),
+    JSON_OBJECT('key', 'premium_amount',    'label', 'Premium Amount',    'type', 'number',   'required', false),
+    JSON_OBJECT('key', 'coverage_amount',   'label', 'Sum Assured',       'type', 'number',   'required', false),
+    JSON_OBJECT('key', 'cash_value',        'label', 'Cash Value',        'type', 'number',   'required', false),
+    JSON_OBJECT('key', 'beneficiary',       'label', 'Beneficiary',       'type', 'text',     'required', false),
+    JSON_OBJECT('key', 'start_date',        'label', 'Start Date',        'type', 'date',     'required', false),
+    JSON_OBJECT('key', 'maturity_date',     'label', 'Maturity Date',     'type', 'date',     'required', false),
+    JSON_OBJECT('key', 'notes',             'label', 'Notes',             'type', 'textarea', 'required', false)
+)),
+('insurance', NULL, 'Auto Insurance', 'car', NULL, 'auto', JSON_ARRAY(
+    JSON_OBJECT('key', 'title',             'label', 'Policy Name',       'type', 'text',     'required', true),
+    JSON_OBJECT('key', 'provider',          'label', 'Provider',          'type', 'text',     'required', false),
+    JSON_OBJECT('key', 'policy_number',     'label', 'Policy Number',     'type', 'secret',   'required', false),
+    JSON_OBJECT('key', 'vehicle',           'label', 'Vehicle',           'type', 'text',     'required', false),
+    JSON_OBJECT('key', 'premium_amount',    'label', 'Premium Amount',    'type', 'number',   'required', false),
+    JSON_OBJECT('key', 'coverage_amount',   'label', 'Coverage Amount',   'type', 'number',   'required', false),
+    JSON_OBJECT('key', 'start_date',        'label', 'Start Date',        'type', 'date',     'required', false),
+    JSON_OBJECT('key', 'expiry_date',       'label', 'Expiry Date',       'type', 'date',     'required', false),
+    JSON_OBJECT('key', 'notes',             'label', 'Notes',             'type', 'textarea', 'required', false)
+)),
+('insurance', NULL, 'Health Insurance', 'activity', NULL, 'health', JSON_ARRAY(
+    JSON_OBJECT('key', 'title',             'label', 'Plan Name',         'type', 'text',     'required', true),
+    JSON_OBJECT('key', 'provider',          'label', 'Provider',          'type', 'text',     'required', false),
+    JSON_OBJECT('key', 'policy_number',     'label', 'Policy Number',     'type', 'secret',   'required', false),
+    JSON_OBJECT('key', 'member_id',         'label', 'Member ID',         'type', 'secret',   'required', false),
+    JSON_OBJECT('key', 'premium_amount',    'label', 'Premium Amount',    'type', 'number',   'required', false),
+    JSON_OBJECT('key', 'deductible',        'label', 'Deductible',        'type', 'number',   'required', false),
+    JSON_OBJECT('key', 'start_date',        'label', 'Start Date',        'type', 'date',     'required', false),
+    JSON_OBJECT('key', 'expiry_date',       'label', 'Expiry Date',       'type', 'date',     'required', false),
+    JSON_OBJECT('key', 'notes',             'label', 'Notes',             'type', 'textarea', 'required', false)
+)),
+('insurance', NULL, 'Home Insurance', 'home', NULL, 'home', JSON_ARRAY(
+    JSON_OBJECT('key', 'title',             'label', 'Policy Name',       'type', 'text',     'required', true),
+    JSON_OBJECT('key', 'provider',          'label', 'Provider',          'type', 'text',     'required', false),
+    JSON_OBJECT('key', 'policy_number',     'label', 'Policy Number',     'type', 'secret',   'required', false),
+    JSON_OBJECT('key', 'property_address',  'label', 'Property Address',  'type', 'textarea', 'required', false),
+    JSON_OBJECT('key', 'premium_amount',    'label', 'Premium Amount',    'type', 'number',   'required', false),
+    JSON_OBJECT('key', 'coverage_amount',   'label', 'Coverage Amount',   'type', 'number',   'required', false),
+    JSON_OBJECT('key', 'start_date',        'label', 'Start Date',        'type', 'date',     'required', false),
+    JSON_OBJECT('key', 'expiry_date',       'label', 'Expiry Date',       'type', 'date',     'required', false),
+    JSON_OBJECT('key', 'notes',             'label', 'Notes',             'type', 'textarea', 'required', false)
+));
 
 -- =============================================================================
 -- CURRENCIES — 23 active (with rates) + 116 inactive (rates fetched on demand)
@@ -179,152 +408,152 @@ INSERT INTO `currencies` (`name`, `code`, `symbol`, `display_order`, `is_active`
 -- COUNTRIES (143 — synced with all currencies)
 -- Pinned: GB(1), IN(2), US(3); rest default display_order=999
 -- =============================================================================
-INSERT INTO `countries` (`name`, `code`, `flag_emoji`, `display_order`, `field_template`) VALUES
--- Pinned countries (with banking field templates)
-('United Kingdom',       'GB', '🇬🇧',   1, '{"fields":[{"name":"sort_code","label":"Sort Code","type":"text","placeholder":"00-00-00"},{"name":"account_number","label":"Account Number","type":"text","placeholder":"12345678"}]}'),
-('India',                'IN', '🇮🇳',   2, '{"fields":[{"name":"ifsc_code","label":"IFSC Code","type":"text","placeholder":"ABCD0123456"},{"name":"account_number","label":"Account Number","type":"text","placeholder":"1234567890123456"}]}'),
-('United States',        'US', '🇺🇸',   3, '{"fields":[{"name":"routing_number","label":"Routing Number","type":"text","placeholder":"123456789"},{"name":"account_number","label":"Account Number","type":"text","placeholder":"1234567890"}]}'),
+INSERT INTO `countries` (`name`, `code`, `flag_emoji`, `display_order`) VALUES
+-- Pinned countries
+('United Kingdom',       'GB', '🇬🇧',   1),
+('India',                'IN', '🇮🇳',   2),
+('United States',        'US', '🇺🇸',   3),
 -- All other countries (alphabetical)
-('Afghanistan',              'AF', '🇦🇫', 999, NULL),
-('Albania',                  'AL', '🇦🇱', 999, NULL),
-('Algeria',                  'DZ', '🇩🇿', 999, NULL),
-('Angola',                   'AO', '🇦🇴', 999, NULL),
-('Argentina',                'AR', '🇦🇷', 999, NULL),
-('Armenia',                  'AM', '🇦🇲', 999, NULL),
-('Aruba',                    'AW', '🇦🇼', 999, NULL),
-('Australia',                'AU', '🇦🇺', 999, NULL),
-('Azerbaijan',               'AZ', '🇦🇿', 999, NULL),
-('Bahamas',                  'BS', '🇧🇸', 999, NULL),
-('Bahrain',                  'BH', '🇧🇭', 999, NULL),
-('Bangladesh',               'BD', '🇧🇩', 999, NULL),
-('Barbados',                 'BB', '🇧🇧', 999, NULL),
-('Belarus',                  'BY', '🇧🇾', 999, NULL),
-('Belize',                   'BZ', '🇧🇿', 999, NULL),
-('Bermuda',                  'BM', '🇧🇲', 999, NULL),
-('Bolivia',                  'BO', '🇧🇴', 999, NULL),
-('Bosnia and Herzegovina',   'BA', '🇧🇦', 999, NULL),
-('Botswana',                 'BW', '🇧🇼', 999, NULL),
-('Brazil',                   'BR', '🇧🇷', 999, NULL),
-('Brunei',                   'BN', '🇧🇳', 999, NULL),
-('Bulgaria',                 'BG', '🇧🇬', 999, NULL),
-('Burundi',                  'BI', '🇧🇮', 999, NULL),
-('Cambodia',                 'KH', '🇰🇭', 999, NULL),
-('Cameroon',                 'CM', '🇨🇲', 999, NULL),
-('Canada',                   'CA', '🇨🇦', 999, NULL),
-('Cape Verde',               'CV', '🇨🇻', 999, NULL),
-('Cayman Islands',           'KY', '🇰🇾', 999, NULL),
-('Chile',                    'CL', '🇨🇱', 999, NULL),
-('China',                    'CN', '🇨🇳', 999, NULL),
-('Colombia',                 'CO', '🇨🇴', 999, NULL),
-('Comoros',                  'KM', '🇰🇲', 999, NULL),
-('Congo (DRC)',              'CD', '🇨🇩', 999, NULL),
-('Costa Rica',               'CR', '🇨🇷', 999, NULL),
-('Cuba',                     'CU', '🇨🇺', 999, NULL),
-('Curaçao',                  'CW', '🇨🇼', 999, NULL),
-('Czech Republic',           'CZ', '🇨🇿', 999, NULL),
-('Denmark',                  'DK', '🇩🇰', 999, NULL),
-('Djibouti',                 'DJ', '🇩🇯', 999, NULL),
-('Dominica',                 'DM', '🇩🇲', 999, NULL),
-('Dominican Republic',       'DO', '🇩🇴', 999, NULL),
-('Egypt',                    'EG', '🇪🇬', 999, NULL),
-('Eritrea',                  'ER', '🇪🇷', 999, NULL),
-('Ethiopia',                 'ET', '🇪🇹', 999, NULL),
-('European Union',           'EU', '🇪🇺', 999, NULL),
-('Falkland Islands',         'FK', '🇫🇰', 999, NULL),
-('Fiji',                     'FJ', '🇫🇯', 999, NULL),
-('France',                   'FR', '🇫🇷', 999, NULL),
-('French Polynesia',         'PF', '🇵🇫', 999, NULL),
-('Gambia',                   'GM', '🇬🇲', 999, NULL),
-('Georgia',                  'GE', '🇬🇪', 999, NULL),
-('Germany',                  'DE', '🇩🇪', 999, NULL),
-('Ghana',                    'GH', '🇬🇭', 999, NULL),
-('Gibraltar',                'GI', '🇬🇮', 999, NULL),
-('Guatemala',                'GT', '🇬🇹', 999, NULL),
-('Guernsey',                 'GG', '🇬🇬', 999, NULL),
-('Guinea',                   'GN', '🇬🇳', 999, NULL),
-('Guyana',                   'GY', '🇬🇾', 999, NULL),
-('Haiti',                    'HT', '🇭🇹', 999, NULL),
-('Honduras',                 'HN', '🇭🇳', 999, NULL),
-('Hong Kong',                'HK', '🇭🇰', 999, NULL),
-('Hungary',                  'HU', '🇭🇺', 999, NULL),
-('Iceland',                  'IS', '🇮🇸', 999, NULL),
-('Indonesia',                'ID', '🇮🇩', 999, NULL),
-('Iran',                     'IR', '🇮🇷', 999, NULL),
-('Iraq',                     'IQ', '🇮🇶', 999, NULL),
-('Isle of Man',              'IM', '🇮🇲', 999, NULL),
-('Israel',                   'IL', '🇮🇱', 999, NULL),
-('Jamaica',                  'JM', '🇯🇲', 999, NULL),
-('Japan',                    'JP', '🇯🇵', 999, NULL),
-('Jersey',                   'JE', '🇯🇪', 999, NULL),
-('Jordan',                   'JO', '🇯🇴', 999, NULL),
-('Kazakhstan',               'KZ', '🇰🇿', 999, NULL),
-('Kenya',                    'KE', '🇰🇪', 999, NULL),
-('Kuwait',                   'KW', '🇰🇼', 999, NULL),
-('Kyrgyzstan',               'KG', '🇰🇬', 999, NULL),
-('Laos',                     'LA', '🇱🇦', 999, NULL),
-('Lebanon',                  'LB', '🇱🇧', 999, NULL),
-('Lesotho',                  'LS', '🇱🇸', 999, NULL),
-('Liberia',                  'LR', '🇱🇷', 999, NULL),
-('Libya',                    'LY', '🇱🇾', 999, NULL),
-('Madagascar',               'MG', '🇲🇬', 999, NULL),
-('Malawi',                   'MW', '🇲🇼', 999, NULL),
-('Malaysia',                 'MY', '🇲🇾', 999, NULL),
-('Mauritania',               'MR', '🇲🇷', 999, NULL),
-('Mauritius',                'MU', '🇲🇺', 999, NULL),
-('Mexico',                   'MX', '🇲🇽', 999, NULL),
-('Moldova',                  'MD', '🇲🇩', 999, NULL),
-('Mongolia',                 'MN', '🇲🇳', 999, NULL),
-('Morocco',                  'MA', '🇲🇦', 999, NULL),
-('Mozambique',               'MZ', '🇲🇿', 999, NULL),
-('Myanmar',                  'MM', '🇲🇲', 999, NULL),
-('Namibia',                  'NA', '🇳🇦', 999, NULL),
-('Nepal',                    'NP', '🇳🇵', 999, NULL),
-('New Zealand',              'NZ', '🇳🇿', 999, NULL),
-('Nigeria',                  'NG', '🇳🇬', 999, NULL),
-('North Korea',              'KP', '🇰🇵', 999, NULL),
-('North Macedonia',          'MK', '🇲🇰', 999, NULL),
-('Norway',                   'NO', '🇳🇴', 999, NULL),
-('Oman',                     'OM', '🇴🇲', 999, NULL),
-('Pakistan',                 'PK', '🇵🇰', 999, NULL),
-('Panama',                   'PA', '🇵🇦', 999, NULL),
-('Paraguay',                 'PY', '🇵🇾', 999, NULL),
-('Peru',                     'PE', '🇵🇪', 999, NULL),
-('Philippines',              'PH', '🇵🇭', 999, NULL),
-('Poland',                   'PL', '🇵🇱', 999, NULL),
-('Qatar',                    'QA', '🇶🇦', 999, NULL),
-('Romania',                  'RO', '🇷🇴', 999, NULL),
-('Russia',                   'RU', '🇷🇺', 999, NULL),
-('Rwanda',                   'RW', '🇷🇼', 999, NULL),
-('Saint Helena',             'SH', '🇸🇭', 999, NULL),
-('Sao Tome and Principe',    'ST', '🇸🇹', 999, NULL),
-('Saudi Arabia',             'SA', '🇸🇦', 999, NULL),
-('Senegal',                  'SN', '🇸🇳', 999, NULL),
-('Serbia',                   'RS', '🇷🇸', 999, NULL),
-('Seychelles',               'SC', '🇸🇨', 999, NULL),
-('Singapore',                'SG', '🇸🇬', 999, NULL),
-('Solomon Islands',          'SB', '🇸🇧', 999, NULL),
-('Somalia',                  'SO', '🇸🇴', 999, NULL),
-('South Africa',             'ZA', '🇿🇦', 999, NULL),
-('South Korea',              'KR', '🇰🇷', 999, NULL),
-('Sri Lanka',                'LK', '🇱🇰', 999, NULL),
-('Suriname',                 'SR', '🇸🇷', 999, NULL),
-('Sweden',                   'SE', '🇸🇪', 999, NULL),
-('Switzerland',              'CH', '🇨🇭', 999, NULL),
-('Syria',                    'SY', '🇸🇾', 999, NULL),
-('Taiwan',                   'TW', '🇹🇼', 999, NULL),
-('Tanzania',                 'TZ', '🇹🇿', 999, NULL),
-('Thailand',                 'TH', '🇹🇭', 999, NULL),
-('Trinidad and Tobago',      'TT', '🇹🇹', 999, NULL),
-('Turkey',                   'TR', '🇹🇷', 999, NULL),
-('Uganda',                   'UG', '🇺🇬', 999, NULL),
-('Ukraine',                  'UA', '🇺🇦', 999, NULL),
-('United Arab Emirates',     'AE', '🇦🇪', 999, NULL),
-('Uruguay',                  'UY', '🇺🇾', 999, NULL),
-('Uzbekistan',               'UZ', '🇺🇿', 999, NULL),
-('Vietnam',                  'VN', '🇻🇳', 999, NULL),
-('Yemen',                    'YE', '🇾🇪', 999, NULL),
-('Zambia',                   'ZM', '🇿🇲', 999, NULL),
-('Zimbabwe',                 'ZW', '🇿🇼', 999, NULL);
+('Afghanistan',              'AF', '🇦🇫', 999),
+('Albania',                  'AL', '🇦🇱', 999),
+('Algeria',                  'DZ', '🇩🇿', 999),
+('Angola',                   'AO', '🇦🇴', 999),
+('Argentina',                'AR', '🇦🇷', 999),
+('Armenia',                  'AM', '🇦🇲', 999),
+('Aruba',                    'AW', '🇦🇼', 999),
+('Australia',                'AU', '🇦🇺', 999),
+('Azerbaijan',               'AZ', '🇦🇿', 999),
+('Bahamas',                  'BS', '🇧🇸', 999),
+('Bahrain',                  'BH', '🇧🇭', 999),
+('Bangladesh',               'BD', '🇧🇩', 999),
+('Barbados',                 'BB', '🇧🇧', 999),
+('Belarus',                  'BY', '🇧🇾', 999),
+('Belize',                   'BZ', '🇧🇿', 999),
+('Bermuda',                  'BM', '🇧🇲', 999),
+('Bolivia',                  'BO', '🇧🇴', 999),
+('Bosnia and Herzegovina',   'BA', '🇧🇦', 999),
+('Botswana',                 'BW', '🇧🇼', 999),
+('Brazil',                   'BR', '🇧🇷', 999),
+('Brunei',                   'BN', '🇧🇳', 999),
+('Bulgaria',                 'BG', '🇧🇬', 999),
+('Burundi',                  'BI', '🇧🇮', 999),
+('Cambodia',                 'KH', '🇰🇭', 999),
+('Cameroon',                 'CM', '🇨🇲', 999),
+('Canada',                   'CA', '🇨🇦', 999),
+('Cape Verde',               'CV', '🇨🇻', 999),
+('Cayman Islands',           'KY', '🇰🇾', 999),
+('Chile',                    'CL', '🇨🇱', 999),
+('China',                    'CN', '🇨🇳', 999),
+('Colombia',                 'CO', '🇨🇴', 999),
+('Comoros',                  'KM', '🇰🇲', 999),
+('Congo (DRC)',              'CD', '🇨🇩', 999),
+('Costa Rica',               'CR', '🇨🇷', 999),
+('Cuba',                     'CU', '🇨🇺', 999),
+('Curaçao',                  'CW', '🇨🇼', 999),
+('Czech Republic',           'CZ', '🇨🇿', 999),
+('Denmark',                  'DK', '🇩🇰', 999),
+('Djibouti',                 'DJ', '🇩🇯', 999),
+('Dominica',                 'DM', '🇩🇲', 999),
+('Dominican Republic',       'DO', '🇩🇴', 999),
+('Egypt',                    'EG', '🇪🇬', 999),
+('Eritrea',                  'ER', '🇪🇷', 999),
+('Ethiopia',                 'ET', '🇪🇹', 999),
+('European Union',           'EU', '🇪🇺', 999),
+('Falkland Islands',         'FK', '🇫🇰', 999),
+('Fiji',                     'FJ', '🇫🇯', 999),
+('France',                   'FR', '🇫🇷', 999),
+('French Polynesia',         'PF', '🇵🇫', 999),
+('Gambia',                   'GM', '🇬🇲', 999),
+('Georgia',                  'GE', '🇬🇪', 999),
+('Germany',                  'DE', '🇩🇪', 999),
+('Ghana',                    'GH', '🇬🇭', 999),
+('Gibraltar',                'GI', '🇬🇮', 999),
+('Guatemala',                'GT', '🇬🇹', 999),
+('Guernsey',                 'GG', '🇬🇬', 999),
+('Guinea',                   'GN', '🇬🇳', 999),
+('Guyana',                   'GY', '🇬🇾', 999),
+('Haiti',                    'HT', '🇭🇹', 999),
+('Honduras',                 'HN', '🇭🇳', 999),
+('Hong Kong',                'HK', '🇭🇰', 999),
+('Hungary',                  'HU', '🇭🇺', 999),
+('Iceland',                  'IS', '🇮🇸', 999),
+('Indonesia',                'ID', '🇮🇩', 999),
+('Iran',                     'IR', '🇮🇷', 999),
+('Iraq',                     'IQ', '🇮🇶', 999),
+('Isle of Man',              'IM', '🇮🇲', 999),
+('Israel',                   'IL', '🇮🇱', 999),
+('Jamaica',                  'JM', '🇯🇲', 999),
+('Japan',                    'JP', '🇯🇵', 999),
+('Jersey',                   'JE', '🇯🇪', 999),
+('Jordan',                   'JO', '🇯🇴', 999),
+('Kazakhstan',               'KZ', '🇰🇿', 999),
+('Kenya',                    'KE', '🇰🇪', 999),
+('Kuwait',                   'KW', '🇰🇼', 999),
+('Kyrgyzstan',               'KG', '🇰🇬', 999),
+('Laos',                     'LA', '🇱🇦', 999),
+('Lebanon',                  'LB', '🇱🇧', 999),
+('Lesotho',                  'LS', '🇱🇸', 999),
+('Liberia',                  'LR', '🇱🇷', 999),
+('Libya',                    'LY', '🇱🇾', 999),
+('Madagascar',               'MG', '🇲🇬', 999),
+('Malawi',                   'MW', '🇲🇼', 999),
+('Malaysia',                 'MY', '🇲🇾', 999),
+('Mauritania',               'MR', '🇲🇷', 999),
+('Mauritius',                'MU', '🇲🇺', 999),
+('Mexico',                   'MX', '🇲🇽', 999),
+('Moldova',                  'MD', '🇲🇩', 999),
+('Mongolia',                 'MN', '🇲🇳', 999),
+('Morocco',                  'MA', '🇲🇦', 999),
+('Mozambique',               'MZ', '🇲🇿', 999),
+('Myanmar',                  'MM', '🇲🇲', 999),
+('Namibia',                  'NA', '🇳🇦', 999),
+('Nepal',                    'NP', '🇳🇵', 999),
+('New Zealand',              'NZ', '🇳🇿', 999),
+('Nigeria',                  'NG', '🇳🇬', 999),
+('North Korea',              'KP', '🇰🇵', 999),
+('North Macedonia',          'MK', '🇲🇰', 999),
+('Norway',                   'NO', '🇳🇴', 999),
+('Oman',                     'OM', '🇴🇲', 999),
+('Pakistan',                 'PK', '🇵🇰', 999),
+('Panama',                   'PA', '🇵🇦', 999),
+('Paraguay',                 'PY', '🇵🇾', 999),
+('Peru',                     'PE', '🇵🇪', 999),
+('Philippines',              'PH', '🇵🇭', 999),
+('Poland',                   'PL', '🇵🇱', 999),
+('Qatar',                    'QA', '🇶🇦', 999),
+('Romania',                  'RO', '🇷🇴', 999),
+('Russia',                   'RU', '🇷🇺', 999),
+('Rwanda',                   'RW', '🇷🇼', 999),
+('Saint Helena',             'SH', '🇸🇭', 999),
+('Sao Tome and Principe',    'ST', '🇸🇹', 999),
+('Saudi Arabia',             'SA', '🇸🇦', 999),
+('Senegal',                  'SN', '🇸🇳', 999),
+('Serbia',                   'RS', '🇷🇸', 999),
+('Seychelles',               'SC', '🇸🇨', 999),
+('Singapore',                'SG', '🇸🇬', 999),
+('Solomon Islands',          'SB', '🇸🇧', 999),
+('Somalia',                  'SO', '🇸🇴', 999),
+('South Africa',             'ZA', '🇿🇦', 999),
+('South Korea',              'KR', '🇰🇷', 999),
+('Sri Lanka',                'LK', '🇱🇰', 999),
+('Suriname',                 'SR', '🇸🇷', 999),
+('Sweden',                   'SE', '🇸🇪', 999),
+('Switzerland',              'CH', '🇨🇭', 999),
+('Syria',                    'SY', '🇸🇾', 999),
+('Taiwan',                   'TW', '🇹🇼', 999),
+('Tanzania',                 'TZ', '🇹🇿', 999),
+('Thailand',                 'TH', '🇹🇭', 999),
+('Trinidad and Tobago',      'TT', '🇹🇹', 999),
+('Turkey',                   'TR', '🇹🇷', 999),
+('Uganda',                   'UG', '🇺🇬', 999),
+('Ukraine',                  'UA', '🇺🇦', 999),
+('United Arab Emirates',     'AE', '🇦🇪', 999),
+('Uruguay',                  'UY', '🇺🇾', 999),
+('Uzbekistan',               'UZ', '🇺🇿', 999),
+('Vietnam',                  'VN', '🇻🇳', 999),
+('Yemen',                    'YE', '🇾🇪', 999),
+('Zambia',                   'ZM', '🇿🇲', 999),
+('Zimbabwe',                 'ZW', '🇿🇼', 999);
 
 -- =============================================================================
 -- LINK COUNTRIES TO DEFAULT CURRENCIES
@@ -472,32 +701,3 @@ UPDATE `countries` SET `default_currency_id` = (SELECT `id` FROM `currencies` WH
 UPDATE `countries` SET `default_currency_id` = (SELECT `id` FROM `currencies` WHERE `code` = 'YER') WHERE `code` = 'YE';
 UPDATE `countries` SET `default_currency_id` = (SELECT `id` FROM `currencies` WHERE `code` = 'ZMW') WHERE `code` = 'ZM';
 UPDATE `countries` SET `default_currency_id` = (SELECT `id` FROM `currencies` WHERE `code` = 'ZWL') WHERE `code` = 'ZW';
-
--- =============================================================================
--- ACCOUNT TYPES (7 system types)
--- =============================================================================
-INSERT INTO `account_types` (`name`, `description`, `icon`, `is_system`) VALUES
-('Current / Checking', 'Standard current or checking account for daily transactions', 'bank', 1),
-('Savings',            'Interest-bearing savings account',                            'piggy-bank', 1),
-('Brokerage / Trading','General investment, brokerage, or trading account',           'trending-up', 1),
-('Credit Card',        'Credit card account',                                         'credit-card', 1),
-('Loan Account',       'Loan or mortgage account',                                    'file-text', 1),
-('Wallet / Prepaid',   'Digital wallet or prepaid card',                              'wallet', 1),
-('Fixed Deposit',      'Fixed deposit or term deposit account',                       'lock', 1);
-
--- =============================================================================
--- ASSET TYPES (12 system types with json_schema)
--- =============================================================================
-INSERT INTO `asset_types` (`name`, `category`, `json_schema`, `icon`, `is_system`) VALUES
-('Cash Balance',       'cash',            '[]', 'banknote', 1),
-('Equity / Stock',     'equity',          '[{"key":"ticker","label":"Ticker Symbol","type":"text","required":true},{"key":"shares","label":"Shares","type":"number","required":true},{"key":"price_per_share","label":"Price per Share","type":"number"}]', 'trending-up', 1),
-('Mutual Fund',        'fund',            '[{"key":"fund_name","label":"Fund Name","type":"text"},{"key":"units","label":"Units","type":"number"},{"key":"nav","label":"NAV","type":"number"}]', 'pie-chart', 1),
-('Fixed Deposit',      'fixed_deposit',   '[{"key":"principal","label":"Principal Amount","type":"number","required":true},{"key":"interest_rate","label":"Interest Rate (%)","type":"number"},{"key":"maturity_date","label":"Maturity Date","type":"date"}]', 'lock', 1),
-('Bond',               'bond',            '[{"key":"issuer","label":"Issuer","type":"text"},{"key":"coupon_rate","label":"Coupon Rate (%)","type":"number"},{"key":"maturity_date","label":"Maturity Date","type":"date"}]', 'file-text', 1),
-('Property',           'property',        '[{"key":"address","label":"Address","type":"text"},{"key":"purchase_price","label":"Purchase Price","type":"number"}]', 'home', 1),
-('Gold / Precious Metal','gold',          '[{"key":"weight_grams","label":"Weight (grams)","type":"number"},{"key":"purity","label":"Purity","type":"text"}]', 'gem', 1),
-('Cryptocurrency',     'crypto',          '[{"key":"coin","label":"Coin/Token","type":"text","required":true},{"key":"quantity","label":"Quantity","type":"number","required":true},{"key":"wallet_address","label":"Wallet Address","type":"text"}]', 'bitcoin', 1),
-('Loan Given',         'loan_given',      '[{"key":"borrower","label":"Borrower","type":"text"},{"key":"interest_rate","label":"Interest Rate (%)","type":"number"},{"key":"due_date","label":"Due Date","type":"date"}]', 'hand-coins', 1),
-('Debt / Liability',   'debt',            '[{"key":"debt_type","label":"Debt Type","type":"text"},{"key":"interest_rate","label":"Interest Rate (%)","type":"number"},{"key":"emi","label":"EMI/Monthly Payment","type":"number"},{"key":"remaining_months","label":"Remaining Months","type":"number"}]', 'alert-triangle', 1),
-('Cash Equivalent',    'cash_equivalent', '[]', 'wallet', 1),
-('Other',              'other',           '[]', 'circle', 1);
