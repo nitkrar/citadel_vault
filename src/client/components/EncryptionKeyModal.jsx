@@ -118,14 +118,31 @@ export default function EncryptionKeyModal() {
   };
 
   // ------------------------------------------------------------------
+  // Validate vault key against policy (length + mode)
+  // ------------------------------------------------------------------
+  const checkVaultKeyPolicy = (key) => {
+    if (key.length < minLen) {
+      return `Vault key must be at least ${minLen} characters.`;
+    }
+    if (vkMode === 'numeric' && !/^\d+$/.test(key)) {
+      return 'Vault key must contain only digits (0-9).';
+    }
+    if (vkMode === 'alphanumeric' && !/^[a-zA-Z0-9]+$/.test(key)) {
+      return 'Vault key must contain only letters and numbers (no special characters).';
+    }
+    return null;
+  };
+
+  // ------------------------------------------------------------------
   // Handle setup submission
   // ------------------------------------------------------------------
   const handleSetup = async (e) => {
     e.preventDefault();
     setError('');
 
-    if (vaultKey.length < minLen) {
-      setError(`Vault key must be at least ${minLen} characters.`);
+    const policyError = checkVaultKeyPolicy(vaultKey);
+    if (policyError) {
+      setError(policyError);
       return;
     }
 
@@ -157,8 +174,9 @@ export default function EncryptionKeyModal() {
     e.preventDefault();
     setError('');
 
-    if (vaultKey.length < minLen) {
-      setError(`Vault key must be at least ${minLen} characters.`);
+    const policyError = checkVaultKeyPolicy(vaultKey);
+    if (policyError) {
+      setError(policyError);
       return;
     }
 
@@ -190,8 +208,9 @@ export default function EncryptionKeyModal() {
     e.preventDefault();
     setError('');
 
-    if (newVaultKey.length < minLen) {
-      setError(`New vault key must be at least ${minLen} characters.`);
+    const policyError = checkVaultKeyPolicy(newVaultKey);
+    if (policyError) {
+      setError(policyError);
       return;
     }
 

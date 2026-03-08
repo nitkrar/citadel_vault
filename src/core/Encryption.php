@@ -16,17 +16,32 @@ class Encryption {
      * Validate vault key against current policy (config-driven).
      * Used for both unlock and new key creation — single source of truth.
      */
-    public static function validateVaultKey(string $key): bool {
+    /**
+     * Returns null if valid, or an error message string if invalid.
+     */
+    public static function validateVaultKey(string $key): ?string {
         $minLen = defined('VAULT_KEY_MIN_LENGTH') ? VAULT_KEY_MIN_LENGTH : 8;
         $mode = defined('VAULT_KEY_MODE') ? VAULT_KEY_MODE : 'alphanumeric';
 
-        if (strlen($key) < $minLen) return false;
+        if (strlen($key) < $minLen) {
+            return "Vault key must be at least {$minLen} characters.";
+        }
 
-        return match($mode) {
+        $valid = match($mode) {
             'numeric'      => preg_match('/^\d+$/', $key) === 1,
             'alphanumeric' => preg_match('/^[a-zA-Z0-9]+$/', $key) === 1,
-            default        => true, // 'any' — no character restriction
+            default        => true,
         };
+
+        if (!$valid) {
+            return match($mode) {
+                'numeric'      => 'Vault key must contain only digits (0-9).',
+                'alphanumeric' => 'Vault key must contain only letters and numbers (no special characters).',
+                default        => null,
+            };
+        }
+
+        return null;
     }
 
     public static function encrypt(?string $plaintext, ?string $key): ?string {
