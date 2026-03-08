@@ -130,7 +130,7 @@ if ($method === 'GET' && $action === 'validate') {
 if ($method === 'GET' && $action === 'list') {
     $payload = Auth::requireAuth();
     $userId = $payload['sub'];
-    $isSiteAdmin = $payload['role'] === 'site_admin';
+    $isSiteAdmin = $payload['role'] === 'admin';
 
     if ($isSiteAdmin) {
         $stmt = $db->query(
@@ -172,7 +172,7 @@ if ($method === 'GET' && $action === 'list') {
 if ($method === 'DELETE' && $action === 'revoke') {
     $payload = Auth::requireAuth();
     $userId = $payload['sub'];
-    $isSiteAdmin = $payload['role'] === 'site_admin';
+    $isSiteAdmin = $payload['role'] === 'admin';
     $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 
     if (!$id) {

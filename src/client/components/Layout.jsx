@@ -228,7 +228,7 @@ export default function Layout() {
             )}
             <div className="sidebar-user-info">
               <span>Signed in as <strong>{user?.username}</strong></span>
-              {user?.site_admin && <span className="badge badge-admin">Admin</span>}
+              {user?.role === 'admin' && <span className="badge badge-admin">Admin</span>}
             </div>
             <div className="sidebar-footer-actions">
               {isUnlocked ? (

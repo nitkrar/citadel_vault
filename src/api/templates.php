@@ -128,7 +128,7 @@ if ($method === 'POST' && $action === 'request-promotion' && $id) {
 // POST ?action=approve-promotion&id=X — Admin: approve template promotion
 // ---------------------------------------------------------------------------
 if ($method === 'POST' && $action === 'approve-promotion' && $id) {
-    if ($payload['role'] !== 'admin' && $payload['role'] !== 'site_admin') {
+    if ($payload['role'] !== 'admin') {
         Response::error('Admin access required.', 403);
     }
 

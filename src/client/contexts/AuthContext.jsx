@@ -111,6 +111,14 @@ export function AuthProvider({ children }) {
     setAdminActionMessage(null);
   };
 
+  const refreshUser = async () => {
+    try {
+      const res = await api.get('/auth.php?action=me');
+      const u = res.data.data;
+      setUser(u);
+    } catch {}
+  };
+
   const value = {
     user,
     token,
@@ -119,14 +127,15 @@ export function AuthProvider({ children }) {
     loginWithPasskey,
     logout,
     register,
-    isSiteAdmin: user?.role === 'site_admin',
-    isAdmin: user?.role === 'site_admin',
+    isSiteAdmin: user?.role === 'admin',
+    isAdmin: user?.role === 'admin',
     mustChangePassword,
     clearMustChangePassword,
     mustChangeVaultKey,
     clearMustChangeVaultKey,
     adminActionMessage,
     clearAdminActionMessage,
+    refreshUser,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
