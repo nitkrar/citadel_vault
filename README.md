@@ -95,7 +95,7 @@ Your vault key protects all your data and is required each session. The vault ke
 
 ## Open Source
 
-Citadel is fully open source under the MIT license. Every line of code is available for audit at [github.com/nitkrar/citadel_vault](https://github.com/nitkrar/citadel_vault).
+Every line of code is available for audit at [github.com/nitkrar/citadel_vault](https://github.com/nitkrar/citadel_vault). Free for personal and noncommercial use.
 
 For setup instructions, see [INSTALL.md](INSTALL.md).
 For developer documentation, visit the [Developer Guide](/dev-guide) on the website.
@@ -104,4 +104,4 @@ For developer documentation, visit the [Developer Guide](/dev-guide) on the webs
 
 ## License
 
-MIT
+[PolyForm Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0) — free for personal, educational, and noncommercial use. See [LICENSE](LICENSE) for details.
