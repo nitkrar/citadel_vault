@@ -19,6 +19,13 @@ if (file_exists($envFile)) {
         if ((substr($value, 0, 1) === '"' && substr($value, -1) === '"') ||
             (substr($value, 0, 1) === "'" && substr($value, -1) === "'")) {
             $value = substr($value, 1, -1);
+        } else {
+            // Strip inline comments (only for unquoted values)
+            // e.g., "DB_PASS=secret  # my password" → "secret"
+            $commentPos = strpos($value, ' #');
+            if ($commentPos !== false) {
+                $value = trim(substr($value, 0, $commentPos));
+            }
         }
         if (!isset($_ENV[$key]) && getenv($key) === false) {
             putenv("$key=$value");

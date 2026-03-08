@@ -10,15 +10,15 @@ class Auth {
      * Generate a JWT token for a user.
      */
     public static function generateToken(array $user): string {
-        $header = base64_encode(json_encode(['alg' => 'HS256', 'typ' => 'JWT']));
-        $payload = base64_encode(json_encode([
+        $header = self::base64UrlEncode(json_encode(['alg' => 'HS256', 'typ' => 'JWT']));
+        $payload = self::base64UrlEncode(json_encode([
             'sub'      => $user['id'],
             'username' => $user['username'],
             'role'     => $user['role'],
             'iat'      => time(),
             'exp'      => time() + JWT_EXPIRY,
         ]));
-        $signature = base64_encode(hash_hmac('sha256', "$header.$payload", JWT_SECRET, true));
+        $signature = self::base64UrlEncode(hash_hmac('sha256', "$header.$payload", JWT_SECRET, true));
         return "$header.$payload.$signature";
     }
 
@@ -30,13 +30,21 @@ class Auth {
         if (count($parts) !== 3) return null;
 
         [$header, $payload, $signature] = $parts;
-        $expectedSig = base64_encode(hash_hmac('sha256', "$header.$payload", JWT_SECRET, true));
+        $expectedSig = self::base64UrlEncode(hash_hmac('sha256', "$header.$payload", JWT_SECRET, true));
         if (!hash_equals($expectedSig, $signature)) return null;
 
-        $data = json_decode(base64_decode($payload), true);
+        $data = json_decode(self::base64UrlDecode($payload), true);
         if (!$data || !isset($data['exp']) || $data['exp'] < time()) return null;
 
         return $data;
+    }
+
+    private static function base64UrlEncode(string $data): string {
+        return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
+    }
+
+    private static function base64UrlDecode(string $data): string {
+        return base64_decode(strtr($data, '-_', '+/'));
     }
 
     /**
