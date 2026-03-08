@@ -1,19 +1,24 @@
-import { useState } from 'react';
-import { User, Mail, Lock, Check, AlertTriangle, Eye, EyeOff, Edit2 } from 'lucide-react';
+import { useState, Fragment } from 'react';
+import { User, Mail, Lock, Check, AlertTriangle, Eye, EyeOff, Edit2, Keyboard, ChevronDown, ChevronRight } from 'lucide-react';
 import api from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
+import useKeyboardShortcuts from '../hooks/useKeyboardShortcuts';
 
 export default function ProfilePage() {
   const { user, refreshUser } = useAuth();
+  const { isDesktop, settings: shortcutSettings, toggleShortcut, SHORTCUT_DEFS } = useKeyboardShortcuts();
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   // ── Profile edit ─────────────────────────────────────────────────
   const [editingProfile, setEditingProfile] = useState(false);
+  const [editDisplayName, setEditDisplayName] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileError, setProfileError] = useState('');
   const [profileSuccess, setProfileSuccess] = useState('');
 
   const openProfileEdit = () => {
+    setEditDisplayName(user?.display_name || '');
     setEditEmail(user?.email || '');
     setProfileError('');
     setProfileSuccess('');
@@ -26,7 +31,10 @@ export default function ProfilePage() {
     if (!editEmail.trim()) { setProfileError('Email is required.'); return; }
     setSavingProfile(true);
     try {
-      await api.put('/auth.php?action=profile', { email: editEmail.trim() });
+      await api.put('/auth.php?action=profile', {
+        display_name: editDisplayName.trim(),
+        email: editEmail.trim(),
+      });
       setProfileSuccess('Profile updated.');
       setEditingProfile(false);
       if (refreshUser) refreshUser();
@@ -95,6 +103,8 @@ export default function ProfilePage() {
             <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '8px 16px', fontSize: 14, alignItems: 'center' }}>
               <span style={{ color: 'var(--text-muted)' }}>Username</span>
               <span className="font-medium">{user?.username || '--'} <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>(not changeable)</span></span>
+              <span style={{ color: 'var(--text-muted)' }}>Display Name</span>
+              <input className="form-control" type="text" value={editDisplayName} onChange={e => setEditDisplayName(e.target.value)} placeholder="Your name" />
               <span style={{ color: 'var(--text-muted)' }}>Email</span>
               <input className="form-control" type="email" value={editEmail} onChange={e => setEditEmail(e.target.value)} required />
               <span style={{ color: 'var(--text-muted)' }}>Role</span>
@@ -109,6 +119,8 @@ export default function ProfilePage() {
           <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '8px 16px', fontSize: 14 }}>
             <span style={{ color: 'var(--text-muted)' }}>Username</span>
             <span className="font-medium">{user?.username || '--'}</span>
+            <span style={{ color: 'var(--text-muted)' }}>Name</span>
+            <span className="font-medium">{user?.display_name || <span style={{ color: 'var(--text-muted)' }}>Not set</span>}</span>
             <span style={{ color: 'var(--text-muted)' }}>Email</span>
             <span className="font-medium">{user?.email || '--'}</span>
             <span style={{ color: 'var(--text-muted)' }}>Role</span>
@@ -166,6 +178,37 @@ export default function ProfilePage() {
           </form>
         )}
       </div>
+
+      {/* Keyboard Shortcuts (desktop only) */}
+      {isDesktop && (
+        <div className="card mb-4" style={{ padding: 0 }}>
+          <button type="button" onClick={() => setShortcutsOpen(!shortcutsOpen)}
+            style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '16px 20px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', fontSize: 16, fontWeight: 600 }}>
+            {shortcutsOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+            <Keyboard size={18} /> Keyboard Shortcuts
+          </button>
+          {shortcutsOpen && (
+            <div style={{ padding: '0 20px 20px' }}>
+              <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
+                Toggle individual shortcuts on or off. Uses the <kbd style={{ fontSize: 11, background: 'var(--bg-secondary, #f3f4f6)', border: '1px solid var(--border-color, #e5e7eb)', borderRadius: 3, padding: '1px 5px' }}>Ctrl</kbd> key (not Cmd on Mac).
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {SHORTCUT_DEFS.map(s => (
+                  <label key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px', borderRadius: 6, background: 'var(--bg-secondary, #f9fafb)', cursor: 'pointer', fontSize: 14 }}>
+                    <input type="checkbox" checked={!!shortcutSettings[s.id]} onChange={() => toggleShortcut(s.id)}
+                      style={{ width: 16, height: 16, cursor: 'pointer' }} />
+                    <kbd style={{ fontSize: 12, background: 'var(--bg, #fff)', border: '1px solid var(--border-color, #e5e7eb)', borderRadius: 4, padding: '2px 8px', fontFamily: 'monospace', minWidth: 56, textAlign: 'center' }}>
+                      Ctrl+{s.key === '/' ? '/' : s.key.toUpperCase()}
+                    </kbd>
+                    <span style={{ flex: 1 }}>{s.label}</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{s.when}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

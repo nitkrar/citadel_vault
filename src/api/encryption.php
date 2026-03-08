@@ -224,6 +224,26 @@ if ($method === 'POST' && $action === 'update-all') {
 }
 
 // ---------------------------------------------------------------------------
+// POST ?action=setup-rsa — Generate RSA keys for sharing (for accounts without them)
+// ---------------------------------------------------------------------------
+if ($method === 'POST' && $action === 'setup-rsa') {
+    $payload = Auth::requireAuth();
+    $userId = $payload['sub'];
+    $body = Response::getBody();
+
+    if (empty($body['public_key']) || empty($body['encrypted_private_key'])) {
+        Response::error('public_key and encrypted_private_key are required.', 400);
+    }
+
+    $storage->setVaultKeys($userId, [
+        'public_key'             => $body['public_key'],
+        'encrypted_private_key'  => $body['encrypted_private_key'],
+    ]);
+
+    Response::success(['message' => 'RSA keys configured.']);
+}
+
+// ---------------------------------------------------------------------------
 // Fallback
 // ---------------------------------------------------------------------------
 Response::error('Invalid request.', 400);

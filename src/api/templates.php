@@ -73,7 +73,28 @@ if ($method === 'PUT' && $action === 'update' && $id) {
         Response::error('No fields to update.', 400);
     }
 
-    if (!$storage->updateTemplate($userId, $id, $data)) {
+    // Admins can edit global templates, regular users can only edit their own
+    $isAdmin = $payload['role'] === 'admin';
+    $updated = $storage->updateTemplate($userId, $id, $data);
+
+    if (!$updated && $isAdmin) {
+        // Try updating global template (owner_id IS NULL)
+        $db = Database::getInstance();
+        $fields = [];
+        $values = [];
+        $allowed = ['name', 'icon', 'fields', 'is_active'];
+        foreach ($data as $k => $v) {
+            if (in_array($k, $allowed, true)) { $fields[] = "`$k` = ?"; $values[] = $v; }
+        }
+        if (!empty($fields)) {
+            $values[] = $id;
+            $stmt = $db->prepare("UPDATE entry_templates SET " . implode(', ', $fields) . " WHERE id = ? AND owner_id IS NULL");
+            $stmt->execute($values);
+            $updated = $stmt->rowCount() > 0;
+        }
+    }
+
+    if (!$updated) {
         Response::error('Template not found or not owned by you.', 404);
     }
 

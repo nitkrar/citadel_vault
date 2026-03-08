@@ -68,14 +68,40 @@ export function EncryptionProvider({ children, user }) {
   }, [isUnlocked, resetAutoLock]);
 
   // ------------------------------------------------------------------
+  // Session persistence helpers
+  // ------------------------------------------------------------------
+  const saveSession = useCallback((keyMaterial, vaultKey) => {
+    // Store just enough to re-derive DEK on refresh (vault key is NOT stored)
+    // We store the wrapped DEK + salt so we can re-derive without the vault key
+    // Actually: we store the vault key temporarily in sessionStorage (tab-scoped)
+    // This is the tradeoff: convenience vs XSS risk (sessionStorage is tab-scoped)
+    try {
+      sessionStorage.setItem('pv_session_salt', keyMaterial.vault_key_salt);
+      sessionStorage.setItem('pv_session_edek', keyMaterial.encrypted_dek);
+      sessionStorage.setItem('pv_session_vk', vaultKey);
+    } catch {}
+  }, []);
+
+  const clearSession = useCallback(() => {
+    sessionStorage.removeItem('pv_session_salt');
+    sessionStorage.removeItem('pv_session_edek');
+    sessionStorage.removeItem('pv_session_vk');
+  }, []);
+
+  const hasSession = useCallback(() => {
+    return !!sessionStorage.getItem('pv_session_vk');
+  }, []);
+
+  // ------------------------------------------------------------------
   // Lock vault
   // ------------------------------------------------------------------
   const lock = useCallback(async () => {
     crypto.lockVault();
     await entryStore.clear().catch(() => {});
     clearAutoLock();
+    clearSession();
     setIsUnlocked(false);
-  }, [clearAutoLock]);
+  }, [clearAutoLock, clearSession]);
 
   // ------------------------------------------------------------------
   // Unlock vault
@@ -136,13 +162,18 @@ export function EncryptionProvider({ children, user }) {
       // 9. Start auto-lock timer
       startAutoLock(prefs);
 
+      // 10. Save session for refresh persistence if preference is on
+      if (getUserPreference(prefs, 'vault_persist_session') === 'persist_in_tab') {
+        saveSession(keyMaterial, vaultKey);
+      }
+
       return { success: true };
     } catch (err) {
       throw err;
     } finally {
       setIsLoading(false);
     }
-  }, [startAutoLock]);
+  }, [startAutoLock, saveSession]);
 
   // ------------------------------------------------------------------
   // Setup vault (first time)
@@ -311,6 +342,38 @@ export function EncryptionProvider({ children, user }) {
         setVaultKeyExists(isTruthy(keyMaterial.has_vault_key));
         if (isTruthy(keyMaterial.must_reset_vault_key)) {
           setMustResetVaultKey(true);
+        }
+
+        // Try to restore session from sessionStorage (refresh persistence)
+        // Session data only exists if user had "persist_in_tab" when they unlocked.
+        // Switching to "lock_on_refresh" clears it immediately in SecurityPage,
+        // so presence of session data = permission to restore. No API call needed.
+        const savedVk = sessionStorage.getItem('pv_session_vk');
+        const savedSalt = sessionStorage.getItem('pv_session_salt');
+        const savedEdek = sessionStorage.getItem('pv_session_edek');
+        if (savedVk && savedSalt && savedEdek && isTruthy(keyMaterial.has_vault_key)) {
+          try {
+            const success = await crypto.unlockVault(
+              { vault_key_salt: savedSalt, encrypted_dek: savedEdek },
+              savedVk
+            );
+            if (success && !cancelled) {
+              const { data: entriesResp } = await api.get('/vault.php');
+              await entryStore.putAll(apiData({ data: entriesResp }) || []);
+              const { data: tplResp } = await api.get('/templates.php');
+              await entryStore.putTemplates(apiData({ data: tplResp }) || []);
+              const { data: prefsResp } = await api.get('/preferences.php');
+              const prefs = apiData({ data: prefsResp }) || {};
+              setPreferences(prefs);
+              const { data: noticesResp } = await api.get('/dashboard.php?action=page-notices');
+              setPageNotices(apiData({ data: noticesResp }) || {});
+              setIsUnlocked(true);
+              startAutoLock(prefs);
+            }
+          } catch {
+            // Session restore failed — clear stale session, user must re-enter vault key
+            clearSession();
+          }
         }
       } catch {
         if (!cancelled) setVaultKeyExists(false);

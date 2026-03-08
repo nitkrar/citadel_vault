@@ -54,10 +54,11 @@ if ($method === 'POST') {
     }
 
     $body = Response::getBody();
-    $username = Response::sanitize($body['username'] ?? null);
-    $email    = Response::sanitize($body['email'] ?? null);
-    $password = $body['password'] ?? null;
-    $role     = $body['role'] ?? 'user';
+    $username    = Response::sanitize($body['username'] ?? null);
+    $displayName = Response::sanitize($body['display_name'] ?? null);
+    $email       = Response::sanitize($body['email'] ?? null);
+    $password    = $body['password'] ?? null;
+    $role        = $body['role'] ?? 'user';
 
     if (!$username || !$email || !$password) {
         Response::error('username, email, and password are required.', 400);
@@ -72,11 +73,11 @@ if ($method === 'POST') {
     $passwordHash = Auth::hashPassword($password);
 
     $stmt = $db->prepare(
-        "INSERT INTO users (username, email, password_hash, role, must_reset_password) VALUES (?, ?, ?, ?, 1)"
+        "INSERT INTO users (username, display_name, email, password_hash, role, email_verified, must_reset_password) VALUES (?, ?, ?, ?, ?, 1, 1)"
     );
 
     try {
-        $stmt->execute([$username, $email, $passwordHash, $role]);
+        $stmt->execute([$username, $displayName, $email, $passwordHash, $role]);
     } catch (PDOException $e) {
         if ($e->getCode() == 23000) {
             Response::error('Username or email already exists.', 409);

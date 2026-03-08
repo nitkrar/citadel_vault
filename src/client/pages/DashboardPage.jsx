@@ -40,7 +40,7 @@ export default function DashboardPage() {
       <div className="page-content">
         <div className="page-header">
           <div>
-            <h1 className="page-title">{getGreeting()}, {user?.username}</h1>
+            <h1 className="page-title">{getGreeting()}, {user?.display_name || user?.username}</h1>
             <p className="page-subtitle">Unlock your vault to see your dashboard</p>
           </div>
         </div>
@@ -48,6 +48,11 @@ export default function DashboardPage() {
           <Lock size={40} className="empty-icon" />
           <h3>Vault is locked</h3>
           <p>Unlock your vault to view entry counts and activity.</p>
+          {!localStorage.getItem('pv_lock_customized') && (
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8, maxWidth: 360 }}>
+              Your vault locks on every page refresh by default. You can change this in <strong>Security &rarr; Vault Key</strong> settings.
+            </p>
+          )}
         </div>
       </div>
     );
@@ -60,7 +65,7 @@ export default function DashboardPage() {
     <div className="page-content">
       <div className="page-header">
         <div>
-          <h1 className="page-title">{getGreeting()}, {user?.username}</h1>
+          <h1 className="page-title">{getGreeting()}, {user?.display_name || user?.username}</h1>
           <p className="page-subtitle">Your vault at a glance</p>
         </div>
       </div>
