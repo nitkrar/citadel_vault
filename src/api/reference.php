@@ -11,7 +11,7 @@ require_once __DIR__ . '/../core/ExchangeRates.php';
 Response::setCors();
 $payload = Auth::requireAuth();
 $userId = $payload['sub'];
-$isSiteAdmin = $payload['role'] === 'site_admin';
+$isSiteAdmin = $payload['role'] === 'admin';
 $method = $_SERVER['REQUEST_METHOD'];
 $resource = $_GET['resource'] ?? '';
 $id = isset($_GET['id']) ? (int)$_GET['id'] : null;

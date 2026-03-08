@@ -96,7 +96,7 @@ if ($method === 'POST') {
 
     if ($scope === 'global') {
         // Only admins can save global templates
-        if (($payload['role'] ?? '') !== 'site_admin') {
+        if (($payload['role'] ?? '') !== 'admin') {
             Response::error('Only admins can save global templates.', 403);
         }
 
@@ -162,7 +162,7 @@ if ($method === 'DELETE') {
 
     if ((int)$tpl['is_global'] === 1) {
         // Global templates can only be deleted by admins
-        if (($payload['role'] ?? '') !== 'site_admin') {
+        if (($payload['role'] ?? '') !== 'admin') {
             Response::error('Only admins can delete global templates.', 403);
         }
     } else {

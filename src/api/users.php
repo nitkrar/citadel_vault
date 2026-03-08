@@ -12,7 +12,7 @@ require_once __DIR__ . '/../core/Mailer.php';
 Response::setCors();
 $payload = Auth::requireAuth();
 $userId = $payload['sub'];
-$isSiteAdmin = $payload['role'] === 'site_admin';
+$isSiteAdmin = $payload['role'] === 'admin';
 $method = $_SERVER['REQUEST_METHOD'];
 $id = isset($_GET['id']) ? (int)$_GET['id'] : null;
 $action = $_GET['action'] ?? '';
@@ -39,7 +39,7 @@ if ($method === 'GET') {
         }
 
         $stmt = $db->query(
-            "SELECT id, username, email, role, is_active, has_vault_key, created_at FROM users ORDER BY id"
+            "SELECT id, username, display_name, email, role, is_active, created_at FROM users ORDER BY id"
         );
         Response::success($stmt->fetchAll());
     }
@@ -65,14 +65,14 @@ if ($method === 'POST') {
     if (strlen($password) < 8) {
         Response::error('Password must be at least 8 characters.', 400);
     }
-    if (!in_array($role, ['site_admin', 'user'], true)) {
+    if (!in_array($role, ['admin', 'user'], true)) {
         Response::error('Invalid role.', 400);
     }
 
     $passwordHash = Auth::hashPassword($password);
 
     $stmt = $db->prepare(
-        "INSERT INTO users (username, email, password_hash, role, must_change_password) VALUES (?, ?, ?, ?, 1)"
+        "INSERT INTO users (username, email, password_hash, role, must_reset_password) VALUES (?, ?, ?, ?, 1)"
     );
 
     try {
@@ -113,14 +113,8 @@ if ($method === 'PUT') {
         $message = $body['message'] ?? null;
         if (strlen($newPassword) < 8) { Response::error('Password must be at least 8 characters.', 400); }
 
-        try {
-            $stmt = $db->prepare("UPDATE users SET password_hash = ?, must_change_password = 1, admin_action_message = ? WHERE id = ?");
-            $stmt->execute([Auth::hashPassword($newPassword), $message, $id]);
-        } catch (PDOException $e) {
-            // Fallback if admin_action_message column doesn't exist yet
-            $stmt = $db->prepare("UPDATE users SET password_hash = ?, must_change_password = 1 WHERE id = ?");
-            $stmt->execute([Auth::hashPassword($newPassword), $id]);
-        }
+        $stmt = $db->prepare("UPDATE users SET password_hash = ?, must_reset_password = 1 WHERE id = ?");
+        $stmt->execute([Auth::hashPassword($newPassword), $id]);
         Response::success(['message' => 'Password reset. User will be forced to change on next login.']);
     }
 
@@ -130,14 +124,8 @@ if ($method === 'PUT') {
         $body = Response::getBody();
         $message = $body['message'] ?? null;
 
-        try {
-            $stmt = $db->prepare("UPDATE users SET must_change_password = 1, admin_action_message = ? WHERE id = ?");
-            $stmt->execute([$message, $id]);
-        } catch (PDOException $e) {
-            // Fallback if admin_action_message column doesn't exist yet
-            $stmt = $db->prepare("UPDATE users SET must_change_password = 1 WHERE id = ?");
-            $stmt->execute([$id]);
-        }
+        $stmt = $db->prepare("UPDATE users SET must_reset_password = 1 WHERE id = ?");
+        $stmt->execute([$id]);
         Response::success(['message' => 'User will be forced to change their password on next login.']);
     }
 
@@ -147,13 +135,9 @@ if ($method === 'PUT') {
         $body = Response::getBody();
         $message = $body['message'] ?? null;
 
-        try {
-            $stmt = $db->prepare("UPDATE users SET must_change_vault_key = 1, admin_action_message = ? WHERE id = ?");
-            $stmt->execute([$message, $id]);
-        } catch (PDOException $e) {
-            // Fallback if columns don't exist yet
-            Response::error('Database migration required: must_change_vault_key column not found.', 500);
-        }
+        // must_reset_vault_key is on user_vault_keys table, not users
+        $stmt = $db->prepare("UPDATE user_vault_keys SET must_reset_vault_key = 1 WHERE user_id = ?");
+        $stmt->execute([$id]);
         Response::success(['message' => 'User will be forced to change their vault key on next session.']);
     }
 
@@ -181,7 +165,7 @@ if ($method === 'PUT') {
 
     if (isset($body['role'])) {
         if (!$isSiteAdmin) { Response::error('Only admins can change roles.', 403); }
-        if (!in_array($body['role'], ['site_admin', 'user'], true)) { Response::error('Invalid role.', 400); }
+        if (!in_array($body['role'], ['admin', 'user'], true)) { Response::error('Invalid role.', 400); }
         $setClauses[] = "role = ?";
         $params[] = $body['role'];
     }

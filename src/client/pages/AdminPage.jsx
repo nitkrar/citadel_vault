@@ -75,7 +75,7 @@ export default function AdminPage() {
   const [togglingCurrency, setTogglingCurrency] = useState(null);
 
   // ===== DERIVED USER LISTS =====
-  const adminUsers = useMemo(() => users.filter(u => u.role === 'site_admin' || u.role === 'ghost'), [users]);
+  const adminUsers = useMemo(() => users.filter(u => u.role === 'admin' || u.role === 'ghost'), [users]);
   const regularUsers = useMemo(() => users.filter(u => u.role === 'user'), [users]);
 
   // Search + slice for regular users
@@ -506,13 +506,13 @@ export default function AdminPage() {
                       <td className="font-medium">
                         <span className="flex items-center gap-2">
                           {u.username}
-                          {u.role === 'site_admin' && <Shield size={14} style={{ color: 'var(--primary)' }} />}
+                          {u.role === 'admin' && <Shield size={14} style={{ color: 'var(--primary)' }} />}
                         </span>
                       </td>
                       <td className="td-muted">{u.email || '--'}</td>
                       <td>
-                        <span className={`badge ${u.role === 'site_admin' ? 'badge-primary' : 'badge-muted'}`}>
-                          {u.role === 'site_admin' ? 'Admin' : u.role === 'ghost' ? 'Ghost' : 'User'}
+                        <span className={`badge ${u.role === 'admin' ? 'badge-primary' : 'badge-muted'}`}>
+                          {u.role === 'admin' ? 'Admin' : u.role === 'ghost' ? 'Ghost' : 'User'}
                         </span>
                       </td>
                       <td>
@@ -954,7 +954,7 @@ export default function AdminPage() {
             <select className="form-control" value={userForm.role}
               onChange={(e) => setUserForm(p => ({ ...p, role: e.target.value }))}>
               <option value="user">User</option>
-              <option value="site_admin">Site Admin</option>
+              <option value="admin">Admin</option>
             </select>
           </div>
           <div className="form-group" style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: 4 }}>

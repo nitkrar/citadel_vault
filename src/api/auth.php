@@ -108,7 +108,7 @@ if ($method === 'POST' && $action === 'login') {
                 elseif ($attempts >= LOCKOUT_TIER3_ATTEMPTS && $attempts % 3 === 0) {
                     // Lock far into the future — only password change unlocks
                     $lockUntil = date('Y-m-d H:i:s', time() + 86400 * 365);
-                    $db->prepare("UPDATE users SET locked_until = ?, must_change_password = 1 WHERE id = ?")->execute([$lockUntil, $user['id']]);
+                    $db->prepare("UPDATE users SET locked_until = ?, must_reset_password = 1 WHERE id = ?")->execute([$lockUntil, $user['id']]);
                     try { $db->prepare("INSERT INTO audit_log (user_id, action, resource_type) VALUES (?, 'account_locked_permanent', 'users')")->execute([$user['id']]); } catch (Exception $e) {}
                     if (defined('SMTP_ENABLED') && SMTP_ENABLED && $failRow['email']) {
                         Mailer::sendLockoutNotification($failRow['email'], $user['username'], $attempts, $ip, null);
@@ -149,31 +149,19 @@ if ($method === 'POST' && $action === 'login') {
         }
     }
 
-    // Check must_change_password separately (DB migration resilience)
-    $mustChangePassword = false;
+    // Check must_reset_password from users, must_reset_vault_key from user_vault_keys
+    $mustChangePassword = (bool)($user['must_reset_password'] ?? false);
     $mustChangeVaultKey = false;
     $adminActionMessage = null;
     try {
-        $stmt2 = $db->prepare("SELECT must_change_password, must_change_vault_key, admin_action_message FROM users WHERE id = ?");
+        $stmt2 = $db->prepare("SELECT must_reset_vault_key FROM user_vault_keys WHERE user_id = ?");
         $stmt2->execute([$user['id']]);
-        $row = $stmt2->fetch(PDO::FETCH_ASSOC);
-        if ($row) {
-            $mustChangePassword = (bool)$row['must_change_password'];
-            $mustChangeVaultKey = (bool)($row['must_change_vault_key'] ?? false);
-            $adminActionMessage = $row['admin_action_message'] ?? null;
+        $vkRow = $stmt2->fetch(PDO::FETCH_ASSOC);
+        if ($vkRow) {
+            $mustChangeVaultKey = (bool)($vkRow['must_reset_vault_key'] ?? false);
         }
     } catch (Exception $e) {
-        // Columns may not exist yet — try fallback with just must_change_password
-        try {
-            $stmt2 = $db->prepare("SELECT must_change_password FROM users WHERE id = ?");
-            $stmt2->execute([$user['id']]);
-            $row = $stmt2->fetch(PDO::FETCH_ASSOC);
-            if ($row) {
-                $mustChangePassword = (bool)$row['must_change_password'];
-            }
-        } catch (Exception $e2) {
-            // Column may not exist yet — default to false
-        }
+        // Table may not exist — default to false
     }
 
     $token = Auth::generateToken($user);
@@ -192,7 +180,7 @@ if ($method === 'POST' && $action === 'login') {
             'username'              => $user['username'],
             'email'                 => $user['email'],
             'role'                  => $user['role'],
-            'must_change_password'  => $mustChangePassword,
+            'must_reset_password'  => $mustChangePassword,
             'must_change_vault_key' => $mustChangeVaultKey,
             'admin_action_message'  => $adminActionMessage,
         ],
@@ -341,7 +329,7 @@ if ($method === 'POST' && $action === 'register') {
             'username'             => $username,
             'email'                => $email,
             'role'                 => $role,
-            'must_change_password' => false,
+            'must_reset_password' => false,
         ],
         'expires_in' => JWT_EXPIRY,
     ], 201);
@@ -391,7 +379,7 @@ if ($method === 'GET' && $action === 'me') {
     $userId = $payload['sub'];
 
     $stmt = $db->prepare(
-        "SELECT id, username, email, role, has_vault_key, vault_session_preference, created_at
+        "SELECT id, username, email, role, must_reset_password, created_at
          FROM users WHERE id = ?"
     );
     $stmt->execute([$userId]);
@@ -401,31 +389,22 @@ if ($method === 'GET' && $action === 'me') {
         Response::error('User not found.', 404);
     }
 
-    // Add must_change_password + must_change_vault_key + admin_action_message (DB migration resilience)
-    $user['must_change_password'] = false;
+    // Map new column names to what the client expects
+    $user['must_reset_password'] = (bool)($user['must_reset_password'] ?? false);
+    unset($user['must_reset_password']);
+
+    // Check vault key status from user_vault_keys table
     $user['must_change_vault_key'] = false;
     $user['admin_action_message'] = null;
     try {
-        $stmt2 = $db->prepare("SELECT must_change_password, must_change_vault_key, admin_action_message FROM users WHERE id = ?");
+        $stmt2 = $db->prepare("SELECT must_reset_vault_key FROM user_vault_keys WHERE user_id = ?");
         $stmt2->execute([$userId]);
-        $row = $stmt2->fetch(PDO::FETCH_ASSOC);
-        if ($row) {
-            $user['must_change_password'] = (bool)$row['must_change_password'];
-            $user['must_change_vault_key'] = (bool)($row['must_change_vault_key'] ?? false);
-            $user['admin_action_message'] = $row['admin_action_message'] ?? null;
+        $vkRow = $stmt2->fetch(PDO::FETCH_ASSOC);
+        if ($vkRow) {
+            $user['must_change_vault_key'] = (bool)($vkRow['must_reset_vault_key'] ?? false);
         }
     } catch (Exception $e) {
-        // Columns may not exist yet — try fallback
-        try {
-            $stmt2 = $db->prepare("SELECT must_change_password FROM users WHERE id = ?");
-            $stmt2->execute([$userId]);
-            $row = $stmt2->fetch(PDO::FETCH_ASSOC);
-            if ($row) {
-                $user['must_change_password'] = (bool)$row['must_change_password'];
-            }
-        } catch (Exception $e2) {
-            // Column may not exist yet — default to false
-        }
+        // Table may not exist — defaults already set
     }
 
     $user['id'] = (int)$user['id'];
@@ -553,12 +532,12 @@ if ($method === 'POST' && $action === 'force-change-password') {
         Response::error('Password must be at least 8 characters.');
     }
 
-    // Verify must_change_password flag is set
-    $stmt = $db->prepare("SELECT must_change_password FROM users WHERE id = ?");
+    // Verify must_reset_password flag is set
+    $stmt = $db->prepare("SELECT must_reset_password FROM users WHERE id = ?");
     $stmt->execute([$userId]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    if (!$row || !(bool)$row['must_change_password']) {
+    if (!$row || !(bool)$row['must_reset_password']) {
         Response::error('Password change is not required.', 403);
     }
 
@@ -577,11 +556,11 @@ if ($method === 'POST' && $action === 'force-change-password') {
 
     $hash = Auth::hashPassword($newPassword);
     try {
-        $stmt = $db->prepare("UPDATE users SET password_hash = ?, must_change_password = 0, admin_action_message = NULL, failed_login_attempts = 0, locked_until = NULL, last_failed_login_at = NULL WHERE id = ?");
+        $stmt = $db->prepare("UPDATE users SET password_hash = ?, must_reset_password = 0, failed_login_attempts = 0, locked_until = NULL, last_failed_login_at = NULL WHERE id = ?");
         $stmt->execute([$hash, $userId]);
     } catch (PDOException $e) {
         // Fallback if columns don't exist yet
-        $stmt = $db->prepare("UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?");
+        $stmt = $db->prepare("UPDATE users SET password_hash = ?, must_reset_password = 0 WHERE id = ?");
         $stmt->execute([$hash, $userId]);
     }
 
@@ -611,8 +590,8 @@ if ($method === 'DELETE' && $action === 'self-delete') {
     }
 
     // Prevent admin from self-deleting if they are the only admin
-    if ($user['role'] === 'site_admin') {
-        $stmt = $db->prepare("SELECT COUNT(*) AS cnt FROM users WHERE role = 'site_admin' AND is_active = 1 AND id != ?");
+    if ($user['role'] === 'admin') {
+        $stmt = $db->prepare("SELECT COUNT(*) AS cnt FROM users WHERE role = 'admin' AND is_active = 1 AND id != ?");
         $stmt->execute([$userId]);
         if ((int)$stmt->fetch()['cnt'] === 0) {
             Response::error('Cannot delete the only admin account.', 400);
@@ -662,10 +641,11 @@ if ($method === 'POST' && $action === 'forgot-password') {
     }
 
     // Look up user by username or email
+    // With client-side encryption, recovery is handled entirely in the browser.
+    // This endpoint only resets the login password — vault recovery is separate.
     $stmt = $db->prepare(
-        "SELECT id, username, email, role, is_active, has_vault_key,
-                recovery_key_salt, encrypted_dek_recovery, recovery_key_encrypted, vault_key_salt, encrypted_dek
-         FROM users WHERE username = ? OR email = ? LIMIT 1"
+        "SELECT id, username, email, role, is_active
+         FROM users WHERE (username = ? OR email = ?) LIMIT 1"
     );
     $stmt->execute([$username, $username]);
     $user = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -675,9 +655,6 @@ if ($method === 'POST' && $action === 'forgot-password') {
     }
     if (!$user['is_active']) {
         Response::error('Account has been deactivated.', 403);
-    }
-    if (!$user['has_vault_key']) {
-        Response::error('Account does not have a vault key set up.', 400);
     }
 
     // Safety: set SQL_MODE for ghost user id=0

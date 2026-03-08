@@ -81,11 +81,11 @@ class Auth {
     }
 
     /**
-     * Require the authenticated user to have site_admin role.
+     * Require the authenticated user to have admin role.
      */
     public static function requireSiteAdmin(): array {
         $payload = self::requireAuth();
-        if ($payload['role'] !== 'site_admin') {
+        if ($payload['role'] !== 'admin') {
             http_response_code(403);
             die(json_encode(['success' => false, 'error' => 'Site admin access required.']));
         }

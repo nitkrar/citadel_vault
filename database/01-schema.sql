@@ -11,8 +11,9 @@
 
 SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
 SET time_zone = "+00:00";
+SET FOREIGN_KEY_CHECKS = 0;
 
--- Drop tables in reverse dependency order
+-- Drop all tables (FK checks disabled for clean re-creation)
 DROP TABLE IF EXISTS `currency_rate_history`;
 DROP TABLE IF EXISTS `portfolio_snapshots`;
 DROP TABLE IF EXISTS `audit_log`;
@@ -35,6 +36,7 @@ DROP TABLE IF EXISTS `users`;
 CREATE TABLE `users` (
     `id`                    INT UNSIGNED NOT NULL AUTO_INCREMENT,
     `username`              VARCHAR(50) NOT NULL,
+    `display_name`          VARCHAR(255) DEFAULT NULL,
     `email`                 VARCHAR(255) NOT NULL,
     `password_hash`         VARCHAR(255) NOT NULL,
     `role`                  ENUM('user','admin','ghost') NOT NULL DEFAULT 'user',
@@ -298,3 +300,5 @@ CREATE TABLE `rate_limits` (
 -- =============================================================================
 ALTER TABLE `countries`
     ADD CONSTRAINT `fk_countries_default_currency` FOREIGN KEY (`default_currency_id`) REFERENCES `currencies` (`id`) ON DELETE SET NULL;
+
+SET FOREIGN_KEY_CHECKS = 1;
