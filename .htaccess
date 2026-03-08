@@ -30,8 +30,14 @@ RewriteCond %{REQUEST_FILENAME} -f [OR]
 RewriteCond %{REQUEST_FILENAME} -d
 RewriteRule ^ - [L]
 
-# SPA fallback — everything else serves index.html
-RewriteRule ^ index.html [L]
+# Serve static assets from public/ (CSS, favicon, version.json)
+RewriteRule ^(styles\.css|favicon\.svg|version\.json)$ public/$1 [L]
+
+# Serve built JS/CSS assets from public/assets/
+RewriteRule ^assets/(.*)$ public/assets/$1 [L]
+
+# SPA fallback — serves built index.html via PHP
+RewriteRule ^ index.php [L]
 
 # Security headers (only if mod_headers is available)
 <IfModule mod_headers.c>
