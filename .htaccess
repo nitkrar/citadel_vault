@@ -1,0 +1,69 @@
+RewriteEngine On
+RewriteBase /
+
+# Force the built index.html, not the dev one at root
+DirectoryIndex public/index.html
+
+# API routes → PHP files
+RewriteRule ^src/api/(.+\.php)$ src/api/$1 [L,QSA]
+
+# Static files from public/ (hashed assets get long cache)
+RewriteCond %{REQUEST_URI} ^/assets/
+RewriteRule ^assets/(.*)$ public/assets/$1 [L]
+<FilesMatch "^assets/">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+</FilesMatch>
+
+# Block access to source code, config, and dev files
+RewriteRule ^src/client/ - [F,L]
+RewriteRule ^src/core/ - [F,L]
+RewriteRule ^database/ - [F,L]
+RewriteRule ^scripts/ - [F,L]
+RewriteRule ^config/ - [F,L]
+RewriteRule ^node_modules/ - [F,L]
+
+# Block the dev index.html at root (not the built one in public/)
+RewriteRule ^index\.html$ public/index.html [L]
+
+# Don't rewrite existing files (only for allowed paths)
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+# Serve public files (CSS, favicon, version.json)
+RewriteRule ^(styles\.css|favicon\.svg|version\.json)$ public/$1 [L]
+
+# SPA fallback — everything else serves public/index.html
+RewriteRule ^ public/index.html [L]
+
+# Security: block access to sensitive file types
+<FilesMatch "\.(env|sql|md|sh|py|lock|log|txt)$">
+    Require all denied
+</FilesMatch>
+
+# Block dotfiles (except .htaccess itself)
+<FilesMatch "^\.(?!htaccess)">
+    Require all denied
+</FilesMatch>
+
+# Block config PHP files from direct access
+<FilesMatch "^(config|database)\.php$">
+    Require all denied
+</FilesMatch>
+
+# Allow version.json
+<Files "version.json">
+    Require all granted
+</Files>
+
+# No-cache for HTML (so new builds are picked up)
+<FilesMatch "\.html$">
+    Header set Cache-Control "no-cache, must-revalidate"
+</FilesMatch>
+
+# Security headers
+Header always set X-Content-Type-Options "nosniff"
+Header always set X-Frame-Options "DENY"
+Header always set Referrer-Policy "strict-origin-when-cross-origin"
+Header always set Permissions-Policy "camera=(), microphone=(), geolocation=()"
+Header always set Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'"

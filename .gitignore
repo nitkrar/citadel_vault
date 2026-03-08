@@ -1,0 +1,11 @@
+node_modules/
+config/.env
+.DS_Store
+*.log
+.build-number
+.env.build
+__pycache__/
+*.pyc
+.claude/
+CLAUDE.md
+SECURITY_AUDIT_*.md
