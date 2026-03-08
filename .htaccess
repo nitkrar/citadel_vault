@@ -16,20 +16,14 @@ RewriteRule ^database/ - [F,L]
 RewriteRule ^scripts/ - [F,L]
 RewriteRule ^static/ - [F,L]
 
-# Block sensitive file types
-<FilesMatch "\.(env|sql|md|sh|py|lock|log|txt|json)$">
-    Require all denied
-</FilesMatch>
+# Allow version.json through before the block rule
+RewriteRule ^(.*/)?(version\.json)$ - [L]
 
-# Allow version.json
-<Files "version.json">
-    Require all granted
-</Files>
+# Block sensitive file types (RewriteRule-based — avoids Require/mod_authz_core issues on shared hosting)
+RewriteRule \.(env|sql|md|sh|py|lock|log|txt|json)$ - [F,L]
 
-# Block dotfiles
-<FilesMatch "^\.(?!htaccess)">
-    Require all denied
-</FilesMatch>
+# Block dotfiles (except .htaccess)
+RewriteRule /\. - [F,L]
 
 # Don't rewrite existing files
 RewriteCond %{REQUEST_FILENAME} -f [OR]
@@ -47,6 +41,7 @@ RewriteRule ^ index.php [L]
 
 # Security headers (only if mod_headers is available)
 <IfModule mod_headers.c>
+    Header always set X-Robots-Tag "noindex, nofollow"
     Header always set X-Content-Type-Options "nosniff"
     Header always set X-Frame-Options "DENY"
     Header always set Referrer-Policy "strict-origin-when-cross-origin"
