@@ -30,4 +30,4 @@ writeFileSync(
   JSON.stringify(version, null, 2) + '\n'
 );
 
-console.log(`Wrote public/version.json: v${version.version} #${version.build}`);
+console.log(`Wrote version.json: v${version.version} #${version.build}`);
