@@ -98,8 +98,9 @@ if ($method === 'POST' && $action === 'setup') {
     }
 
     // Validate vault key format
-    if (!Encryption::validateVaultKey($vaultKey)) {
-        Response::error('Vault key must be at least ' . VAULT_KEY_MIN_LENGTH . ' characters.', 400);
+    $vkError = Encryption::validateVaultKey($vaultKey);
+    if ($vkError) {
+        Response::error($vkError, 400);
     }
 
     // Ensure user doesn't already have a vault key
@@ -185,8 +186,9 @@ if ($method === 'POST' && $action === 'unlock') {
     $vaultKey = $body['vault_key'] ?? '';
 
     // Validate vault key format (accepts legacy 6+ numeric AND new 8+ any)
-    if (!Encryption::validateVaultKey($vaultKey)) {
-        Response::error('Invalid vault key format.', 400);
+    $vkError = Encryption::validateVaultKey($vaultKey);
+    if ($vkError) {
+        Response::error($vkError, 400);
     }
 
     // --- Vault lockout check ---
@@ -332,8 +334,9 @@ if ($method === 'POST' && $action === 'change') {
     if ($newVaultKey !== $confirmNewKey) {
         Response::error('New vault keys do not match.', 400);
     }
-    if (!Encryption::validateVaultKey($newVaultKey)) {
-        Response::error('Vault key must be at least ' . VAULT_KEY_MIN_LENGTH . ' characters.', 400);
+    $vkError = Encryption::validateVaultKey($newVaultKey);
+    if ($vkError) {
+        Response::error($vkError, 400);
     }
 
     // Fetch user vault data
