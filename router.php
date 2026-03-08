@@ -18,8 +18,8 @@ if (preg_match('#^/src/api/(.+\.php)#', $uri, $m)) {
     }
 }
 
-// Static assets from public/ (CSS, JS, images, fonts)
-$publicFile = __DIR__ . '/public' . $uri;
+// Static assets from dist/ (CSS, JS, images, fonts)
+$publicFile = __DIR__ . '/dist' . $uri;
 if ($uri !== '/' && file_exists($publicFile) && !is_dir($publicFile)) {
     $mimeTypes = [
         'css' => 'text/css',

@@ -8,7 +8,7 @@ export default defineConfig({
   publicDir: 'static',
   envDir: '.',
   build: {
-    outDir: 'public',
+    outDir: 'dist',
     emptyOutDir: true,
     rollupOptions: {
       output: {
