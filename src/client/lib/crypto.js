@@ -67,7 +67,7 @@ export function fromBase64(base64) {
 export async function generateDek() {
     return crypto.subtle.generateKey(
         { name: 'AES-GCM', length: 256 },
-        false, // non-extractable
+        true, // extractable — required for wrapKey('raw') to work
         ['encrypt', 'decrypt']
     );
 }
@@ -107,7 +107,6 @@ export async function wrapDek(dek, wrappingKey) {
 
 /**
  * Unwrap (decrypt) the DEK with a wrapping key.
- * CRITICAL: extractable = false on the unwrapped key.
  * Returns null on failure (wrong passphrase).
  */
 export async function unwrapDek(wrappedBase64, wrappingKey) {
@@ -119,7 +118,7 @@ export async function unwrapDek(wrappedBase64, wrappingKey) {
             wrappingKey,
             'AES-KW',
             { name: 'AES-GCM', length: 256 },
-            false, // non-extractable
+            true, // extractable — needed for re-wrapping on key change
             ['encrypt', 'decrypt']
         );
     } catch {
