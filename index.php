@@ -1,7 +1,7 @@
 <?php
 // Serve the built SPA index.html
 // This replaces the dev index.html when accessed via .htaccess
-$builtIndex = __DIR__ . '/public/index.html';
+$builtIndex = __DIR__ . '/dist/index.html';
 if (file_exists($builtIndex)) {
     readfile($builtIndex);
 } else {

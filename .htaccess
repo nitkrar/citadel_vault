@@ -32,11 +32,11 @@ RewriteCond %{REQUEST_FILENAME} -f [OR]
 RewriteCond %{REQUEST_FILENAME} -d
 RewriteRule ^ - [L]
 
-# Serve static assets from public/ (CSS, favicon, version.json)
-RewriteRule ^(styles\.css|favicon\.svg|version\.json)$ public/$1 [L]
+# Serve static assets from dist/ (CSS, favicon, version.json)
+RewriteRule ^(styles\.css|favicon\.svg|version\.json)$ dist/$1 [L]
 
-# Serve built JS/CSS assets from public/assets/
-RewriteRule ^assets/(.*)$ public/assets/$1 [L]
+# Serve built JS/CSS assets from dist/assets/
+RewriteRule ^assets/(.*)$ dist/assets/$1 [L]
 
 # SPA fallback — serves built index.html via PHP
 RewriteRule ^ index.php [L]

@@ -26,7 +26,7 @@ const version = {
 };
 
 writeFileSync(
-  resolve(root, 'public', 'version.json'),
+  resolve(root, 'dist', 'version.json'),
   JSON.stringify(version, null, 2) + '\n'
 );
 
