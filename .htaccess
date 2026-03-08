@@ -3,6 +3,10 @@ DirectoryIndex index.php
 RewriteEngine On
 RewriteBase /
 
+# Pass Authorization header to PHP (required for nginx/FastCGI on shared hosting)
+RewriteCond %{HTTP:Authorization} .+
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
 # API routes
 RewriteRule ^src/api/(.+\.php)$ src/api/$1 [L,QSA]
 
