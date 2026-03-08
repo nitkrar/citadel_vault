@@ -1,272 +1,190 @@
-import { useState, useEffect } from 'react';
-import { KeyRound, Copy, Check, AlertTriangle, Shield } from 'lucide-react';
-import api from '../api/client';
+import { useState } from 'react';
+import { KeyRound, Copy, Check, AlertTriangle, Shield, Download } from 'lucide-react';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { useAuth } from '../contexts/AuthContext';
 import Modal from '../components/Modal';
 import { isTruthy } from '../lib/checks';
+import { getVaultKeyMinLength, VAULT_KEY_MINIMUMS } from '../lib/defaults';
 
 /**
  * EncryptionKeyModal
  *
- * Shown when the user is authenticated, vaultKeyExists status is known,
- * and the vault is neither unlocked nor skipped.
- *
- * Three modes:
- *  - "setup"        — first-time vault key creation (has_vault_key === false)
+ * Four modes:
+ *  - "setup"        — first-time vault key creation (key type selector + strength meter)
  *  - "unlock"       — returning user unlocks with existing key
- *  - "force_change" — admin forced vault key change (vault is unlocked but must change)
+ *  - "recovery"     — forgot vault key, use recovery key to set new one
+ *  - "force_change" — admin-forced vault key change (must enter current + new)
  */
 export default function EncryptionKeyModal() {
   const {
-    vaultUnlocked,
-    vaultSkipped,
+    isUnlocked,
     vaultKeyExists,
     vaultPromptForced,
-    mustChangeVaultKey,
-    adminVaultMessage,
-    backfilledRecoveryKey,
-    setupVaultKey,
-    unlockVault,
+    mustResetVaultKey,
+    setup,
+    unlock,
     changeVaultKey,
-    changeVaultKeyWithRecovery,
+    recoverWithRecoveryKey,
     skipVault,
-    clearBackfilledRecoveryKey,
   } = useEncryption();
 
   const { mustChangePassword } = useAuth();
 
-  // ------------------------------------------------------------------
   // Block vault modal if password change is required first
-  // ------------------------------------------------------------------
   if (mustChangePassword) return null;
-
-  // ------------------------------------------------------------------
-  // Vault key policy (fetched from backend)
-  // ------------------------------------------------------------------
-  const [vaultKeyPolicy, setVaultKeyPolicy] = useState({ min_length: 8, mode: 'alphanumeric', description: '8+ characters (letters and numbers)' });
-  useEffect(() => {
-    api.get('/encryption.php?action=vault-key-policy')
-      .then((r) => { const d = r.data?.data || r.data; if (d?.min_length) setVaultKeyPolicy(d); })
-      .catch(() => {});
-  }, []);
 
   // ------------------------------------------------------------------
   // Local state
   // ------------------------------------------------------------------
+  const [mode, setMode] = useState(null); // null = auto-detect
+  const [keyType, setKeyType] = useState('alphanumeric');
   const [vaultKey, setVaultKey] = useState('');
   const [confirmKey, setConfirmKey] = useState('');
+  const [recoveryKeyInput, setRecoveryKeyInput] = useState('');
+  const [newVaultKey, setNewVaultKey] = useState('');
+  const [confirmNewKey, setConfirmNewKey] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  // Recovery key flow (setup & force_change modes)
-  const [recoveryKey, setRecoveryKey] = useState('');
+  // Recovery key display (after setup/recovery)
+  const [recoveryKeyDisplay, setRecoveryKeyDisplay] = useState('');
   const [copiedRecovery, setCopiedRecovery] = useState(false);
   const [savedConfirmed, setSavedConfirmed] = useState(false);
   const [showRecovery, setShowRecovery] = useState(false);
 
-  // Force change mode: method selection and extra fields
-  const [changeMethod, setChangeMethod] = useState('vault_key'); // 'vault_key' or 'recovery'
+  // For force change (when mustResetVaultKey)
   const [oldVaultKey, setOldVaultKey] = useState('');
-  const [recoveryInput, setRecoveryInput] = useState('');
-  const [newVaultKey, setNewVaultKey] = useState('');
-  const [confirmNewKey, setConfirmNewKey] = useState('');
 
   // ------------------------------------------------------------------
-  // Determine visibility & mode
+  // Determine visibility & effective mode
   // ------------------------------------------------------------------
-  const forceChangeMode = isTruthy(mustChangeVaultKey) && isTruthy(vaultUnlocked);
+  const forceChangeMode = isTruthy(mustResetVaultKey) && isTruthy(isUnlocked);
+  const standardVisible = !isTruthy(isUnlocked) && isTruthy(vaultPromptForced);
+  const needsSetup = !isTruthy(isUnlocked) && !isTruthy(vaultKeyExists);
 
-  // Standard modal: vault not unlocked AND (not skipped OR force-opened)
-  const standardVisible = !isTruthy(vaultUnlocked) && (!isTruthy(vaultSkipped) || isTruthy(vaultPromptForced));
+  // Auto-show for setup or when vault prompt forced
+  const isVisible = forceChangeMode || standardVisible || needsSetup || showRecovery;
 
-  const isVisible = forceChangeMode || standardVisible || showRecovery;
-
-  const mode = forceChangeMode
-    ? 'force_change'
-    : isTruthy(vaultKeyExists)
-      ? 'unlock'
-      : 'setup';
+  const effectiveMode = mode
+    || (forceChangeMode ? 'force_change' : null)
+    || (isTruthy(vaultKeyExists) ? 'unlock' : 'setup');
 
   if (!isVisible) return null;
 
-  const minLen = vaultKeyPolicy.min_length || 8;
-  const vkMode = vaultKeyPolicy.mode || 'alphanumeric';
-  const vkInputType = vkMode === 'numeric' ? 'tel' : 'text';
-  const vkInputMode = vkMode === 'numeric' ? 'numeric' : undefined;
-  const vkPattern = vkMode === 'numeric' ? '[0-9]*' : undefined;
-  const vkPlaceholder = vaultKeyPolicy.description || `${minLen}+ characters`;
-  const vkProps = { type: vkInputType, ...(vkInputMode && { inputMode: vkInputMode }), ...(vkPattern && { pattern: vkPattern }) };
+  const minLen = getVaultKeyMinLength(keyType);
+  const inputMode = keyType === 'numeric' ? 'numeric' : undefined;
+  const inputType = keyType === 'numeric' ? 'tel' : 'text';
+  const inputProps = {
+    type: inputType,
+    ...(inputMode && { inputMode }),
+    autoComplete: 'off',
+  };
 
   // ------------------------------------------------------------------
-  // Reset form fields
+  // Strength meter (simple visual feedback)
+  // ------------------------------------------------------------------
+  function getStrength(key) {
+    if (!key) return { label: '', color: '#d1d5db', pct: 0 };
+    const min = getVaultKeyMinLength(keyType);
+    if (key.length < min) return { label: 'Too short', color: '#ef4444', pct: 20 };
+    const ratio = Math.min(key.length / (min * 2), 1);
+    if (ratio < 0.5) return { label: 'Acceptable', color: '#f59e0b', pct: 40 };
+    if (ratio < 0.75) return { label: 'Good', color: '#22c55e', pct: 70 };
+    return { label: 'Strong', color: '#16a34a', pct: 100 };
+  }
+
+  // ------------------------------------------------------------------
+  // Reset form
   // ------------------------------------------------------------------
   const resetForm = () => {
-    setVaultKey('');
-    setConfirmKey('');
-    setError('');
-    setSubmitting(false);
-    setRecoveryKey('');
-    setCopiedRecovery(false);
-    setSavedConfirmed(false);
-    setShowRecovery(false);
-    setChangeMethod('vault_key');
-    setOldVaultKey('');
-    setRecoveryInput('');
-    setNewVaultKey('');
-    setConfirmNewKey('');
+    setVaultKey(''); setConfirmKey(''); setError(''); setSubmitting(false);
+    setRecoveryKeyDisplay(''); setCopiedRecovery(false); setSavedConfirmed(false);
+    setShowRecovery(false); setMode(null); setRecoveryKeyInput('');
+    setNewVaultKey(''); setConfirmNewKey(''); setOldVaultKey('');
   };
 
   // ------------------------------------------------------------------
-  // Validate vault key against policy (length + mode)
-  // ------------------------------------------------------------------
-  const checkVaultKeyPolicy = (key) => {
-    if (key.length < minLen) {
-      return `Vault key must be at least ${minLen} characters.`;
-    }
-    if (vkMode === 'numeric' && !/^\d+$/.test(key)) {
-      return 'Vault key must contain only digits (0-9).';
-    }
-    if (vkMode === 'alphanumeric' && !/^[a-zA-Z0-9]+$/.test(key)) {
-      return 'Vault key must contain only letters and numbers (no special characters).';
-    }
-    return null;
-  };
-
-  // ------------------------------------------------------------------
-  // Handle setup submission
+  // Handlers
   // ------------------------------------------------------------------
   const handleSetup = async (e) => {
     e.preventDefault();
     setError('');
-
-    const policyError = checkVaultKeyPolicy(vaultKey);
-    if (policyError) {
-      setError(policyError);
-      return;
-    }
-
-    if (vaultKey !== confirmKey) {
-      setError('Vault keys do not match.');
-      return;
-    }
+    if (vaultKey.length < minLen) { setError(`Vault key must be at least ${minLen} characters.`); return; }
+    if (vaultKey !== confirmKey) { setError('Vault keys do not match.'); return; }
 
     setSubmitting(true);
     try {
-      const result = await setupVaultKey(vaultKey, confirmKey);
-      setRecoveryKey(result.recovery_key);
+      const result = await setup(vaultKey);
+      setRecoveryKeyDisplay(result.recoveryKey);
       setShowRecovery(true);
     } catch (err) {
-      const msg =
-        err.response?.data?.error ||
-        err.response?.data?.message ||
-        'Failed to set up vault key.';
-      setError(msg);
+      setError(err.response?.data?.error || err.message || 'Setup failed.');
     } finally {
       setSubmitting(false);
     }
   };
 
-  // ------------------------------------------------------------------
-  // Handle unlock submission
-  // ------------------------------------------------------------------
   const handleUnlock = async (e) => {
     e.preventDefault();
     setError('');
-
-    const policyError = checkVaultKeyPolicy(vaultKey);
-    if (policyError) {
-      setError(policyError);
-      return;
-    }
+    if (!vaultKey) { setError('Enter your vault key.'); return; }
 
     setSubmitting(true);
     try {
-      const result = await unlockVault(vaultKey);
-      // If server backfilled a recovery key, show it to the user
-      if (result.recovery_key) {
-        setRecoveryKey(result.recovery_key);
-        setShowRecovery(true);
-      } else {
-        resetForm();
-      }
+      await unlock(vaultKey);
+      resetForm();
     } catch (err) {
-      const msg =
-        err.response?.data?.error ||
-        err.response?.data?.message ||
-        'Invalid vault key.';
-      setError(msg);
+      setError(err.response?.data?.error || err.message || 'Invalid vault key.');
     } finally {
       setSubmitting(false);
     }
   };
 
-  // ------------------------------------------------------------------
-  // Handle forced vault key change submission
-  // ------------------------------------------------------------------
+  const handleRecovery = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (!recoveryKeyInput.trim()) { setError('Enter your recovery key.'); return; }
+    if (newVaultKey.length < minLen) { setError(`New vault key must be at least ${minLen} characters.`); return; }
+    if (newVaultKey !== confirmNewKey) { setError('New vault keys do not match.'); return; }
+
+    setSubmitting(true);
+    try {
+      const result = await recoverWithRecoveryKey(recoveryKeyInput.trim(), newVaultKey);
+      setRecoveryKeyDisplay(result.recoveryKey);
+      setShowRecovery(true);
+    } catch (err) {
+      setError(err.response?.data?.error || err.message || 'Recovery failed.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const handleForceChange = async (e) => {
     e.preventDefault();
     setError('');
-
-    const policyError = checkVaultKeyPolicy(newVaultKey);
-    if (policyError) {
-      setError(policyError);
-      return;
-    }
-
-    if (newVaultKey !== confirmNewKey) {
-      setError('New vault keys do not match.');
-      return;
-    }
-
-    if (changeMethod === 'vault_key' && oldVaultKey.length < minLen) {
-      setError(`Current vault key must be at least ${minLen} characters.`);
-      return;
-    }
-
-    if (changeMethod === 'recovery' && !recoveryInput.trim()) {
-      setError('Recovery key is required.');
-      return;
-    }
+    if (!oldVaultKey) { setError('Enter your current vault key.'); return; }
+    if (newVaultKey.length < minLen) { setError(`New vault key must be at least ${minLen} characters.`); return; }
+    if (newVaultKey !== confirmNewKey) { setError('New vault keys do not match.'); return; }
 
     setSubmitting(true);
     try {
-      let result;
-      if (changeMethod === 'vault_key') {
-        result = await changeVaultKey(oldVaultKey, newVaultKey, confirmNewKey);
-      } else {
-        result = await changeVaultKeyWithRecovery(recoveryInput.trim(), newVaultKey, confirmNewKey);
-      }
-      if (result.recovery_key) {
-        setRecoveryKey(result.recovery_key);
-        setShowRecovery(true);
-      } else {
-        // Vault key changed without recovery key rotation — just close
-        resetForm();
-      }
+      await changeVaultKey(oldVaultKey, newVaultKey);
+      resetForm();
     } catch (err) {
-      const msg =
-        err.response?.data?.error ||
-        err.response?.data?.message ||
-        'Failed to change vault key.';
-      setError(msg);
+      setError(err.response?.data?.error || err.message || 'Failed to change vault key.');
     } finally {
       setSubmitting(false);
     }
   };
 
-  // ------------------------------------------------------------------
-  // Copy recovery key to clipboard
-  // ------------------------------------------------------------------
   const handleCopyRecovery = async () => {
     try {
-      await navigator.clipboard.writeText(recoveryKey);
+      await navigator.clipboard.writeText(recoveryKeyDisplay);
       setCopiedRecovery(true);
       setTimeout(() => setCopiedRecovery(false), 2000);
     } catch {
-      // Fallback: select text in a temporary input
       const tmp = document.createElement('textarea');
-      tmp.value = recoveryKey;
+      tmp.value = recoveryKeyDisplay;
       document.body.appendChild(tmp);
       tmp.select();
       document.execCommand('copy');
@@ -276,111 +194,64 @@ export default function EncryptionKeyModal() {
     }
   };
 
-  // ------------------------------------------------------------------
-  // Finish recovery key confirmation (close modal)
-  // ------------------------------------------------------------------
-  const handleRecoveryDone = () => {
-    clearBackfilledRecoveryKey();
-    resetForm();
+  const handleDownloadRecovery = () => {
+    const blob = new Blob([`Citadel Vault Recovery Key\n\n${recoveryKeyDisplay}\n\nKeep this file safe. This is the only way to recover your vault if you forget your vault key.`], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'citadel-recovery-key.txt';
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
-  // ------------------------------------------------------------------
-  // Skip vault
-  // ------------------------------------------------------------------
-  const handleSkip = () => {
-    resetForm();
-    skipVault();
-  };
+  const handleSkip = () => { resetForm(); skipVault(); };
+  const handleRecoveryDone = () => { resetForm(); };
 
-  // ------------------------------------------------------------------
-  // Render: recovery key display (after successful setup or change)
-  // ------------------------------------------------------------------
+  // Shared styles
+  const inputStyle = {
+    width: '100%', padding: '10px 12px', border: '1px solid #d1d5db',
+    borderRadius: 8, fontSize: 15, boxSizing: 'border-box',
+  };
+  const btnPrimary = (disabled) => ({
+    width: '100%', padding: '10px 0', borderRadius: 8, border: 'none',
+    background: '#2563eb', color: '#fff', fontWeight: 600, fontSize: 15,
+    cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.7 : 1, marginBottom: 8,
+  });
+  const btnSecondary = {
+    width: '100%', padding: '10px 0', borderRadius: 8, border: '1px solid #d1d5db',
+    background: 'transparent', color: '#6b7280', fontWeight: 500, fontSize: 14, cursor: 'pointer',
+  };
+  const errorBox = (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 12px', marginBottom: 12, color: '#dc2626', fontSize: 13 }}>
+      <AlertTriangle size={16} style={{ flexShrink: 0 }} /><span>{error}</span>
+    </div>
+  );
+
+  // ==================================================================
+  // RECOVERY KEY DISPLAY (after setup or recovery)
+  // ==================================================================
   if (showRecovery) {
     return (
       <Modal isOpen={true} title="Save Your Recovery Key" onClose={null}>
         <div style={{ textAlign: 'center', padding: '8px 0' }}>
           <Shield size={48} style={{ color: '#f59e0b', marginBottom: 16 }} />
-
           <p style={{ marginBottom: 8, color: '#6b7280', fontSize: 14 }}>
-            This recovery key is the <strong>only way</strong> to regain access
-            to your encrypted data if you forget your vault key. Save it
-            somewhere safe.
+            This recovery key is the <strong>only way</strong> to regain access if you forget your vault key.
           </p>
-
-          <p style={{ marginBottom: 16, color: '#6b7280', fontSize: 13 }}>
-            You can always view your recovery key on the Profile page when your vault is unlocked.
-          </p>
-
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 8,
-              background: '#f9fafb',
-              border: '1px solid #e5e7eb',
-              borderRadius: 8,
-              padding: '12px 16px',
-              marginBottom: 16,
-              fontFamily: 'monospace',
-              fontSize: 16,
-              wordBreak: 'break-all',
-            }}
-          >
-            <span>{recoveryKey}</span>
-            <button
-              type="button"
-              onClick={handleCopyRecovery}
-              title="Copy recovery key"
-              style={{
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                padding: 4,
-                color: copiedRecovery ? '#10b981' : '#6b7280',
-                flexShrink: 0,
-              }}
-            >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 8, padding: '12px 16px', marginBottom: 12, fontFamily: 'monospace', fontSize: 16, wordBreak: 'break-all' }}>
+            <span>{recoveryKeyDisplay}</span>
+            <button type="button" onClick={handleCopyRecovery} title="Copy" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: copiedRecovery ? '#10b981' : '#6b7280', flexShrink: 0 }}>
               {copiedRecovery ? <Check size={18} /> : <Copy size={18} />}
             </button>
           </div>
-
-          <label
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 8,
-              marginBottom: 20,
-              fontSize: 14,
-              cursor: 'pointer',
-              userSelect: 'none',
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={savedConfirmed}
-              onChange={(e) => setSavedConfirmed(e.target.checked)}
-            />
+          <button type="button" onClick={handleDownloadRecovery} style={{ ...btnSecondary, marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+            <Download size={16} /> Download as file
+          </button>
+          <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 20, fontSize: 14, cursor: 'pointer' }}>
+            <input type="checkbox" checked={savedConfirmed} onChange={(e) => setSavedConfirmed(e.target.checked)} />
             I have saved my recovery key
           </label>
-
-          <button
-            type="button"
-            disabled={!savedConfirmed}
-            onClick={handleRecoveryDone}
-            style={{
-              width: '100%',
-              padding: '10px 0',
-              borderRadius: 8,
-              border: 'none',
-              background: savedConfirmed ? '#2563eb' : '#93c5fd',
-              color: '#fff',
-              fontWeight: 600,
-              fontSize: 15,
-              cursor: savedConfirmed ? 'pointer' : 'not-allowed',
-            }}
-          >
+          <button type="button" disabled={!savedConfirmed} onClick={handleRecoveryDone} style={btnPrimary(!savedConfirmed)}>
             Continue
           </button>
         </div>
@@ -388,463 +259,154 @@ export default function EncryptionKeyModal() {
     );
   }
 
-  // ------------------------------------------------------------------
-  // Render: forced vault key change mode
-  // ------------------------------------------------------------------
-  if (mode === 'force_change') {
+  // ==================================================================
+  // FORCE CHANGE MODE
+  // ==================================================================
+  if (effectiveMode === 'force_change') {
+    const strength = getStrength(newVaultKey);
     return (
       <Modal isOpen={true} title="Change Your Vault Key" onClose={null}>
         <form onSubmit={handleForceChange}>
-          <div style={{ textAlign: 'center', marginBottom: 16 }}>
-            <KeyRound size={40} style={{ color: '#dc2626' }} />
-          </div>
-
-          {/* Admin message alert */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: 8,
-              background: '#fef2f2',
-              border: '1px solid #fecaca',
-              borderRadius: 8,
-              padding: '10px 12px',
-              marginBottom: 16,
-              color: '#dc2626',
-              fontSize: 13,
-            }}
-          >
+          <div style={{ textAlign: 'center', marginBottom: 16 }}><KeyRound size={40} style={{ color: '#dc2626' }} /></div>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 12px', marginBottom: 16, color: '#dc2626', fontSize: 13 }}>
             <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
-            <span>
-              {adminVaultMessage || 'Your administrator requires you to change your vault key.'}
-            </span>
+            <span>Your administrator requires you to change your vault key.</span>
           </div>
-
-          {error && (
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                background: '#fef2f2',
-                border: '1px solid #fecaca',
-                borderRadius: 8,
-                padding: '10px 12px',
-                marginBottom: 12,
-                color: '#dc2626',
-                fontSize: 13,
-              }}
-            >
-              <AlertTriangle size={16} style={{ flexShrink: 0 }} />
-              <span>{error}</span>
-            </div>
-          )}
-
-          {/* Method selector */}
+          {error && errorBox}
           <div style={{ marginBottom: 12 }}>
-            <label style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}>
-              Verify identity using
-            </label>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button
-                type="button"
-                onClick={() => setChangeMethod('vault_key')}
-                style={{
-                  flex: 1,
-                  padding: '8px 12px',
-                  borderRadius: 8,
-                  border: `1px solid ${changeMethod === 'vault_key' ? '#2563eb' : '#d1d5db'}`,
-                  background: changeMethod === 'vault_key' ? '#eff6ff' : 'transparent',
-                  color: changeMethod === 'vault_key' ? '#2563eb' : '#6b7280',
-                  fontWeight: 500,
-                  fontSize: 13,
-                  cursor: 'pointer',
-                }}
-              >
-                Current Key
-              </button>
-              <button
-                type="button"
-                onClick={() => setChangeMethod('recovery')}
-                style={{
-                  flex: 1,
-                  padding: '8px 12px',
-                  borderRadius: 8,
-                  border: `1px solid ${changeMethod === 'recovery' ? '#2563eb' : '#d1d5db'}`,
-                  background: changeMethod === 'recovery' ? '#eff6ff' : 'transparent',
-                  color: changeMethod === 'recovery' ? '#2563eb' : '#6b7280',
-                  fontWeight: 500,
-                  fontSize: 13,
-                  cursor: 'pointer',
-                }}
-              >
-                Recovery Key
-              </button>
-            </div>
+            <label style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}>Current Vault Key</label>
+            <input {...inputProps} placeholder="Current key" value={oldVaultKey} onChange={(e) => setOldVaultKey(e.target.value)} autoFocus required style={inputStyle} />
           </div>
-
-          {/* Old key or recovery key input */}
-          {changeMethod === 'vault_key' ? (
-            <div style={{ marginBottom: 12 }}>
-              <label
-                htmlFor="force-old-key"
-                style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}
-              >
-                Current Vault Key
-              </label>
-              <input
-                id="force-old-key"
-                {...vkProps}
-                placeholder={`Current key (${vkPlaceholder})`}
-                value={oldVaultKey}
-                onChange={(e) => setOldVaultKey(e.target.value)}
-                autoComplete="off"
-                autoFocus
-                required
-                style={{
-                  width: '100%',
-                  padding: '10px 12px',
-                  border: '1px solid #d1d5db',
-                  borderRadius: 8,
-                  fontSize: 15,
-                  boxSizing: 'border-box',
-                }}
-              />
-            </div>
-          ) : (
-            <div style={{ marginBottom: 12 }}>
-              <label
-                htmlFor="force-recovery-key"
-                style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}
-              >
-                Recovery Key
-              </label>
-              <input
-                id="force-recovery-key"
-                type="text"
-                placeholder="Enter your recovery key"
-                value={recoveryInput}
-                onChange={(e) => setRecoveryInput(e.target.value)}
-                autoComplete="off"
-                autoFocus
-                required
-                style={{
-                  width: '100%',
-                  padding: '10px 12px',
-                  border: '1px solid #d1d5db',
-                  borderRadius: 8,
-                  fontSize: 15,
-                  fontFamily: 'monospace',
-                  boxSizing: 'border-box',
-                }}
-              />
-            </div>
-          )}
-
-          {/* New key */}
           <div style={{ marginBottom: 12 }}>
-            <label
-              htmlFor="force-new-key"
-              style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}
-            >
-              New Vault Key
-            </label>
-            <input
-              id="force-new-key"
-              {...vkProps}
-              placeholder={vkPlaceholder}
-              value={newVaultKey}
-              onChange={(e) => setNewVaultKey(e.target.value)}
-              autoComplete="off"
-              required
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                border: '1px solid #d1d5db',
-                borderRadius: 8,
-                fontSize: 15,
-                boxSizing: 'border-box',
-              }}
-            />
+            <label style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}>New Vault Key</label>
+            <input {...inputProps} placeholder={`${minLen}+ characters`} value={newVaultKey} onChange={(e) => setNewVaultKey(e.target.value)} required style={inputStyle} />
+            {newVaultKey && <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ flex: 1, height: 4, borderRadius: 2, background: '#e5e7eb' }}><div style={{ height: '100%', width: `${strength.pct}%`, background: strength.color, borderRadius: 2, transition: 'width 0.2s' }} /></div>
+              <span style={{ fontSize: 12, color: strength.color }}>{strength.label}</span>
+            </div>}
           </div>
-
-          {/* Confirm new key */}
           <div style={{ marginBottom: 20 }}>
-            <label
-              htmlFor="force-confirm-key"
-              style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}
-            >
-              Confirm New Vault Key
-            </label>
-            <input
-              id="force-confirm-key"
-              {...vkProps}
-              placeholder="Confirm new key"
-              value={confirmNewKey}
-              onChange={(e) => setConfirmNewKey(e.target.value)}
-              autoComplete="off"
-              required
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                border: '1px solid #d1d5db',
-                borderRadius: 8,
-                fontSize: 15,
-                boxSizing: 'border-box',
-              }}
-            />
+            <label style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}>Confirm New Key</label>
+            <input {...inputProps} placeholder="Confirm" value={confirmNewKey} onChange={(e) => setConfirmNewKey(e.target.value)} required style={inputStyle} />
           </div>
-
-          <button
-            type="submit"
-            disabled={submitting}
-            style={{
-              width: '100%',
-              padding: '10px 0',
-              borderRadius: 8,
-              border: 'none',
-              background: '#2563eb',
-              color: '#fff',
-              fontWeight: 600,
-              fontSize: 15,
-              cursor: submitting ? 'not-allowed' : 'pointer',
-              opacity: submitting ? 0.7 : 1,
-            }}
-          >
-            {submitting ? 'Changing key...' : 'Change Vault Key'}
+          <button type="submit" disabled={submitting} style={btnPrimary(submitting)}>
+            {submitting ? 'Changing...' : 'Change Vault Key'}
           </button>
         </form>
       </Modal>
     );
   }
 
-  // ------------------------------------------------------------------
-  // Render: setup mode
-  // ------------------------------------------------------------------
-  if (mode === 'setup') {
+  // ==================================================================
+  // RECOVERY MODE
+  // ==================================================================
+  if (effectiveMode === 'recovery') {
+    const strength = getStrength(newVaultKey);
+    return (
+      <Modal isOpen={true} title="Recover Your Vault" onClose={() => setMode(null)}>
+        <form onSubmit={handleRecovery}>
+          <div style={{ textAlign: 'center', marginBottom: 16 }}><Shield size={40} style={{ color: '#f59e0b' }} /></div>
+          <p style={{ color: '#6b7280', fontSize: 14, marginBottom: 16 }}>
+            Enter your recovery key to regain access and set a new vault key.
+          </p>
+          {error && errorBox}
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}>Recovery Key</label>
+            <input type="text" placeholder="Enter your 32-character recovery key" value={recoveryKeyInput} onChange={(e) => setRecoveryKeyInput(e.target.value)} autoComplete="off" autoFocus required style={{ ...inputStyle, fontFamily: 'monospace' }} />
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}>New Vault Key</label>
+            <input {...inputProps} placeholder={`${minLen}+ characters`} value={newVaultKey} onChange={(e) => setNewVaultKey(e.target.value)} required style={inputStyle} />
+            {newVaultKey && <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ flex: 1, height: 4, borderRadius: 2, background: '#e5e7eb' }}><div style={{ height: '100%', width: `${strength.pct}%`, background: strength.color, borderRadius: 2, transition: 'width 0.2s' }} /></div>
+              <span style={{ fontSize: 12, color: strength.color }}>{strength.label}</span>
+            </div>}
+          </div>
+          <div style={{ marginBottom: 20 }}>
+            <label style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}>Confirm New Key</label>
+            <input {...inputProps} placeholder="Confirm" value={confirmNewKey} onChange={(e) => setConfirmNewKey(e.target.value)} required style={inputStyle} />
+          </div>
+          <button type="submit" disabled={submitting} style={btnPrimary(submitting)}>
+            {submitting ? 'Recovering...' : 'Recover Vault'}
+          </button>
+          <button type="button" onClick={() => setMode(null)} style={btnSecondary}>Back</button>
+        </form>
+      </Modal>
+    );
+  }
+
+  // ==================================================================
+  // SETUP MODE
+  // ==================================================================
+  if (effectiveMode === 'setup') {
+    const strength = getStrength(vaultKey);
     return (
       <Modal isOpen={true} title="Set Up Vault Key" onClose={handleSkip}>
         <form onSubmit={handleSetup}>
-          <div style={{ textAlign: 'center', marginBottom: 16 }}>
-            <KeyRound size={40} style={{ color: '#2563eb' }} />
-          </div>
-
+          <div style={{ textAlign: 'center', marginBottom: 16 }}><KeyRound size={40} style={{ color: '#2563eb' }} /></div>
           <p style={{ color: '#6b7280', fontSize: 14, marginBottom: 16 }}>
-            Create a vault key to protect your vault data (minimum {minLen} characters, alphanumeric recommended). You will need this key each time you start a new session.
+            Create a vault key to protect your data with end-to-end encryption. All encryption happens in your browser — the server never sees your vault key.
           </p>
+          {error && errorBox}
 
-          {error && (
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                background: '#fef2f2',
-                border: '1px solid #fecaca',
-                borderRadius: 8,
-                padding: '10px 12px',
-                marginBottom: 12,
-                color: '#dc2626',
-                fontSize: 13,
-              }}
-            >
-              <AlertTriangle size={16} style={{ flexShrink: 0 }} />
-              <span>{error}</span>
+          {/* Key type selector */}
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}>Key Type</label>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {Object.entries({ numeric: 'PIN', alphanumeric: 'Password', passphrase: 'Passphrase' }).map(([type, label]) => (
+                <button key={type} type="button" onClick={() => { setKeyType(type); setVaultKey(''); setConfirmKey(''); }}
+                  style={{ flex: 1, padding: '7px 8px', borderRadius: 8, border: `1px solid ${keyType === type ? '#2563eb' : '#d1d5db'}`, background: keyType === type ? '#eff6ff' : 'transparent', color: keyType === type ? '#2563eb' : '#6b7280', fontWeight: 500, fontSize: 13, cursor: 'pointer' }}>
+                  {label}
+                  <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>{VAULT_KEY_MINIMUMS[type]}+ chars</div>
+                </button>
+              ))}
             </div>
-          )}
+          </div>
 
           <div style={{ marginBottom: 12 }}>
-            <label
-              htmlFor="setup-vault-key"
-              style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}
-            >
-              Vault Key
-            </label>
-            <input
-              id="setup-vault-key"
-              {...vkProps}
-              placeholder={vkPlaceholder}
-              value={vaultKey}
-              onChange={(e) => setVaultKey(e.target.value)}
-              autoComplete="off"
-              required
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                border: '1px solid #d1d5db',
-                borderRadius: 8,
-                fontSize: 15,
-                boxSizing: 'border-box',
-              }}
-            />
+            <label style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}>Vault Key</label>
+            <input {...inputProps} placeholder={`${minLen}+ characters`} value={vaultKey} onChange={(e) => setVaultKey(e.target.value)} autoFocus required style={inputStyle} />
+            {vaultKey && <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ flex: 1, height: 4, borderRadius: 2, background: '#e5e7eb' }}><div style={{ height: '100%', width: `${strength.pct}%`, background: strength.color, borderRadius: 2, transition: 'width 0.2s' }} /></div>
+              <span style={{ fontSize: 12, color: strength.color }}>{strength.label}</span>
+            </div>}
           </div>
-
           <div style={{ marginBottom: 20 }}>
-            <label
-              htmlFor="setup-confirm-key"
-              style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}
-            >
-              Confirm Vault Key
-            </label>
-            <input
-              id="setup-confirm-key"
-              {...vkProps}
-              placeholder="Confirm key"
-              value={confirmKey}
-              onChange={(e) => setConfirmKey(e.target.value)}
-              autoComplete="off"
-              required
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                border: '1px solid #d1d5db',
-                borderRadius: 8,
-                fontSize: 15,
-                boxSizing: 'border-box',
-              }}
-            />
+            <label style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}>Confirm Vault Key</label>
+            <input {...inputProps} placeholder="Confirm" value={confirmKey} onChange={(e) => setConfirmKey(e.target.value)} required style={inputStyle} />
           </div>
-
-          <button
-            type="submit"
-            disabled={submitting}
-            style={{
-              width: '100%',
-              padding: '10px 0',
-              borderRadius: 8,
-              border: 'none',
-              background: '#2563eb',
-              color: '#fff',
-              fontWeight: 600,
-              fontSize: 15,
-              cursor: submitting ? 'not-allowed' : 'pointer',
-              opacity: submitting ? 0.7 : 1,
-              marginBottom: 8,
-            }}
-          >
+          <button type="submit" disabled={submitting} style={btnPrimary(submitting)}>
             {submitting ? 'Setting up...' : 'Set Up Vault Key'}
           </button>
-
-          <button
-            type="button"
-            onClick={handleSkip}
-            style={{
-              width: '100%',
-              padding: '10px 0',
-              borderRadius: 8,
-              border: '1px solid #d1d5db',
-              background: 'transparent',
-              color: '#6b7280',
-              fontWeight: 500,
-              fontSize: 14,
-              cursor: 'pointer',
-            }}
-          >
-            Skip for now
-          </button>
+          <button type="button" onClick={handleSkip} style={btnSecondary}>Skip for now</button>
         </form>
       </Modal>
     );
   }
 
-  // ------------------------------------------------------------------
-  // Render: unlock mode
-  // ------------------------------------------------------------------
+  // ==================================================================
+  // UNLOCK MODE (default)
+  // ==================================================================
+  const strength = getStrength(vaultKey);
   return (
     <Modal isOpen={true} title="Unlock Your Vault" onClose={handleSkip}>
       <form onSubmit={handleUnlock}>
-        <div style={{ textAlign: 'center', marginBottom: 16 }}>
-          <KeyRound size={40} style={{ color: '#2563eb' }} />
-        </div>
-
+        <div style={{ textAlign: 'center', marginBottom: 16 }}><KeyRound size={40} style={{ color: '#2563eb' }} /></div>
         <p style={{ color: '#6b7280', fontSize: 14, marginBottom: 16 }}>
-          Enter your vault key to unlock your vault data.
+          Enter your vault key to decrypt your data.
         </p>
-
-        {error && (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              background: '#fef2f2',
-              border: '1px solid #fecaca',
-              borderRadius: 8,
-              padding: '10px 12px',
-              marginBottom: 12,
-              color: '#dc2626',
-              fontSize: 13,
-            }}
-          >
-            <AlertTriangle size={16} style={{ flexShrink: 0 }} />
-            <span>{error}</span>
-          </div>
-        )}
-
+        {error && errorBox}
         <div style={{ marginBottom: 20 }}>
-          <label
-            htmlFor="unlock-vault-key"
-            style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}
-          >
-            Vault Key
-          </label>
-          <input
-            id="unlock-vault-key"
-            {...vkProps}
-            placeholder={vkPlaceholder}
-            value={vaultKey}
-            onChange={(e) => setVaultKey(e.target.value)}
-            autoComplete="off"
-            autoFocus
-            required
-            style={{
-              width: '100%',
-              padding: '10px 12px',
-              border: '1px solid #d1d5db',
-              borderRadius: 8,
-              fontSize: 15,
-              boxSizing: 'border-box',
-            }}
-          />
+          <label style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}>Vault Key</label>
+          <input {...inputProps} placeholder="Enter vault key" value={vaultKey} onChange={(e) => setVaultKey(e.target.value)} autoFocus required style={inputStyle} />
         </div>
-
-        <button
-          type="submit"
-          disabled={submitting}
-          style={{
-            width: '100%',
-            padding: '10px 0',
-            borderRadius: 8,
-            border: 'none',
-            background: '#2563eb',
-            color: '#fff',
-            fontWeight: 600,
-            fontSize: 15,
-            cursor: submitting ? 'not-allowed' : 'pointer',
-            opacity: submitting ? 0.7 : 1,
-            marginBottom: 8,
-          }}
-        >
+        <button type="submit" disabled={submitting} style={btnPrimary(submitting)}>
           {submitting ? 'Unlocking...' : 'Unlock Vault'}
         </button>
-
-        <button
-          type="button"
-          onClick={handleSkip}
-          style={{
-            width: '100%',
-            padding: '10px 0',
-            borderRadius: 8,
-            border: '1px solid #d1d5db',
-            background: 'transparent',
-            color: '#6b7280',
-            fontWeight: 500,
-            fontSize: 14,
-            cursor: 'pointer',
-          }}
-        >
-          Skip for now
+        <button type="button" onClick={() => setMode('recovery')} style={{ ...btnSecondary, marginBottom: 8, color: '#f59e0b' }}>
+          Forgot vault key? Use recovery key
         </button>
+        <button type="button" onClick={handleSkip} style={btnSecondary}>Skip for now</button>
       </form>
     </Modal>
   );

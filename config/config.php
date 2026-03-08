@@ -58,12 +58,15 @@ define('DB_NAME', env('DB_NAME', 'citadel_vault_db'));
 define('DB_USER', env('DB_USER', 'root'));
 define('DB_PASS', env('DB_PASS', ''));
 
-// Encryption
-define('DATA_SESSION_SECRET', env('DATA_SESSION_SECRET', ''));
-
 // JWT
 define('JWT_SECRET', env('JWT_SECRET', ''));
 define('JWT_EXPIRY', (int)env('JWT_EXPIRY', 28800)); // 8 hours
+
+// Audit HMAC (for hashing IPs in audit log)
+define('AUDIT_HMAC_SECRET', env('AUDIT_HMAC_SECRET', ''));
+
+// Storage adapter
+define('STORAGE_ADAPTER', env('STORAGE_ADAPTER', 'mariadb'));
 
 // WebAuthn
 define('WEBAUTHN_RP_ID', env('WEBAUTHN_RP_ID', 'localhost'));
@@ -84,11 +87,11 @@ define('ALLOWED_ORIGINS', env('ALLOWED_ORIGINS', 'https://localhost'));
 // In development mode these are warnings; in production the app refuses to start.
 // ---------------------------------------------------------------------------
 $_criticalErrors = [];
-if (!DATA_SESSION_SECRET) {
-    $_criticalErrors[] = 'DATA_SESSION_SECRET is not set. Run: openssl rand -hex 32';
-}
 if (!JWT_SECRET) {
     $_criticalErrors[] = 'JWT_SECRET is not set. Run: openssl rand -hex 64';
+}
+if (!AUDIT_HMAC_SECRET) {
+    $_criticalErrors[] = 'AUDIT_HMAC_SECRET is not set. Run: openssl rand -hex 32';
 }
 if (!DB_PASS) {
     $_criticalErrors[] = 'DB_PASS is not set.';
@@ -112,12 +115,13 @@ if (!empty($_criticalErrors)) {
 }
 unset($_criticalErrors);
 
-// Encryption mode: 'server' (current — PHP handles encryption) or 'client' (future — browser handles encryption)
-// This is the system default for new users. Individual users can override via their profile.
-define('ENCRYPTION_MODE', env('ENCRYPTION_MODE', 'server'));
+// Vault key policy (client-side enforcement only — server doesn't validate vault keys)
+// These constants are kept for backward compatibility with auth.php registration
+define('VAULT_KEY_MIN_LENGTH', (int)env('VAULT_KEY_MIN_LENGTH', 8));
+define('VAULT_KEY_MODE', env('VAULT_KEY_MODE', 'alphanumeric'));
 
-// Admin contact
-define('ADMIN_EMAIL', env('ADMIN_EMAIL', ''));
+// Encryption tuning (client-side only — kept for reference)
+define('BCRYPT_COST', (int)env('BCRYPT_COST', 12));
 
 // Branding
 define('APP_NAME', env('APP_NAME', 'Personal Vault'));
@@ -127,20 +131,10 @@ define('APP_TAGLINE', env('APP_TAGLINE', 'Secure Personal Hub'));
 define('SELF_REGISTRATION', filter_var(env('SELF_REGISTRATION', 'false'), FILTER_VALIDATE_BOOLEAN));
 define('REQUIRE_EMAIL_VERIFICATION', filter_var(env('REQUIRE_EMAIL_VERIFICATION', 'false'), FILTER_VALIDATE_BOOLEAN));
 
-// Vault key policy
-// VAULT_KEY_MIN_LENGTH: minimum characters (default: 8 for prod, lower for dev)
-// VAULT_KEY_MODE: 'numeric' (digits only), 'alphanumeric' (letters+digits), 'any' (all characters)
-define('VAULT_KEY_MIN_LENGTH', (int)env('VAULT_KEY_MIN_LENGTH', 8));
-define('VAULT_KEY_MODE', env('VAULT_KEY_MODE', 'alphanumeric'));
-
-// Encryption tuning
-define('PBKDF2_ITERATIONS', (int)env('PBKDF2_ITERATIONS', 100000));
-define('BCRYPT_COST', (int)env('BCRYPT_COST', 12));
-
 // Password policy
-define('PASSWORD_HISTORY_COUNT', (int)env('PASSWORD_HISTORY_COUNT', 1)); // Block reuse of last N passwords
+define('PASSWORD_HISTORY_COUNT', (int)env('PASSWORD_HISTORY_COUNT', 1));
 
-// Account lockout (progressive)
+// Account lockout (progressive — for login, not vault key)
 define('LOCKOUT_TIER1_ATTEMPTS', (int)env('LOCKOUT_TIER1_ATTEMPTS', 3));
 define('LOCKOUT_TIER1_DURATION', (int)env('LOCKOUT_TIER1_DURATION', 900));
 define('LOCKOUT_TIER2_ATTEMPTS', (int)env('LOCKOUT_TIER2_ATTEMPTS', 6));
@@ -167,10 +161,8 @@ define('SMTP_FROM_NAME', env('SMTP_FROM_NAME', 'Citadel Vault'));
 define('SMTP_ENCRYPTION', env('SMTP_ENCRYPTION', 'tls'));
 define('SMTP_ENABLED', filter_var(env('SMTP_ENABLED', 'false'), FILTER_VALIDATE_BOOLEAN));
 
-// Data session expiry (seconds)
-define('DATA_SESSION_EXPIRY_TIMED', (int)env('DATA_SESSION_EXPIRY_TIMED', 3600));
-define('DATA_SESSION_EXPIRY_LOGIN', (int)env('DATA_SESSION_EXPIRY_LOGIN', JWT_EXPIRY));
-define('DATA_SESSION_EXPIRY_SESSION', (int)env('DATA_SESSION_EXPIRY_SESSION', 86400));
+// Admin contact
+define('ADMIN_EMAIL', env('ADMIN_EMAIL', ''));
 
 // Load database class
 require_once __DIR__ . '/database.php';

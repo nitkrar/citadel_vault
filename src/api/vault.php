@@ -1,216 +1,257 @@
 <?php
 /**
- * Personal Vault — Password Vault API
- * CRUD for encrypted password entries.
+ * Citadel Vault — Vault Entries API (Client-Side Encryption)
+ *
+ * Unified CRUD for all entry types. The server stores opaque encrypted blobs.
+ * Replaces: accounts.php, assets.php, licenses.php, insurance.php, vault.php (old).
  */
 require_once __DIR__ . '/../core/Response.php';
 require_once __DIR__ . '/../../config/config.php';
 require_once __DIR__ . '/../core/Auth.php';
-require_once __DIR__ . '/../core/Encryption.php';
+require_once __DIR__ . '/../core/Storage.php';
 
 Response::setCors();
+
 $payload = Auth::requireAuth();
-$dek = Encryption::requireDek();
 $userId = $payload['sub'];
 $method = $_SERVER['REQUEST_METHOD'];
+$action = $_GET['action'] ?? null;
 $id = isset($_GET['id']) ? (int)$_GET['id'] : null;
-$db = Database::getInstance();
+$storage = Storage::adapter();
+
+$validTypes = ['password', 'account', 'asset', 'license', 'insurance', 'custom'];
 
 // ---------------------------------------------------------------------------
-// GET — List all entries or fetch a single entry
+// GET ?action=counts — Entry counts by type (for dashboard, no blobs)
 // ---------------------------------------------------------------------------
-if ($method === 'GET') {
-    $dekHex = bin2hex($dek);
-
-    // Single entry
-    if ($id) {
-        $stmt = $db->prepare("SELECT * FROM password_vault WHERE id = ? AND user_id = ?");
-        $stmt->execute([$id, $userId]);
-        $entry = $stmt->fetch(PDO::FETCH_ASSOC);
-
-        if (!$entry) {
-            Response::error('Entry not found.', 404);
+if ($method === 'GET' && $action === 'counts') {
+    $entries = $storage->getEntries($userId);
+    $counts = array_fill_keys($validTypes, 0);
+    foreach ($entries as $entry) {
+        $type = $entry['entry_type'];
+        if (isset($counts[$type])) {
+            $counts[$type]++;
         }
-
-        // Decrypt ALL fields for single-entry view
-        $entry['title']    = Encryption::decrypt($entry['title'], $dekHex);
-        $entry['website_url'] = Encryption::decrypt($entry['website_url'], $dekHex);
-        $entry['username'] = Encryption::decrypt($entry['username_encrypted'], $dekHex);
-        $entry['password'] = Encryption::decrypt($entry['password_encrypted'], $dekHex);
-        $entry['notes']    = Encryption::decrypt($entry['notes_encrypted'], $dekHex);
-
-        // Remove raw encrypted columns from response
-        unset($entry['username_encrypted'], $entry['password_encrypted'], $entry['notes_encrypted']);
-
-        Response::success($entry);
     }
-
-    // List all entries (passwords excluded for security)
-    $stmt = $db->prepare("SELECT * FROM password_vault WHERE user_id = ? ORDER BY is_favourite DESC, title ASC");
-    $stmt->execute([$userId]);
-    $entries = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-    foreach ($entries as &$entry) {
-        // Decrypt only title and website_url for the list view
-        $entry['title']       = Encryption::decrypt($entry['title'], $dekHex);
-        $entry['website_url'] = Encryption::decrypt($entry['website_url'], $dekHex);
-
-        // Remove sensitive encrypted columns from list response
-        unset($entry['username_encrypted'], $entry['password_encrypted'], $entry['notes_encrypted']);
-    }
-    unset($entry);
-
-    Response::success($entries);
+    Response::success($counts);
 }
 
 // ---------------------------------------------------------------------------
-// POST — Create a new password entry
+// GET ?action=deleted — List soft-deleted entries
+// ---------------------------------------------------------------------------
+if ($method === 'GET' && $action === 'deleted') {
+    $db = Database::getInstance();
+    $stmt = $db->prepare(
+        "SELECT ve.id, ve.entry_type, ve.encrypted_data, ve.deleted_at, ve.created_at, ve.updated_at,
+                et.name AS template_name, et.icon AS template_icon, et.fields AS template_fields
+         FROM vault_entries ve
+         LEFT JOIN entry_templates et ON ve.template_id = et.id
+         WHERE ve.user_id = ? AND ve.deleted_at IS NOT NULL
+           AND ve.deleted_at >= NOW() - INTERVAL 1 DAY
+         ORDER BY ve.deleted_at DESC"
+    );
+    $stmt->execute([$userId]);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $result = array_map(function ($row) {
+        $template = null;
+        if ($row['template_name']) {
+            $template = [
+                'name'   => $row['template_name'],
+                'icon'   => $row['template_icon'],
+                'fields' => json_decode($row['template_fields'], true) ?? [],
+            ];
+        }
+        return [
+            'id'             => (int)$row['id'],
+            'entry_type'     => $row['entry_type'],
+            'template'       => $template,
+            'data'           => $row['encrypted_data'],
+            'deleted_at'     => $row['deleted_at'],
+            'created_at'     => $row['created_at'],
+            'updated_at'     => $row['updated_at'],
+        ];
+    }, $rows);
+
+    Response::success($result);
+}
+
+// ---------------------------------------------------------------------------
+// GET ?id=X — Single entry
+// ---------------------------------------------------------------------------
+if ($method === 'GET' && $id) {
+    $entry = $storage->getEntry($userId, $id);
+    if (!$entry) {
+        Response::error('Entry not found.', 404);
+    }
+
+    Response::success([
+        'id'         => (int)$entry['id'],
+        'entry_type' => $entry['entry_type'],
+        'template'   => $entry['template'] ?? null,
+        'data'       => $entry['encrypted_data'],
+        'created_at' => $entry['created_at'],
+        'updated_at' => $entry['updated_at'],
+    ]);
+}
+
+// ---------------------------------------------------------------------------
+// GET — List entries (optional ?type= filter)
+// ---------------------------------------------------------------------------
+if ($method === 'GET') {
+    $typeFilter = $_GET['type'] ?? null;
+    if ($typeFilter && !in_array($typeFilter, $validTypes, true)) {
+        Response::error("Invalid type filter: $typeFilter", 400);
+    }
+
+    $entries = $storage->getEntries($userId, $typeFilter);
+    $result = array_map(function ($entry) {
+        return [
+            'id'         => (int)$entry['id'],
+            'entry_type' => $entry['entry_type'],
+            'template'   => $entry['template'] ?? null,
+            'data'       => $entry['encrypted_data'],
+            'created_at' => $entry['created_at'],
+            'updated_at' => $entry['updated_at'],
+        ];
+    }, $entries);
+
+    Response::success($result);
+}
+
+// ---------------------------------------------------------------------------
+// POST ?action=restore&id=X — Restore soft-deleted entry
+// ---------------------------------------------------------------------------
+if ($method === 'POST' && $action === 'restore' && $id) {
+    $db = Database::getInstance();
+    $stmt = $db->prepare(
+        "UPDATE vault_entries SET deleted_at = NULL WHERE id = ? AND user_id = ? AND deleted_at IS NOT NULL"
+    );
+    $stmt->execute([$id, $userId]);
+
+    if ($stmt->rowCount() === 0) {
+        Response::error('Entry not found or not deleted.', 404);
+    }
+
+    Response::success(['message' => 'Entry restored.']);
+}
+
+// ---------------------------------------------------------------------------
+// POST ?action=bulk-create — Batch insert entries
+// ---------------------------------------------------------------------------
+if ($method === 'POST' && $action === 'bulk-create') {
+    $body = Response::getBody();
+    $entries = $body['entries'] ?? [];
+
+    if (!is_array($entries) || empty($entries)) {
+        Response::error('No entries provided.', 400);
+    }
+
+    $ids = [];
+    foreach ($entries as $entry) {
+        $type = $entry['entry_type'] ?? '';
+        if (!in_array($type, $validTypes, true)) {
+            Response::error("Invalid entry type: $type", 400);
+        }
+        if (empty($entry['encrypted_data'])) {
+            Response::error('Missing encrypted_data.', 400);
+        }
+        $ids[] = $storage->createEntry(
+            $userId,
+            $type,
+            $entry['encrypted_data'],
+            isset($entry['template_id']) ? (int)$entry['template_id'] : null
+        );
+    }
+
+    Response::success(['ids' => $ids, 'count' => count($ids)]);
+}
+
+// ---------------------------------------------------------------------------
+// POST ?action=bulk-update — Batch update entries
+// ---------------------------------------------------------------------------
+if ($method === 'POST' && $action === 'bulk-update') {
+    $body = Response::getBody();
+    $entries = $body['entries'] ?? [];
+
+    if (!is_array($entries) || empty($entries)) {
+        Response::error('No entries provided.', 400);
+    }
+
+    $updated = 0;
+    foreach ($entries as $entry) {
+        if (empty($entry['id']) || empty($entry['encrypted_data'])) {
+            Response::error('Each entry requires id and encrypted_data.', 400);
+        }
+        if ($storage->updateEntry($userId, (int)$entry['id'], $entry['encrypted_data'])) {
+            $updated++;
+        }
+    }
+
+    Response::success(['updated' => $updated]);
+}
+
+// ---------------------------------------------------------------------------
+// POST — Create single entry
 // ---------------------------------------------------------------------------
 if ($method === 'POST') {
     $body = Response::getBody();
-    $dekHex = bin2hex($dek);
+    $entryType = $body['entry_type'] ?? '';
+    $encryptedData = $body['encrypted_data'] ?? '';
+    $templateId = isset($body['template_id']) ? (int)$body['template_id'] : null;
 
-    $title       = Response::sanitize($body['title'] ?? null);
-    $websiteUrl  = Response::sanitize($body['website_url'] ?? null);
-    $username    = $body['username'] ?? null;
-    $password    = $body['password'] ?? null;
-    $notes       = $body['notes'] ?? null;
-    $category    = Response::sanitize($body['category'] ?? 'General');
-    $isFavourite = !empty($body['is_favourite']) ? 1 : 0;
-
-    // Validate required fields
-    if (!$title || $title === '') {
-        Response::error('Title is required.', 400);
+    if (!in_array($entryType, $validTypes, true)) {
+        Response::error("Invalid entry type: $entryType", 400);
     }
-    if (!$password || $password === '') {
-        Response::error('Password is required.', 400);
+    if (empty($encryptedData)) {
+        Response::error('Missing encrypted_data.', 400);
     }
 
-    // Encrypt fields
-    $encTitle      = Encryption::encrypt($title, $dekHex);
-    $encWebsiteUrl = Encryption::encrypt($websiteUrl, $dekHex);
-    $encUsername    = Encryption::encrypt($username, $dekHex);
-    $encPassword   = Encryption::encrypt($password, $dekHex);
-    $encNotes      = Encryption::encrypt($notes, $dekHex);
-
-    $stmt = $db->prepare(
-        "INSERT INTO password_vault (user_id, title, website_url, username_encrypted, password_encrypted, notes_encrypted, category, is_favourite)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-    );
-    $stmt->execute([
-        $userId,
-        $encTitle,
-        $encWebsiteUrl,
-        $encUsername,
-        $encPassword,
-        $encNotes,
-        $category,
-        $isFavourite,
-    ]);
-
-    $newId = (int)$db->lastInsertId();
-
+    $newId = $storage->createEntry($userId, $entryType, $encryptedData, $templateId);
     Response::success(['id' => $newId], 201);
 }
 
 // ---------------------------------------------------------------------------
-// PUT — Update an existing password entry
+// PUT ?id=X — Update entry
 // ---------------------------------------------------------------------------
-if ($method === 'PUT') {
-    if (!$id) {
-        Response::error('Entry ID is required.', 400);
-    }
-
-    // Verify ownership
-    $stmt = $db->prepare("SELECT id FROM password_vault WHERE id = ? AND user_id = ?");
-    $stmt->execute([$id, $userId]);
-    if (!$stmt->fetch()) {
-        Response::error('Entry not found.', 404);
-    }
-
+if ($method === 'PUT' && $id) {
     $body = Response::getBody();
-    $dekHex = bin2hex($dek);
+    $encryptedData = $body['encrypted_data'] ?? '';
 
-    // Build dynamic update
-    $fields = [];
-    $values = [];
-
-    if (array_key_exists('title', $body)) {
-        $title = Response::sanitize($body['title']);
-        if (!$title || $title === '') {
-            Response::error('Title cannot be empty.', 400);
-        }
-        $fields[] = 'title = ?';
-        $values[] = Encryption::encrypt($title, $dekHex);
+    if (empty($encryptedData)) {
+        Response::error('Missing encrypted_data.', 400);
     }
 
-    if (array_key_exists('website_url', $body)) {
-        $fields[] = 'website_url = ?';
-        $values[] = Encryption::encrypt(Response::sanitize($body['website_url']), $dekHex);
-    }
-
-    if (array_key_exists('username', $body)) {
-        $fields[] = 'username_encrypted = ?';
-        $values[] = Encryption::encrypt($body['username'], $dekHex);
-    }
-
-    if (array_key_exists('password', $body)) {
-        if ($body['password'] === null || $body['password'] === '') {
-            Response::error('Password cannot be empty.', 400);
-        }
-        $fields[] = 'password_encrypted = ?';
-        $values[] = Encryption::encrypt($body['password'], $dekHex);
-    }
-
-    if (array_key_exists('notes', $body)) {
-        $fields[] = 'notes_encrypted = ?';
-        $values[] = Encryption::encrypt($body['notes'], $dekHex);
-    }
-
-    if (array_key_exists('category', $body)) {
-        $fields[] = 'category = ?';
-        $values[] = Response::sanitize($body['category']) ?? 'General';
-    }
-
-    if (array_key_exists('is_favourite', $body)) {
-        $fields[] = 'is_favourite = ?';
-        $values[] = !empty($body['is_favourite']) ? 1 : 0;
-    }
-
-    if (empty($fields)) {
-        Response::error('No fields to update.', 400);
-    }
-
-    $values[] = $id;
-    $values[] = $userId;
-
-    $sql = "UPDATE password_vault SET " . implode(', ', $fields) . " WHERE id = ? AND user_id = ?";
-    $stmt = $db->prepare($sql);
-    $stmt->execute($values);
-
-    Response::success(['id' => $id]);
-}
-
-// ---------------------------------------------------------------------------
-// DELETE — Hard-delete a password entry
-// ---------------------------------------------------------------------------
-if ($method === 'DELETE') {
-    if (!$id) {
-        Response::error('Entry ID is required.', 400);
-    }
-
-    // Verify ownership and delete
-    $stmt = $db->prepare("DELETE FROM password_vault WHERE id = ? AND user_id = ?");
-    $stmt->execute([$id, $userId]);
-
-    if ($stmt->rowCount() === 0) {
+    if (!$storage->updateEntry($userId, $id, $encryptedData)) {
         Response::error('Entry not found.', 404);
     }
 
-    Response::success(['message' => 'Entry deleted.']);
+    Response::success(['message' => 'Entry updated.']);
 }
 
 // ---------------------------------------------------------------------------
-// Fallback — Invalid request method
+// DELETE ?id=X — Soft delete entry
+// ---------------------------------------------------------------------------
+if ($method === 'DELETE' && $id) {
+    // Check share count first to warn client
+    $db = Database::getInstance();
+    $stmt = $db->prepare(
+        "SELECT COUNT(*) FROM shared_items WHERE source_entry_id = ? AND sender_id = ?"
+    );
+    $stmt->execute([$id, $userId]);
+    $shareCount = (int)$stmt->fetchColumn();
+
+    if (!$storage->deleteEntry($userId, $id)) {
+        Response::error('Entry not found.', 404);
+    }
+
+    Response::success([
+        'message'     => 'Entry deleted.',
+        'share_count' => $shareCount,
+    ]);
+}
+
+// ---------------------------------------------------------------------------
+// Fallback
 // ---------------------------------------------------------------------------
 Response::error('Invalid request.', 400);

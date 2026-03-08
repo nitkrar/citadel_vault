@@ -24,8 +24,8 @@ const WIZARD_STEPS = [
  *   isOpen, onClose
  */
 export default function BulkWizard({ isOpen, onClose }) {
-  const { vaultUnlocked } = useEncryption();
-  const vaultLocked = !isTruthy(vaultUnlocked);
+  const { isUnlocked } = useEncryption();
+  const vaultLocked = !isUnlocked;
 
   const [currentStep, setCurrentStep] = useState(0);
   const [stepResults, setStepResults] = useState({});

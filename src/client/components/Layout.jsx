@@ -38,7 +38,7 @@ export function useHideAmounts() {
 
 export default function Layout() {
   const { user, logout, isSiteAdmin } = useAuth();
-  const { vaultUnlocked, vaultKeyExists, lockVault, promptVault } = useEncryption();
+  const { isUnlocked, vaultKeyExists, lock: lockVault, promptVault } = useEncryption();
 
   const [hideAmounts, setHideAmounts] = useState(() => {
     return localStorage.getItem('pv_hide_amounts') === 'true';
@@ -73,7 +73,7 @@ export default function Layout() {
     let cancelled = false;
     const loadPendingShares = async () => {
       try {
-        const res = await (await import('../api/client')).default.get('/sharing.php?action=received');
+        const res = await (await import('../api/client')).default.get('/sharing.php?action=shared-with-me');
         if (!cancelled) {
           const shares = res.data?.data || res.data?.shares || [];
           setPendingShareCount(shares.length);
@@ -173,50 +173,33 @@ export default function Layout() {
               <NavLink to="/" end className={({ isActive }) => (isActive ? 'active' : '')}>
                 <LayoutDashboard size={18} /> Dashboard
               </NavLink>
+              <NavLink to="/vault" className={({ isActive }) => (isActive ? 'active' : '')}>
+                <KeyRound size={18} /> Vault
+              </NavLink>
               <NavLink to="/portfolio" className={({ isActive }) => (isActive ? 'active' : '')}>
                 <PieChart size={18} /> Portfolio
               </NavLink>
-              <NavLink to="/export" className={({ isActive }) => (isActive ? 'active' : '')}>
-                <FileDown size={18} /> Export
-              </NavLink>
             </div>
 
-            {/* Finance */}
+            {/* Tools */}
             <div className="nav-section">
-              <span className="nav-section-label">Finance</span>
-              <NavLink to="/accounts" className={({ isActive }) => (isActive ? 'active' : '')}>
-                <Landmark size={18} /> Accounts
-              </NavLink>
-              <NavLink to="/assets" className={({ isActive }) => (isActive ? 'active' : '')}>
-                <Briefcase size={18} /> Assets
-              </NavLink>
-              <NavLink to="/insurance" className={({ isActive }) => (isActive ? 'active' : '')}>
-                <ShieldCheck size={18} /> Insurance
-              </NavLink>
-            </div>
-
-            {/* Secure Storage */}
-            <div className="nav-section">
-              <span className="nav-section-label">Secure Storage</span>
-              <NavLink to="/vault" className={({ isActive }) => (isActive ? 'active' : '')}>
-                <KeyRound size={18} /> Password Vault
-              </NavLink>
-              <NavLink to="/licenses" className={({ isActive }) => (isActive ? 'active' : '')}>
-                <FileText size={18} /> Licenses
-              </NavLink>
-            </div>
-
-            {/* Settings */}
-            <div className="nav-section">
-              <span className="nav-section-label">Settings</span>
+              <span className="nav-section-label">Tools</span>
               <NavLink to="/sharing" className={({ isActive }) => (isActive ? 'active' : '')}>
-                <Share2 size={18} />
-                <span>Sharing</span>
-                {pendingShareCount > 0 && (
-                  <span className="badge badge-primary" style={{ marginLeft: 'auto', fontSize: 11, padding: '1px 6px' }}>
-                    {pendingShareCount}
-                  </span>
-                )}
+                <Share2 size={18} /> Sharing
+              </NavLink>
+              <NavLink to="/import-export" className={({ isActive }) => (isActive ? 'active' : '')}>
+                <FileDown size={18} /> Import / Export
+              </NavLink>
+              <NavLink to="/templates" className={({ isActive }) => (isActive ? 'active' : '')}>
+                <FileText size={18} /> Templates
+              </NavLink>
+            </div>
+
+            {/* Account */}
+            <div className="nav-section">
+              <span className="nav-section-label">Account</span>
+              <NavLink to="/security" className={({ isActive }) => (isActive ? 'active' : '')}>
+                <ShieldCheck size={18} /> Security
               </NavLink>
               <NavLink to="/profile" className={({ isActive }) => (isActive ? 'active' : '')}>
                 <User size={18} /> Profile
@@ -248,7 +231,7 @@ export default function Layout() {
               {user?.site_admin && <span className="badge badge-admin">Admin</span>}
             </div>
             <div className="sidebar-footer-actions">
-              {isTruthy(vaultUnlocked) ? (
+              {isUnlocked ? (
                 <button
                   className="btn btn-sm btn-outline"
                   onClick={lockVault}
@@ -282,7 +265,7 @@ export default function Layout() {
 
         {/* Main Content */}
         <main className="main-content">
-          {!isTruthy(vaultUnlocked) && !hideVaultBanner && (
+          {!isUnlocked && !hideVaultBanner && (
             <div className="alert alert-warning" style={{ margin: 'var(--space-lg)', marginBottom: 0, justifyContent: 'space-between' }}>
               <div className="flex items-center gap-2">
                 <Lock size={18} style={{ flexShrink: 0 }} />

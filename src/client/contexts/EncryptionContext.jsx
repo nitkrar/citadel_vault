@@ -1,342 +1,365 @@
 import { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import api from '../api/client';
 import { isTruthy, apiData } from '../lib/checks';
+import * as crypto from '../lib/crypto';
+import { entryStore } from '../lib/entryStore';
+import { getUserPreference, PREFERENCE_DEFAULTS } from '../lib/defaults';
 
 const EncryptionContext = createContext(null);
 
 export function EncryptionProvider({ children, user }) {
-  const [vaultUnlocked, setVaultUnlocked] = useState(false);
-  const [vaultSkipped, setVaultSkipped] = useState(false);
+  const [isUnlocked, setIsUnlocked] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [vaultKeyExists, setVaultKeyExists] = useState(false);
+  const [mustResetVaultKey, setMustResetVaultKey] = useState(false);
+  const [mustResetPassword, setMustResetPassword] = useState(false);
+  const [preferences, setPreferences] = useState({});
+  const [pageNotices, setPageNotices] = useState({});
   const [vaultPromptForced, setVaultPromptForced] = useState(false);
-  const [mustChangeVaultKey, setMustChangeVaultKey] = useState(false);
-  const [adminVaultMessage, setAdminVaultMessage] = useState(null);
-  const [sessionPreference, setSessionPreference] = useState('session');
-  const [loading, setLoading] = useState(true);
-  const [backfilledRecoveryKey, setBackfilledRecoveryKey] = useState(null);
 
   const autoLockTimerRef = useRef(null);
+  const activityTimerRef = useRef(null);
 
   // ------------------------------------------------------------------
-  // Helper: persist data token + expiry in sessionStorage
+  // Auto-lock timer management
   // ------------------------------------------------------------------
-  const storeToken = useCallback((dataToken, expiresAt) => {
-    sessionStorage.setItem('pv_data_token', dataToken);
-    sessionStorage.setItem('pv_data_token_expiry', String(expiresAt));
-  }, []);
-
-  // ------------------------------------------------------------------
-  // Helper: clear stored tokens
-  // ------------------------------------------------------------------
-  const clearToken = useCallback(() => {
-    sessionStorage.removeItem('pv_data_token');
-    sessionStorage.removeItem('pv_data_token_expiry');
-  }, []);
-
-  // ------------------------------------------------------------------
-  // Helper: schedule auto-lock when preference is 'timed'
-  // ------------------------------------------------------------------
-  const scheduleAutoLock = useCallback((expiresAt, preference) => {
+  const clearAutoLock = useCallback(() => {
     if (autoLockTimerRef.current) {
       clearTimeout(autoLockTimerRef.current);
       autoLockTimerRef.current = null;
     }
+  }, []);
 
-    if (preference === 'timed' && expiresAt) {
-      const msUntilExpiry = expiresAt * 1000 - Date.now();
-      if (msUntilExpiry > 0) {
-        autoLockTimerRef.current = setTimeout(() => {
-          clearToken();
-          setVaultUnlocked(false);
-        }, msUntilExpiry);
-      } else {
-        // Already expired
-        clearToken();
-        setVaultUnlocked(false);
-      }
+  const startAutoLock = useCallback((prefs) => {
+    clearAutoLock();
+    const mode = getUserPreference(prefs, 'auto_lock_mode');
+    if (mode !== 'timed') return;
+
+    const timeout = parseInt(getUserPreference(prefs, 'auto_lock_timeout'), 10) || 3600;
+    autoLockTimerRef.current = setTimeout(() => {
+      // Auto-lock fires
+      crypto.lockVault();
+      entryStore.clear().catch(() => {});
+      setIsUnlocked(false);
+    }, timeout * 1000);
+  }, [clearAutoLock]);
+
+  // Reset auto-lock on user activity
+  const resetAutoLock = useCallback(() => {
+    if (autoLockTimerRef.current) {
+      startAutoLock(preferences);
     }
-  }, [clearToken]);
+  }, [startAutoLock, preferences]);
+
+  // Attach activity listeners when unlocked
+  useEffect(() => {
+    if (!isUnlocked) return;
+    const events = ['mousedown', 'keydown', 'touchstart', 'scroll'];
+    // Debounce: only reset every 30 seconds
+    let lastReset = Date.now();
+    const handler = () => {
+      if (Date.now() - lastReset > 30000) {
+        lastReset = Date.now();
+        resetAutoLock();
+      }
+    };
+    events.forEach(e => window.addEventListener(e, handler, { passive: true }));
+    return () => events.forEach(e => window.removeEventListener(e, handler));
+  }, [isUnlocked, resetAutoLock]);
 
   // ------------------------------------------------------------------
-  // On mount (when user is available): check session + fetch status
+  // Lock vault
+  // ------------------------------------------------------------------
+  const lock = useCallback(async () => {
+    crypto.lockVault();
+    await entryStore.clear().catch(() => {});
+    clearAutoLock();
+    setIsUnlocked(false);
+  }, [clearAutoLock]);
+
+  // ------------------------------------------------------------------
+  // Unlock vault
+  // ------------------------------------------------------------------
+  const unlock = useCallback(async (vaultKey) => {
+    setIsLoading(true);
+    try {
+      // 1. Fetch vault key material
+      const { data: keyResp } = await api.get('/encryption.php?action=key-material');
+      const keyMaterial = apiData({ data: keyResp });
+
+      if (!keyMaterial.has_vault_key) {
+        throw new Error('Vault not set up.');
+      }
+
+      // 2. Check must_reset_vault_key
+      if (isTruthy(keyMaterial.must_reset_vault_key)) {
+        setMustResetVaultKey(true);
+      }
+
+      // 3. Derive key and unwrap DEK client-side
+      const success = await crypto.unlockVault(
+        {
+          vault_key_salt: keyMaterial.vault_key_salt,
+          encrypted_dek: keyMaterial.encrypted_dek,
+        },
+        vaultKey
+      );
+
+      if (!success) {
+        throw new Error('Invalid vault key.');
+      }
+
+      // 4. Fetch all vault entries
+      const { data: entriesResp } = await api.get('/vault.php');
+      const entries = apiData({ data: entriesResp }) || [];
+      await entryStore.putAll(entries);
+
+      // 5. Fetch templates
+      const { data: templatesResp } = await api.get('/templates.php');
+      const templates = apiData({ data: templatesResp }) || [];
+      await entryStore.putTemplates(templates);
+
+      // 6. Fetch preferences
+      const { data: prefsResp } = await api.get('/preferences.php');
+      const prefs = apiData({ data: prefsResp }) || {};
+      setPreferences(prefs);
+
+      // 7. Fetch page notices
+      const { data: noticesResp } = await api.get('/dashboard.php?action=page-notices');
+      const notices = apiData({ data: noticesResp }) || {};
+      setPageNotices(notices);
+
+      // 8. Set state
+      setIsUnlocked(true);
+      setVaultPromptForced(false);
+
+      // 9. Start auto-lock timer
+      startAutoLock(prefs);
+
+      return { success: true };
+    } catch (err) {
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [startAutoLock]);
+
+  // ------------------------------------------------------------------
+  // Setup vault (first time)
+  // ------------------------------------------------------------------
+  const setup = useCallback(async (vaultKey) => {
+    setIsLoading(true);
+    try {
+      // 1. Generate all crypto material client-side
+      const result = await crypto.setupVault(vaultKey);
+
+      // 2. Send blobs to server for storage
+      await api.post('/encryption.php?action=setup', result.keyMaterial);
+
+      // 3. Fetch preferences (may have been set during registration)
+      const { data: prefsResp } = await api.get('/preferences.php');
+      const prefs = apiData({ data: prefsResp }) || {};
+      setPreferences(prefs);
+
+      // 4. Fetch page notices
+      const { data: noticesResp } = await api.get('/dashboard.php?action=page-notices');
+      setPageNotices(apiData({ data: noticesResp }) || {});
+
+      // 5. Set state
+      setIsUnlocked(true);
+      setVaultKeyExists(true);
+      setVaultPromptForced(false);
+      startAutoLock(prefs);
+
+      // 6. Return recovery key for user to save
+      return { recoveryKey: result.recoveryKey };
+    } catch (err) {
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [startAutoLock]);
+
+  // ------------------------------------------------------------------
+  // Change vault key
+  // ------------------------------------------------------------------
+  const changeVaultKey = useCallback(async (currentVaultKey, newVaultKey) => {
+    // 1. Fetch current blobs
+    const { data: keyResp } = await api.get('/encryption.php?action=key-material');
+    const blobs = apiData({ data: keyResp });
+
+    // 2. Re-wrap DEK client-side
+    const newBlobs = await crypto.changeVaultKey(
+      { vault_key_salt: blobs.vault_key_salt, encrypted_dek: blobs.encrypted_dek },
+      currentVaultKey,
+      newVaultKey
+    );
+
+    // 3. Send new blobs to server
+    await api.post('/encryption.php?action=update-vault-key', newBlobs);
+    setMustResetVaultKey(false);
+
+    return { success: true };
+  }, []);
+
+  // ------------------------------------------------------------------
+  // Recover with recovery key
+  // ------------------------------------------------------------------
+  const recoverWithRecoveryKey = useCallback(async (recoveryKey, newVaultKey) => {
+    setIsLoading(true);
+    try {
+      // 1. Fetch recovery blobs
+      const { data: recResp } = await api.get('/encryption.php?action=recovery-material');
+      const recoveryBlobs = apiData({ data: recResp });
+
+      // 2. Unwrap DEK with recovery key, re-wrap with new vault key, generate new recovery key
+      const result = await crypto.recoverWithRecoveryKey(
+        {
+          recovery_key_salt: recoveryBlobs.recovery_key_salt,
+          encrypted_dek_recovery: recoveryBlobs.encrypted_dek_recovery,
+        },
+        recoveryKey,
+        newVaultKey
+      );
+
+      // 3. Send all new blobs to server
+      await api.post('/encryption.php?action=update-all', {
+        vault_key_salt: result.vault_key_salt,
+        encrypted_dek: result.encrypted_dek,
+        recovery_key_salt: result.recovery_key_salt,
+        encrypted_dek_recovery: result.encrypted_dek_recovery,
+        recovery_key_encrypted: result.recovery_key_encrypted,
+      });
+
+      // 4. Load entries into IndexedDB
+      const { data: entriesResp } = await api.get('/vault.php');
+      const entries = apiData({ data: entriesResp }) || [];
+      await entryStore.putAll(entries);
+
+      // 5. Load templates
+      const { data: templatesResp } = await api.get('/templates.php');
+      await entryStore.putTemplates(apiData({ data: templatesResp }) || []);
+
+      // 6. Load preferences
+      const { data: prefsResp } = await api.get('/preferences.php');
+      const prefs = apiData({ data: prefsResp }) || {};
+      setPreferences(prefs);
+
+      setIsUnlocked(true);
+      setMustResetVaultKey(false);
+      setVaultPromptForced(false);
+      startAutoLock(prefs);
+
+      return { recoveryKey: result.recoveryKey };
+    } catch (err) {
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [startAutoLock]);
+
+  // ------------------------------------------------------------------
+  // View recovery key (vault must be unlocked, DEK available)
+  // ------------------------------------------------------------------
+  const viewRecoveryKey = useCallback(async () => {
+    const { data: resp } = await api.get('/encryption.php?action=recovery-key-encrypted');
+    const { recovery_key_encrypted } = apiData({ data: resp });
+    return crypto.viewRecoveryKey(recovery_key_encrypted);
+  }, []);
+
+  // ------------------------------------------------------------------
+  // Encrypt / Decrypt convenience wrappers
+  // ------------------------------------------------------------------
+  const encrypt = useCallback(async (data) => {
+    if (!crypto.isUnlocked()) throw new Error('Vault is locked.');
+    return crypto.encryptEntry(data, crypto._getDekForContext());
+  }, []);
+
+  const decrypt = useCallback(async (blob) => {
+    if (!crypto.isUnlocked()) throw new Error('Vault is locked.');
+    return crypto.decryptEntry(blob, crypto._getDekForContext());
+  }, []);
+
+  // ------------------------------------------------------------------
+  // Skip / Force vault prompt
+  // ------------------------------------------------------------------
+  const skipVault = useCallback(() => {
+    setVaultPromptForced(false);
+  }, []);
+
+  const promptVault = useCallback(() => {
+    setVaultPromptForced(true);
+  }, []);
+
+  // ------------------------------------------------------------------
+  // On mount: check if vault key exists
   // ------------------------------------------------------------------
   useEffect(() => {
     if (!user) {
-      setLoading(false);
+      setIsLoading(false);
       return;
     }
 
     let cancelled = false;
 
     const init = async () => {
-      setLoading(true);
+      setIsLoading(true);
       try {
-        // Check for an existing valid data token in sessionStorage
-        // ONLY trust sessionStorage token — never auto-unlock from cookies alone
-        const existingToken = sessionStorage.getItem('pv_data_token');
-        const existingExpiry = sessionStorage.getItem('pv_data_token_expiry');
-        const hasValidToken =
-          existingToken &&
-          existingExpiry &&
-          Number(existingExpiry) * 1000 > Date.now();
-
-        // Fetch encryption status from the server
-        const { data } = await api.get('/encryption.php?action=status');
+        const { data } = await api.get('/encryption.php?action=key-material');
         if (cancelled) return;
-
-        const status = apiData({ data });
-        setVaultKeyExists(isTruthy(status.has_vault_key));
-        setSessionPreference(status.vault_session_preference || 'session');
-        setMustChangeVaultKey(isTruthy(status.must_change_vault_key));
-        setAdminVaultMessage(status.admin_action_message || null);
-
-        if (hasValidToken) {
-          setVaultUnlocked(true);
-          scheduleAutoLock(
-            Number(existingExpiry),
-            status.vault_session_preference || 'session',
-          );
-        } else {
-          // Stale / missing token
-          clearToken();
-          setVaultUnlocked(false);
+        const keyMaterial = apiData({ data });
+        setVaultKeyExists(isTruthy(keyMaterial.has_vault_key));
+        if (isTruthy(keyMaterial.must_reset_vault_key)) {
+          setMustResetVaultKey(true);
         }
       } catch {
-        // On failure, leave vaultKeyExists as false — modal will show setup mode
-        if (!cancelled) {
-          setVaultKeyExists(false);
-        }
+        if (!cancelled) setVaultKeyExists(false);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     };
 
     init();
-
     return () => {
       cancelled = true;
-      if (autoLockTimerRef.current) {
-        clearTimeout(autoLockTimerRef.current);
-      }
+      clearAutoLock();
     };
-  }, [user, clearToken, scheduleAutoLock]);
+  }, [user, clearAutoLock]);
 
   // ------------------------------------------------------------------
-  // setupVaultKey
+  // Cleanup on unmount
   // ------------------------------------------------------------------
-  const setupVaultKey = useCallback(
-    async (vaultKey, confirmKey) => {
-      const { data } = await api.post('/encryption.php?action=setup', {
-        vault_key: vaultKey,
-        confirm_vault_key: confirmKey,
-      });
-
-      const result = apiData({ data });
-      storeToken(result.data_token, result.expires_at);
-      setVaultUnlocked(true);
-      setVaultKeyExists(true);
-      setVaultPromptForced(false);
-            scheduleAutoLock(result.expires_at, sessionPreference);
-
-      return result;
-    },
-    [storeToken, scheduleAutoLock, sessionPreference],
-  );
-
-  // ------------------------------------------------------------------
-  // unlockVault
-  // ------------------------------------------------------------------
-  const unlockVault = useCallback(
-    async (vaultKey) => {
-      const { data } = await api.post('/encryption.php?action=unlock', {
-        vault_key: vaultKey,
-      });
-
-      const result = apiData({ data });
-      storeToken(result.data_token, result.expires_at);
-      setVaultUnlocked(true);
-      setVaultPromptForced(false);
-
-      const pref = result.session_preference || sessionPreference;
-      setSessionPreference(pref);
-      scheduleAutoLock(result.expires_at, pref);
-
-      // If server backfilled a recovery key, surface it
-      if (result.recovery_key) {
-        setBackfilledRecoveryKey(result.recovery_key);
-      }
-
-      return result;
-    },
-    [storeToken, scheduleAutoLock, sessionPreference],
-  );
-
-  // ------------------------------------------------------------------
-  // clearBackfilledRecoveryKey
-  // ------------------------------------------------------------------
-  const clearBackfilledRecoveryKey = useCallback(() => {
-    setBackfilledRecoveryKey(null);
-  }, []);
-
-  // ------------------------------------------------------------------
-  // changeVaultKey (using current vault key)
-  // ------------------------------------------------------------------
-  const changeVaultKey = useCallback(
-    async (oldKey, newKey, confirmKey) => {
-      const { data } = await api.post('/encryption.php?action=change', {
-        method: 'vault_key',
-        old_vault_key: oldKey,
-        new_vault_key: newKey,
-        confirm_new_vault_key: confirmKey,
-      });
-
-      const result = apiData({ data });
-      storeToken(result.data_token, result.expires_at);
-      scheduleAutoLock(result.expires_at, sessionPreference);
-      setMustChangeVaultKey(false);
-      setAdminVaultMessage(null);
-
-      return result;
-    },
-    [storeToken, scheduleAutoLock, sessionPreference],
-  );
-
-  // ------------------------------------------------------------------
-  // changeVaultKeyWithRecovery
-  // ------------------------------------------------------------------
-  const changeVaultKeyWithRecovery = useCallback(
-    async (recoveryKey, newKey, confirmKey) => {
-      const { data } = await api.post('/encryption.php?action=change', {
-        method: 'recovery',
-        recovery_key: recoveryKey,
-        new_vault_key: newKey,
-        confirm_new_vault_key: confirmKey,
-      });
-
-      const result = apiData({ data });
-      storeToken(result.data_token, result.expires_at);
-      scheduleAutoLock(result.expires_at, sessionPreference);
-      setMustChangeVaultKey(false);
-      setAdminVaultMessage(null);
-
-      return result;
-    },
-    [storeToken, scheduleAutoLock, sessionPreference],
-  );
-
-  // ------------------------------------------------------------------
-  // viewRecoveryKey
-  // ------------------------------------------------------------------
-  const viewRecoveryKey = useCallback(async () => {
-    const { data } = await api.post('/encryption.php?action=view-recovery-key');
-    const result = apiData({ data });
-    return result.recovery_key;
-  }, []);
-
-  // ------------------------------------------------------------------
-  // regenerateRecoveryKey
-  // ------------------------------------------------------------------
-  const regenerateRecoveryKey = useCallback(async () => {
-    const { data } = await api.post('/encryption.php?action=regenerate-recovery-key');
-    const result = apiData({ data });
-    return result.recovery_key;
-  }, []);
-
-  // ------------------------------------------------------------------
-  // skipVault
-  // ------------------------------------------------------------------
-  const skipVault = useCallback(() => {
-    setVaultSkipped(true);
-    setVaultPromptForced(false);
-  }, []);
-
-  // ------------------------------------------------------------------
-  // promptVault — force-open the vault modal
-  // ------------------------------------------------------------------
-  const promptVault = useCallback(async () => {
-    setVaultSkipped(false);
-    setVaultUnlocked(false);
-    try {
-      const { data } = await api.get('/encryption.php?action=status');
-      const status = apiData({ data });
-      setVaultKeyExists(isTruthy(status.has_vault_key));
-    } catch {
-      setVaultKeyExists(false);
-    }
-    // Always force the modal open, even if state didn't change
-    setVaultPromptForced(true);
-  }, []);
-
-  // ------------------------------------------------------------------
-  // lockVault
-  // ------------------------------------------------------------------
-  const lockVault = useCallback(() => {
-    clearToken();
-    setVaultUnlocked(false);
-    
-    // Clear HttpOnly cookie on server
-    api.post('/encryption.php?action=lock').catch(() => {});
-
-    if (autoLockTimerRef.current) {
-      clearTimeout(autoLockTimerRef.current);
-      autoLockTimerRef.current = null;
-    }
-  }, [clearToken]);
-
-  // ------------------------------------------------------------------
-  // updatePreference
-  // ------------------------------------------------------------------
-  const updatePreference = useCallback(
-    async (pref) => {
-      await api.put('/encryption.php?action=preference', {
-        preference: pref,
-      });
-      setSessionPreference(pref);
-
-      // Re-schedule auto-lock if there is an active token
-      const expiry = sessionStorage.getItem('pv_data_token_expiry');
-      if (expiry) {
-        scheduleAutoLock(Number(expiry), pref);
-      }
-    },
-    [scheduleAutoLock],
-  );
-
-  // ------------------------------------------------------------------
-  // getDataToken
-  // ------------------------------------------------------------------
-  const getDataToken = useCallback(() => {
-    return sessionStorage.getItem('pv_data_token');
-  }, []);
+  useEffect(() => {
+    return () => {
+      clearAutoLock();
+    };
+  }, [clearAutoLock]);
 
   // ------------------------------------------------------------------
   // Context value
   // ------------------------------------------------------------------
   const value = {
     // State
-    vaultUnlocked,
-    vaultSkipped,
+    isUnlocked,
+    isLoading,
     vaultKeyExists,
     vaultPromptForced,
-    mustChangeVaultKey,
-    adminVaultMessage,
-    sessionPreference,
-    loading,
-    backfilledRecoveryKey,
+    mustResetVaultKey,
+    mustResetPassword,
+    preferences,
+    pageNotices,
 
     // Methods
-    setupVaultKey,
-    unlockVault,
+    unlock,
+    lock,
+    setup,
     changeVaultKey,
-    changeVaultKeyWithRecovery,
+    recoverWithRecoveryKey,
     viewRecoveryKey,
-    regenerateRecoveryKey,
+    encrypt,
+    decrypt,
     skipVault,
     promptVault,
-    lockVault,
-    updatePreference,
-    getDataToken,
-    clearBackfilledRecoveryKey,
   };
 
   return (

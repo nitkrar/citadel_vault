@@ -59,13 +59,6 @@ export default function ForgotPasswordPage() {
       if (data.token) {
         localStorage.setItem('pv_token', data.token);
       }
-      if (data.data_token) {
-        sessionStorage.setItem('pv_data_token', data.data_token);
-        if (data.expires_at) {
-          sessionStorage.setItem('pv_data_token_expiry', String(data.expires_at));
-        }
-      }
-
       // Show new recovery key
       setNewRecoveryKey(data.recovery_key);
     } catch (err) {

@@ -44,8 +44,7 @@ export function AuthProvider({ children }) {
 
   const login = async (username, password) => {
     // Clear any stale vault session from previous login
-    sessionStorage.removeItem('pv_data_token');
-    sessionStorage.removeItem('pv_data_token_expiry');
+    // No server-side data tokens in client-side encryption mode
 
     const res = await api.post('/auth.php?action=login', { username, password });
     const { token: newToken, user: newUser } = res.data.data;
@@ -59,8 +58,7 @@ export function AuthProvider({ children }) {
   };
 
   const loginWithPasskey = async () => {
-    sessionStorage.removeItem('pv_data_token');
-    sessionStorage.removeItem('pv_data_token_expiry');
+    // No server-side data tokens in client-side encryption mode
     const result = await authenticateWithPasskey(api);
     const { token: newToken, user: newUser } = result;
     localStorage.setItem('pv_token', newToken);
@@ -87,8 +85,7 @@ export function AuthProvider({ children }) {
 
   const logout = () => {
     localStorage.removeItem('pv_token');
-    sessionStorage.removeItem('pv_data_token');
-    sessionStorage.removeItem('pv_data_token_expiry');
+    // No server-side data tokens in client-side encryption mode
     // Clear all form drafts
     Object.keys(localStorage).forEach(key => {
       if (key.startsWith('pv_draft_')) localStorage.removeItem(key);
