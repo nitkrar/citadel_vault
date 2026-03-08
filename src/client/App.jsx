@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { EncryptionProvider } from './contexts/EncryptionContext';
 import Modal from './components/Modal';
@@ -129,8 +129,12 @@ function ForceChangePasswordModal() {
 }
 
 // --- AppRoutes ---
+const PUBLIC_PATHS = ['/home', '/help', '/dev-guide', '/features', '/login', '/register', '/forgot-password', '/verify-email'];
+
 function AppRoutes() {
   const { user } = useAuth();
+  const location = useLocation();
+  const isPublicPage = PUBLIC_PATHS.includes(location.pathname);
 
   return (
     <>
@@ -187,9 +191,13 @@ function AppRoutes() {
         <Route path="*" element={<Navigate to={user ? '/' : '/home'} replace />} />
       </Routes>
 
-      {/* Global modals */}
-      {user && <ForceChangePasswordModal />}
-      {user && <EncryptionKeyModal />}
+      {/* Global modals — only on protected pages */}
+      {user && !isPublicPage && (
+        <>
+          <ForceChangePasswordModal />
+          <EncryptionKeyModal />
+        </>
+      )}
     </>
   );
 }

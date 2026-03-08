@@ -264,7 +264,7 @@ if ($method === 'POST' && $action === 'unlock') {
         } catch (Exception $e) {
             // Lockout columns may not exist — non-fatal
         }
-        Response::error('Invalid vault key.', 401);
+        Response::error('Invalid vault key.', 400);
     }
 
     // --- Successful unlock: reset vault lockout counters ---
@@ -355,7 +355,7 @@ if ($method === 'POST' && $action === 'change') {
         $verifiedDek = Encryption::unwrapDek($row['encrypted_dek'], $oldWrappingKey);
 
         if ($verifiedDek === null) {
-            Response::error('Invalid current vault key.', 401);
+            Response::error('Invalid current vault key.', 400);
         }
     } elseif ($changeMethod === 'recovery') {
         $recoveryKey = $body['recovery_key'] ?? '';
@@ -364,7 +364,7 @@ if ($method === 'POST' && $action === 'change') {
         $storedRecoveryKey = Encryption::decryptRecoveryKey($row['recovery_key_encrypted'], $dek);
 
         if ($storedRecoveryKey === null || !hash_equals($storedRecoveryKey, $recoveryKey)) {
-            Response::error('Invalid recovery key.', 401);
+            Response::error('Invalid recovery key.', 400);
         }
 
         // Use recovery salt + key to unwrap DEK as additional verification
@@ -372,7 +372,7 @@ if ($method === 'POST' && $action === 'change') {
         $verifiedDek = Encryption::unwrapDek($row['encrypted_dek_recovery'], $recoveryWrappingKey);
 
         if ($verifiedDek === null) {
-            Response::error('Recovery key verification failed.', 401);
+            Response::error('Recovery key verification failed.', 400);
         }
 
         // Audit log for recovery key usage
