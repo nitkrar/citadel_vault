@@ -97,11 +97,21 @@ class Auth {
      */
     private static function getBearerToken(): ?string {
         $headers = null;
-        if (isset($_SERVER['Authorization'])) {
-            $headers = trim($_SERVER['Authorization']);
-        } elseif (isset($_SERVER['HTTP_AUTHORIZATION'])) {
+
+        // Try standard CGI/FastCGI variable
+        if (isset($_SERVER['HTTP_AUTHORIZATION'])) {
             $headers = trim($_SERVER['HTTP_AUTHORIZATION']);
-        } elseif (function_exists('apache_request_headers')) {
+        }
+        // Try redirect variant (set by .htaccess RewriteRule with [E=])
+        elseif (isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
+            $headers = trim($_SERVER['REDIRECT_HTTP_AUTHORIZATION']);
+        }
+        // Try raw key (some server configs)
+        elseif (isset($_SERVER['Authorization'])) {
+            $headers = trim($_SERVER['Authorization']);
+        }
+        // Try Apache-specific function
+        elseif (function_exists('apache_request_headers')) {
             $requestHeaders = apache_request_headers();
             $requestHeaders = array_combine(
                 array_map('ucwords', array_keys($requestHeaders)),
@@ -109,6 +119,15 @@ class Auth {
             );
             if (isset($requestHeaders['Authorization'])) {
                 $headers = trim($requestHeaders['Authorization']);
+            }
+        }
+        // Last resort: getallheaders() (available in PHP-FPM since PHP 7.0+)
+        elseif (function_exists('getallheaders')) {
+            foreach (getallheaders() as $name => $value) {
+                if (strtolower($name) === 'authorization') {
+                    $headers = trim($value);
+                    break;
+                }
             }
         }
 
