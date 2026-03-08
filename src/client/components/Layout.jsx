@@ -1,9 +1,11 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { isTruthy } from '../lib/checks';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useEncryption } from '../contexts/EncryptionContext';
 import PageNotice from './PageNotice';
+import ShortcutOverlay from './ShortcutOverlay';
+import useKeyboardShortcuts from '../hooks/useKeyboardShortcuts';
 import { isWebAuthnSupported, registerPasskey } from './WebAuthnLogin';
 import api from '../api/client';
 import {
@@ -27,6 +29,7 @@ import {
   Sun,
   Moon,
   HelpCircle,
+  Keyboard,
 } from 'lucide-react';
 
 // --- Hide Amounts Context ---
@@ -129,6 +132,19 @@ export default function Layout() {
   const toggleHideAmounts = () => setHideAmounts((prev) => !prev);
   const toggleDarkMode = () => setDarkMode((prev) => !prev);
 
+  // ── Keyboard shortcuts ──────────────────────────────────────────
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const navigate = useNavigate();
+
+  const shortcutCallbacks = useMemo(() => ({
+    onLock: () => { if (isUnlocked) lockVault(); },
+    onUnlock: () => { if (!isUnlocked && isTruthy(vaultKeyExists)) promptVault(); },
+    onSearch: () => { if (isUnlocked) navigate('/vault'); },
+    onToggleHelp: () => setShowShortcuts(prev => !prev),
+  }), [isUnlocked, vaultKeyExists, lockVault, promptVault, navigate]);
+
+  const { isDesktop, settings: shortcutSettings } = useKeyboardShortcuts(shortcutCallbacks);
+
   const location = useLocation();
   const appName = import.meta.env.VITE_APP_NAME || 'Personal Vault';
   // Pages that don't need the vault locked banner
@@ -217,6 +233,14 @@ export default function Layout() {
               <a href="/help" target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <HelpCircle size={18} /> Help &amp; FAQ
               </a>
+              {isDesktop && (
+                <button onClick={() => setShowShortcuts(true)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none', cursor: 'pointer', padding: '6px 12px', fontSize: 14, color: 'inherit', width: '100%', borderRadius: 6 }}
+                  className="nav-link-style">
+                  <Keyboard size={18} /> Shortcuts
+                  <kbd style={{ marginLeft: 'auto', fontSize: 10, opacity: 0.5, background: 'rgba(255,255,255,0.1)', borderRadius: 3, padding: '1px 5px' }}>Ctrl+/</kbd>
+                </button>
+              )}
             </div>
           </nav>
 
@@ -306,6 +330,10 @@ export default function Layout() {
           <PageNotice />
           <Outlet />
         </main>
+
+        {showShortcuts && (
+          <ShortcutOverlay onClose={() => setShowShortcuts(false)} settings={shortcutSettings} />
+        )}
       </div>
     </HideAmountsContext.Provider>
   );

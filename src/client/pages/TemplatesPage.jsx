@@ -142,11 +142,9 @@ export default function TemplatesPage() {
                   <td>{fields.length} fields</td>
                   <td>
                     <div className="td-actions">
+                      <button className="btn btn-ghost btn-sm" onClick={() => openEdit(t)}><Edit2 size={14} /></button>
                       {t.owner_id && (
-                        <>
-                          <button className="btn btn-ghost btn-sm" onClick={() => openEdit(t)}><Edit2 size={14} /></button>
-                          <button className="btn btn-ghost btn-sm" onClick={() => handleRequestPromotion(t.id)} title="Request promotion to global"><ArrowUp size={14} /></button>
-                        </>
+                        <button className="btn btn-ghost btn-sm" onClick={() => handleRequestPromotion(t.id)} title="Request promotion to global"><ArrowUp size={14} /></button>
                       )}
                     </div>
                   </td>

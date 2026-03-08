@@ -1,14 +1,29 @@
 import { useState, useCallback } from 'react';
 import {
-  Shield, Key, Eye, EyeOff, Lock, Clock, Fingerprint, AlertTriangle,
-  Copy, Check, Download, Trash2, Plus, RefreshCw,
+  Shield, Key, Eye, EyeOff, Lock, Clock,
+  Copy, Check, Download, ChevronDown, ChevronRight, KeyRound, Plus,
 } from 'lucide-react';
 import api from '../api/client';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { useAuth } from '../contexts/AuthContext';
 import useVaultData from '../hooks/useVaultData';
-import { apiData, isTruthy } from '../lib/checks';
+import { apiData } from '../lib/checks';
 import { getUserPreference, VAULT_KEY_MINIMUMS } from '../lib/defaults';
+
+/** Collapsible section */
+function Section({ icon: Icon, title, defaultOpen = false, danger = false, children }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="card mb-4" style={{ padding: 0, ...(danger ? { borderColor: '#fecaca' } : {}) }}>
+      <button type="button" onClick={() => setOpen(!open)}
+        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '16px 20px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', fontSize: 16, fontWeight: 600, color: danger ? '#dc2626' : 'inherit' }}>
+        {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+        <Icon size={18} /> {title}
+      </button>
+      {open && <div style={{ padding: '0 20px 20px' }}>{children}</div>}
+    </div>
+  );
+}
 
 export default function SecurityPage() {
   const { isUnlocked, preferences, changeVaultKey, viewRecoveryKey, lock } = useEncryption();
@@ -23,10 +38,25 @@ export default function SecurityPage() {
   const [changeError, setChangeError] = useState('');
   const [changeSuccess, setChangeSuccess] = useState('');
 
+  // Key type change
+  const [newKeyType, setNewKeyType] = useState(getUserPreference(preferences, 'vault_key_type'));
+  const [savingKeyType, setSavingKeyType] = useState(false);
+
+  const handleChangeKeyType = async (type) => {
+    setSavingKeyType(true);
+    try {
+      await api.put('/preferences.php', { vault_key_type: type });
+      setNewKeyType(type);
+    } catch {}
+    setSavingKeyType(false);
+  };
+
   const handleChangeKey = async (e) => {
     e.preventDefault();
     setChangeError(''); setChangeSuccess('');
-    if (!currentKey || !newKey) { setChangeError('Both fields are required.'); return; }
+    const minLen = VAULT_KEY_MINIMUMS[newKeyType] || 8;
+    if (!currentKey) { setChangeError('Current key is required.'); return; }
+    if (newKey.length < minLen) { setChangeError(`New key must be at least ${minLen} characters.`); return; }
     if (newKey !== confirmKey) { setChangeError('New keys do not match.'); return; }
     setChangingKey(true);
     try {
@@ -38,6 +68,43 @@ export default function SecurityPage() {
       setChangeError(err.message || 'Failed to change vault key.');
     } finally {
       setChangingKey(false);
+    }
+  };
+
+  // ── RSA Keys ───────────────────────────────────────────────────
+  const [hasRsaKeys, setHasRsaKeys] = useState(null); // null = loading
+  const [generatingRsa, setGeneratingRsa] = useState(false);
+
+  const checkRsaKeys = useCallback(async () => {
+    try {
+      const { data: resp } = await api.get('/encryption.php?action=public-key');
+      const d = apiData({ data: resp });
+      return !!d?.public_key;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const { data: rsaKeysExist } = useVaultData(checkRsaKeys, false);
+
+  const handleGenerateRsa = async () => {
+    setGeneratingRsa(true);
+    try {
+      const { generateKeyPair, exportPublicKey, encryptPrivateKey, _getDekForContext } = await import('../lib/crypto');
+      const dek = _getDekForContext();
+      const keyPair = await generateKeyPair();
+      const publicKey = await exportPublicKey(keyPair.publicKey);
+      const encryptedPrivateKey = await encryptPrivateKey(keyPair.privateKey, dek);
+
+      await api.post('/encryption.php?action=setup-rsa', {
+        public_key: publicKey,
+        encrypted_private_key: encryptedPrivateKey,
+      });
+      setHasRsaKeys(true);
+    } catch (err) {
+      alert(err.response?.data?.error || err.message || 'Failed to generate RSA keys.');
+    } finally {
+      setGeneratingRsa(false);
     }
   };
 
@@ -66,16 +133,18 @@ export default function SecurityPage() {
     setTimeout(() => setCopiedRecovery(false), 2000);
   };
 
+  // ── Local prefs (shared by auto-lock & privacy) ─────────────────
+  const [localPrefs, setLocalPrefs] = useState({});
+  const getLocalPref = (key) => localPrefs[key] ?? getUserPreference(preferences, key);
+
   // ── Privacy: IP logging ──────────────────────────────────────────
-  const currentIpMode = getUserPreference(preferences, 'audit_ip_mode');
+  const currentIpMode = getLocalPref('audit_ip_mode');
   const [savingIpMode, setSavingIpMode] = useState(false);
 
   const handleIpModeChange = async (mode) => {
+    setLocalPrefs(prev => ({ ...prev, audit_ip_mode: mode }));
     setSavingIpMode(true);
-    try {
-      await api.put('/preferences.php', { audit_ip_mode: mode });
-      // preferences will be stale — user needs to re-unlock for fresh state
-    } catch {}
+    try { await api.put('/preferences.php', { audit_ip_mode: mode }); } catch {}
     setSavingIpMode(false);
   };
 
@@ -86,10 +155,24 @@ export default function SecurityPage() {
   }, []);
 
   const { data: auditLog, loading: auditLoading } = useVaultData(fetchAudit, []);
+  const autoLockMode = getLocalPref('auto_lock_mode');
+  const autoLockTimeout = getLocalPref('auto_lock_timeout');
+  const [savingAutoLock, setSavingAutoLock] = useState(false);
 
-  // ── Auto-lock settings ───────────────────────────────────────────
-  const autoLockMode = getUserPreference(preferences, 'auto_lock_mode');
-  const autoLockTimeout = getUserPreference(preferences, 'auto_lock_timeout');
+  const handleAutoLockChange = async (key, value) => {
+    setLocalPrefs(prev => ({ ...prev, [key]: value }));
+    // Switching to lock_on_refresh: clear cached vault key so next refresh locks
+    if (key === 'vault_persist_session' && value === 'lock_on_refresh') {
+      sessionStorage.removeItem('pv_session_salt');
+      sessionStorage.removeItem('pv_session_edek');
+      sessionStorage.removeItem('pv_session_vk');
+    }
+    // Mark that user has customized lock settings (hides default hint on lock screen)
+    try { localStorage.setItem('pv_lock_customized', '1'); } catch {}
+    setSavingAutoLock(true);
+    try { await api.put('/preferences.php', { [key]: value }); } catch {}
+    setSavingAutoLock(false);
+  };
 
   if (!isUnlocked) {
     return (
@@ -99,45 +182,165 @@ export default function SecurityPage() {
     );
   }
 
+  const currentKeyType = newKeyType || getUserPreference(preferences, 'vault_key_type');
+
   return (
     <div className="page-content">
-      <div className="page-header">
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div><h1 className="page-title">Security</h1><p className="page-subtitle">Vault key, recovery, privacy, and audit log</p></div>
+        <button className="btn btn-secondary btn-sm" onClick={() => lock()} style={{ flexShrink: 0 }}>
+          <Lock size={14} /> Lock Vault
+        </button>
       </div>
 
-      {/* Vault Key */}
-      <div className="card mb-4" style={{ padding: 20 }}>
-        <h3 className="flex items-center gap-2 mb-3"><Key size={18} /> Vault Key</h3>
-        <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 12 }}>
-          Key type: <strong>{getUserPreference(preferences, 'vault_key_type')}</strong> | Auto-lock: <strong>{autoLockMode}</strong> ({autoLockTimeout}s timeout)
-        </p>
-        <button className="btn btn-secondary" onClick={() => setShowChangeKey(!showChangeKey)}>
-          <Key size={14} /> Change Vault Key
-        </button>
-        {showChangeKey && (
-          <form onSubmit={handleChangeKey} style={{ marginTop: 16, maxWidth: 400 }}>
+      {/* ── Vault Key ──────────────────────────────────────────── */}
+      <Section icon={Key} title="Vault Key">
+        {/* Auto-lock settings */}
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ display: 'block', marginBottom: 6, fontSize: 13, fontWeight: 500 }}>Auto-Lock Mode</label>
+          <div className="flex gap-2 mb-2">
+            {[
+              { value: 'timed', label: 'Timed' },
+              { value: 'session', label: 'Session' },
+              { value: 'manual', label: 'Manual' },
+            ].map(opt => (
+              <button key={opt.value}
+                className={`btn btn-sm ${autoLockMode === opt.value ? 'btn-primary' : 'btn-ghost'}`}
+                onClick={() => handleAutoLockChange('auto_lock_mode', opt.value)}
+                disabled={savingAutoLock}>
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+            {autoLockMode === 'timed' && 'Vault locks automatically after a period of inactivity. Best balance of security and convenience.'}
+            {autoLockMode === 'session' && 'Vault stays unlocked while you use it, but locks when you close the tab or browser. No inactivity timer.'}
+            {autoLockMode === 'manual' && 'Vault never locks on its own. You must click "Lock Vault" yourself. Least secure — use only on trusted devices.'}
+          </p>
+          {autoLockMode === 'timed' && (
+            <div className="flex items-center gap-2" style={{ marginTop: 8 }}>
+              <label style={{ fontSize: 13 }}>Timeout:</label>
+              <select className="form-control" style={{ width: 160 }} value={autoLockTimeout}
+                onChange={e => handleAutoLockChange('auto_lock_timeout', e.target.value)} disabled={savingAutoLock}>
+                <option value="300">5 minutes</option>
+                <option value="900">15 minutes</option>
+                <option value="1800">30 minutes</option>
+                <option value="3600">1 hour</option>
+                <option value="7200">2 hours</option>
+                <option value="28800">8 hours</option>
+              </select>
+            </div>
+          )}
+        </div>
+
+        {/* Session persistence */}
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ display: 'block', marginBottom: 6, fontSize: 13, fontWeight: 500 }}>On Page Refresh</label>
+          <div className="flex gap-2 mb-2">
+            {[
+              { value: 'lock_on_refresh', label: 'Lock vault' },
+              { value: 'persist_in_tab', label: 'Stay unlocked in tab' },
+            ].map(opt => (
+              <button key={opt.value}
+                className={`btn btn-sm ${getLocalPref('vault_persist_session') === opt.value ? 'btn-primary' : 'btn-ghost'}`}
+                onClick={() => handleAutoLockChange('vault_persist_session', opt.value)}
+                disabled={savingAutoLock}>
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            {getLocalPref('vault_persist_session') === 'persist_in_tab'
+              ? 'Vault key is cached in this tab\'s session storage. Survives page refreshes but cleared when the tab closes.'
+              : 'Vault key is held in memory only. Refreshing or navigating away requires re-entering your vault key.'}
+          </p>
+        </div>
+
+        {/* Combined summary */}
+        <div style={{ padding: '10px 14px', background: 'var(--bg-secondary, #f3f4f6)', borderRadius: 8, marginBottom: 16, fontSize: 13, color: 'var(--text-secondary, #4b5563)' }}>
+          <strong style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-muted)' }}>In practice</strong>
+          <p style={{ margin: '4px 0 0' }}>
+            {autoLockMode === 'timed' && getLocalPref('vault_persist_session') === 'lock_on_refresh'
+              && `Your vault locks after ${({'300':'5 min','900':'15 min','1800':'30 min','3600':'1 hour','7200':'2 hours','28800':'8 hours'})[autoLockTimeout] || autoLockTimeout + 's'} of inactivity and every time you refresh the page. You'll enter your vault key frequently.`}
+            {autoLockMode === 'timed' && getLocalPref('vault_persist_session') === 'persist_in_tab'
+              && `Your vault locks after ${({'300':'5 min','900':'15 min','1800':'30 min','3600':'1 hour','7200':'2 hours','28800':'8 hours'})[autoLockTimeout] || autoLockTimeout + 's'} of inactivity but survives page refreshes. Closing the tab locks it.`}
+            {autoLockMode === 'session' && getLocalPref('vault_persist_session') === 'lock_on_refresh'
+              && 'Your vault locks when you refresh the page or close the tab. No inactivity timer, but refreshes require re-entry.'}
+            {autoLockMode === 'session' && getLocalPref('vault_persist_session') === 'persist_in_tab'
+              && 'Your vault stays unlocked for the entire browser tab session. Only closing the tab or clicking "Lock Vault" locks it.'}
+            {autoLockMode === 'manual' && getLocalPref('vault_persist_session') === 'lock_on_refresh'
+              && 'No auto-lock timer, but refreshing the page still locks the vault. You must re-enter your key after each refresh.'}
+            {autoLockMode === 'manual' && getLocalPref('vault_persist_session') === 'persist_in_tab'
+              && 'Your vault stays unlocked until you manually click "Lock Vault" or close the tab. Maximum convenience, least secure.'}
+          </p>
+        </div>
+
+        {/* Key type selector */}
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ display: 'block', marginBottom: 6, fontSize: 13, fontWeight: 500 }}>Key Type</label>
+          <div className="flex gap-2">
+            {Object.entries({ numeric: 'PIN', alphanumeric: 'Password', passphrase: 'Passphrase' }).map(([type, label]) => (
+              <button key={type}
+                className={`btn btn-sm ${currentKeyType === type ? 'btn-primary' : 'btn-ghost'}`}
+                onClick={() => handleChangeKeyType(type)}
+                disabled={savingKeyType}>
+                {label} ({VAULT_KEY_MINIMUMS[type]}+ chars)
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Change key */}
+        {changeSuccess && <div className="alert alert-success mb-3"><Check size={14} /> {changeSuccess}</div>}
+
+        {!showChangeKey ? (
+          <button className="btn btn-secondary" onClick={() => { setShowChangeKey(true); setChangeError(''); setChangeSuccess(''); }}>
+            <Key size={14} /> Change Vault Key
+          </button>
+        ) : (
+          <form onSubmit={handleChangeKey} style={{ maxWidth: 400 }}>
             {changeError && <div className="alert alert-danger mb-3">{changeError}</div>}
-            {changeSuccess && <div className="alert alert-success mb-3">{changeSuccess}</div>}
             <div className="form-group">
               <label className="form-label">Current Vault Key</label>
-              <input className="form-control" type="text" value={currentKey} onChange={e => setCurrentKey(e.target.value)} autoComplete="off" />
+              <input className="form-control" type="text" value={currentKey} onChange={e => setCurrentKey(e.target.value)} autoComplete="off" autoFocus />
             </div>
             <div className="form-group">
-              <label className="form-label">New Vault Key</label>
+              <label className="form-label">New Vault Key ({VAULT_KEY_MINIMUMS[currentKeyType] || 8}+ characters)</label>
               <input className="form-control" type="text" value={newKey} onChange={e => setNewKey(e.target.value)} autoComplete="off" />
             </div>
             <div className="form-group">
               <label className="form-label">Confirm New Key</label>
               <input className="form-control" type="text" value={confirmKey} onChange={e => setConfirmKey(e.target.value)} autoComplete="off" />
             </div>
-            <button type="submit" className="btn btn-primary" disabled={changingKey}>{changingKey ? 'Changing...' : 'Change Key'}</button>
+            <div className="flex gap-2">
+              <button type="submit" className="btn btn-primary" disabled={changingKey}>{changingKey ? 'Changing...' : 'Change Key'}</button>
+              <button type="button" className="btn btn-ghost" onClick={() => { setShowChangeKey(false); setCurrentKey(''); setNewKey(''); setConfirmKey(''); setChangeError(''); }}>Cancel</button>
+            </div>
           </form>
         )}
-      </div>
+      </Section>
 
-      {/* Recovery Key */}
-      <div className="card mb-4" style={{ padding: 20 }}>
-        <h3 className="flex items-center gap-2 mb-3"><Shield size={18} /> Recovery Key</h3>
+      {/* ── RSA Keys (Sharing) ─────────────────────────────────── */}
+      <Section icon={KeyRound} title="Sharing Keys (RSA)">
+        {rsaKeysExist ? (
+          <div className="flex items-center gap-2">
+            <Check size={16} style={{ color: '#22c55e' }} />
+            <span style={{ fontSize: 14 }}>RSA key pair is configured. You can share and receive entries.</span>
+          </div>
+        ) : (
+          <div>
+            <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 12 }}>
+              RSA keys are required for sharing entries with other users. Your account does not have them yet — this can happen if the account was created from the backend.
+            </p>
+            <button className="btn btn-primary" onClick={handleGenerateRsa} disabled={generatingRsa}>
+              <Plus size={14} /> {generatingRsa ? 'Generating...' : 'Generate RSA Keys'}
+            </button>
+          </div>
+        )}
+      </Section>
+
+      {/* ── Recovery Key ───────────────────────────────────────── */}
+      <Section icon={Shield} title="Recovery Key">
         <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 12 }}>
           Your recovery key is the only way to regain access if you forget your vault key.
         </p>
@@ -154,11 +357,10 @@ export default function SecurityPage() {
             <Eye size={14} /> {loadingRecovery ? 'Decrypting...' : 'View Recovery Key'}
           </button>
         )}
-      </div>
+      </Section>
 
-      {/* Privacy */}
-      <div className="card mb-4" style={{ padding: 20 }}>
-        <h3 className="flex items-center gap-2 mb-3"><EyeOff size={18} /> Privacy</h3>
+      {/* ── Privacy ────────────────────────────────────────────── */}
+      <Section icon={EyeOff} title="Privacy">
         <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 12 }}>
           Security actions are logged with a one-way hash of your IP address. You can disable IP logging entirely.
         </p>
@@ -172,33 +374,27 @@ export default function SecurityPage() {
             No IP logging
           </button>
         </div>
-      </div>
+      </Section>
 
-      {/* Security Log */}
-      <div className="card mb-4" style={{ padding: 20 }}>
-        <h3 className="flex items-center gap-2 mb-3"><Clock size={18} /> Security Log</h3>
+      {/* ── Security Log ───────────────────────────────────────── */}
+      <Section icon={Clock} title="Security Log">
         {auditLoading ? <div className="spinner" /> :
           auditLog.length === 0 ? <p className="text-muted">No security events recorded.</p> : (
-            <div className="table-wrapper"><table>
-              <thead><tr><th>Action</th><th>Date</th></tr></thead>
-              <tbody>{auditLog.slice(0, 20).map((entry, i) => (
-                <tr key={i}>
-                  <td>{entry.action?.replace(/_/g, ' ')}</td>
-                  <td style={{ fontSize: 13 }}>{new Date(entry.created_at).toLocaleString()}</td>
-                </tr>
-              ))}</tbody>
-            </table></div>
+            <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+              <table style={{ width: '100%' }}>
+                <thead><tr><th>Action</th><th>Date</th></tr></thead>
+                <tbody>{auditLog.slice(0, 10).map((entry, i) => (
+                  <tr key={i}>
+                    <td style={{ textTransform: 'capitalize' }}>{entry.action?.replace(/_/g, ' ')}</td>
+                    <td style={{ fontSize: 13, whiteSpace: 'nowrap' }}>{new Date(entry.created_at).toLocaleString()}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
           )
         }
-      </div>
+      </Section>
 
-      {/* Danger Zone */}
-      <div className="card" style={{ padding: 20, borderColor: '#fecaca' }}>
-        <h3 className="flex items-center gap-2 mb-3" style={{ color: '#dc2626' }}><AlertTriangle size={18} /> Danger Zone</h3>
-        <button className="btn btn-danger" onClick={() => lock()}>
-          <Lock size={14} /> Lock Vault Now
-        </button>
-      </div>
     </div>
   );
 }

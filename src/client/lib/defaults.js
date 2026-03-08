@@ -1,8 +1,9 @@
 export const PREFERENCE_DEFAULTS = {
     vault_key_type: 'alphanumeric',
-    auto_lock_mode: 'timed',
+    auto_lock_mode: 'session',
     auto_lock_timeout: '3600',
     audit_ip_mode: 'hashed',
+    vault_persist_session: 'lock_on_refresh',
 };
 
 export const VAULT_KEY_MINIMUMS = {

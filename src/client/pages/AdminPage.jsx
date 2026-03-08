@@ -10,8 +10,6 @@ import {
 
 const TABS = [
   { key: 'users',        label: 'Users',         icon: Users },
-  { key: 'accountTypes', label: 'Account Types',  icon: Tag },
-  { key: 'assetTypes',   label: 'Asset Types',    icon: Briefcase },
   { key: 'countries',    label: 'Countries',      icon: Globe },
   { key: 'currencies',   label: 'Currencies',     icon: DollarSign },
 ];
@@ -103,8 +101,8 @@ export default function AdminPage() {
   const { sorted: sortedRegularUsers, sortKey: regSortKey, sortDir: regSortDir, onSort: onRegSort } = useSort(filteredRegularUsers, 'created_at', 'desc');
   const { sorted: sortedAccountTypes, sortKey: atSortKey, sortDir: atSortDir, onSort: onAtSort } = useSort(accountTypes, 'name', 'asc');
   const { sorted: sortedAssetTypes, sortKey: astSortKey, sortDir: astSortDir, onSort: onAstSort } = useSort(assetTypes, 'name', 'asc');
-  const { sorted: sortedCountries, sortKey: countrySortKey, sortDir: countrySortDir, onSort: onCountrySort } = useSort(countries, 'name', 'asc');
-  const { sorted: sortedCurrencies, sortKey: currSortKey, sortDir: currSortDir, onSort: onCurrSort } = useSort(currencies, 'code', 'asc');
+  const { sorted: sortedCountries, sortKey: countrySortKey, sortDir: countrySortDir, onSort: onCountrySort } = useSort(countries, 'display_order', 'asc');
+  const { sorted: sortedCurrencies, sortKey: currSortKey, sortDir: currSortDir, onSort: onCurrSort } = useSort(currencies, 'display_order', 'asc');
 
   // ===== LOAD FUNCTIONS =====
   const loadUsers = useCallback(async () => {
@@ -116,23 +114,9 @@ export default function AdminPage() {
     setUsersLoading(false);
   }, []);
 
-  const loadAccountTypes = useCallback(async () => {
-    setAtLoading(true);
-    try {
-      const res = await api.get('/reference.php?resource=account-types');
-      setAccountTypes(res.data.data || []);
-    } catch { /* ignore */ }
-    setAtLoading(false);
-  }, []);
-
-  const loadAssetTypes = useCallback(async () => {
-    setAstLoading(true);
-    try {
-      const res = await api.get('/reference.php?resource=asset-types');
-      setAssetTypes(res.data.data || []);
-    } catch { /* ignore */ }
-    setAstLoading(false);
-  }, []);
+  // Account types and asset types are now managed via Templates page
+  const loadAccountTypes = useCallback(() => {}, []);
+  const loadAssetTypes = useCallback(() => {}, []);
 
   const loadCountries = useCallback(async () => {
     setCountriesLoading(true);

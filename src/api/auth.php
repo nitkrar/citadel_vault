@@ -46,7 +46,7 @@ if ($method === 'POST' && $action === 'login') {
     }
 
     $stmt = $db->prepare(
-        "SELECT id, username, email, password_hash, role, is_active
+        "SELECT id, username, display_name, email, password_hash, role, is_active
          FROM users WHERE username = ? OR email = ? LIMIT 1"
     );
     $stmt->execute([$username, $username]);
@@ -266,31 +266,20 @@ if ($method === 'POST' && $action === 'register') {
     // Hash password and insert
     $hash = Auth::hashPassword($password);
 
-    // Email verification: generate token if enabled (infrastructure ready, not active)
-    $emailVerified = 1; // Default: verified (no email service)
-    $emailVerificationToken = null;
-    $emailVerificationExpiry = null;
-    if (REQUIRE_EMAIL_VERIFICATION) {
+    // Invited users are automatically email-verified (they clicked an invite link)
+    // Self-registered users need verification if REQUIRE_EMAIL_VERIFICATION is on
+    $emailVerified = 1;
+    $emailVerifyToken = null;
+    if (REQUIRE_EMAIL_VERIFICATION && !$inviteRow) {
         $emailVerified = 0;
-        $emailVerificationToken = bin2hex(random_bytes(32));
-        $emailVerificationExpiry = date('Y-m-d H:i:s', time() + 86400); // 24 hours
+        $emailVerifyToken = bin2hex(random_bytes(32));
     }
 
-    try {
-        $stmt = $db->prepare(
-            "INSERT INTO users (username, email, password_hash, role, is_active,
-                                email_verified, email_verification_token, email_verification_expires)
-             VALUES (?, ?, ?, ?, 1, ?, ?, ?)"
-        );
-        $stmt->execute([$username, $email, $hash, $role, $emailVerified, $emailVerificationToken, $emailVerificationExpiry]);
-    } catch (PDOException $e) {
-        // Fallback if email verification columns don't exist yet
-        $stmt = $db->prepare(
-            "INSERT INTO users (username, email, password_hash, role, is_active)
-             VALUES (?, ?, ?, ?, 1)"
-        );
-        $stmt->execute([$username, $email, $hash, $role]);
-    }
+    $stmt = $db->prepare(
+        "INSERT INTO users (username, email, password_hash, role, is_active, email_verified, email_verify_token)
+         VALUES (?, ?, ?, ?, 1, ?, ?)"
+    );
+    $stmt->execute([$username, $email, $hash, $role, $emailVerified, $emailVerifyToken]);
     $newId = (int)$db->lastInsertId();
 
     // Mark invite as used
@@ -379,7 +368,7 @@ if ($method === 'GET' && $action === 'me') {
     $userId = $payload['sub'];
 
     $stmt = $db->prepare(
-        "SELECT id, username, email, role, must_reset_password, created_at
+        "SELECT id, username, display_name, email, role, must_reset_password, created_at
          FROM users WHERE id = ?"
     );
     $stmt->execute([$userId]);
@@ -432,16 +421,22 @@ if ($method === 'PUT' && $action === 'profile') {
     $userId = $payload['sub'];
     $body = Response::getBody();
 
-    $username = Response::sanitize($body['username'] ?? '');
-    $email    = Response::sanitize($body['email'] ?? '');
+    $username     = Response::sanitize($body['username'] ?? '');
+    $displayName  = Response::sanitize($body['display_name'] ?? '');
+    $email        = Response::sanitize($body['email'] ?? '');
 
-    if (!$username && !$email) {
-        Response::error('Username or email is required.');
+    if (!$username && !$email && !$displayName) {
+        Response::error('At least one field is required.');
     }
 
     // Build dynamic update
     $fields = [];
     $values = [];
+
+    if ($displayName !== '') {
+        $fields[] = 'display_name = ?';
+        $values[] = $displayName;
+    }
 
     if ($username) {
         // Check for duplicate username excluding current user

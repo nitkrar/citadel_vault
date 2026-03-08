@@ -226,18 +226,10 @@ if ($resource === 'countries') {
 
     if ($method === 'GET') {
         $stmt = $db->query(
-            "SELECT id, name, code, flag_emoji, field_template, default_currency_id
+            "SELECT id, name, code, flag_emoji, display_order, default_currency_id
              FROM countries ORDER BY display_order ASC, name ASC"
         );
-        $rows = $stmt->fetchAll();
-        foreach ($rows as &$row) {
-            if ($row['field_template'] !== null) {
-                $decoded = json_decode($row['field_template'], true);
-                $row['field_template'] = $decoded !== null ? $decoded : $row['field_template'];
-            }
-        }
-        unset($row);
-        Response::success($rows);
+        Response::success($stmt->fetchAll());
     }
 
     if ($method === 'POST') {
@@ -247,26 +239,20 @@ if ($resource === 'countries') {
         $name  = Response::sanitize($body['name'] ?? '');
         $code  = Response::sanitize($body['code'] ?? '');
         $flagEmoji         = Response::sanitize($body['flag_emoji'] ?? null);
-        $fieldTemplate     = isset($body['field_template']) ? json_encode($body['field_template']) : null;
         $defaultCurrencyId = isset($body['default_currency_id']) ? (int)$body['default_currency_id'] : null;
 
         if (!$name || !$code) { Response::error('Name and code are required.', 400); }
 
         $stmt = $db->prepare(
-            "INSERT INTO countries (name, code, flag_emoji, field_template, default_currency_id)
-             VALUES (?, ?, ?, ?, ?)"
+            "INSERT INTO countries (name, code, flag_emoji, default_currency_id)
+             VALUES (?, ?, ?, ?)"
         );
-        $stmt->execute([$name, $code, $flagEmoji, $fieldTemplate, $defaultCurrencyId]);
+        $stmt->execute([$name, $code, $flagEmoji, $defaultCurrencyId]);
         $newId = (int)$db->lastInsertId();
 
-        $stmt = $db->prepare("SELECT id, name, code, flag_emoji, field_template, default_currency_id FROM countries WHERE id = ?");
+        $stmt = $db->prepare("SELECT * FROM countries WHERE id = ?");
         $stmt->execute([$newId]);
-        $row = $stmt->fetch();
-        if ($row['field_template'] !== null) {
-            $decoded = json_decode($row['field_template'], true);
-            $row['field_template'] = $decoded !== null ? $decoded : $row['field_template'];
-        }
-        Response::success($row, 201);
+        Response::success($stmt->fetch(), 201);
     }
 
     if ($method === 'PUT') {
@@ -284,10 +270,6 @@ if ($resource === 'countries') {
         if (isset($body['name'])) { $fields[] = 'name = ?'; $params[] = Response::sanitize($body['name']); }
         if (isset($body['code'])) { $fields[] = 'code = ?'; $params[] = Response::sanitize($body['code']); }
         if (isset($body['flag_emoji'])) { $fields[] = 'flag_emoji = ?'; $params[] = Response::sanitize($body['flag_emoji']); }
-        if (array_key_exists('field_template', $body)) {
-            $fields[] = 'field_template = ?';
-            $params[] = $body['field_template'] !== null ? json_encode($body['field_template']) : null;
-        }
         if (array_key_exists('default_currency_id', $body)) {
             $fields[] = 'default_currency_id = ?';
             $params[] = $body['default_currency_id'] !== null ? (int)$body['default_currency_id'] : null;
@@ -299,14 +281,9 @@ if ($resource === 'countries') {
         $stmt = $db->prepare("UPDATE countries SET " . implode(', ', $fields) . " WHERE id = ?");
         $stmt->execute($params);
 
-        $stmt = $db->prepare("SELECT id, name, code, flag_emoji, field_template, default_currency_id FROM countries WHERE id = ?");
+        $stmt = $db->prepare("SELECT * FROM countries WHERE id = ?");
         $stmt->execute([$id]);
-        $row = $stmt->fetch();
-        if ($row['field_template'] !== null) {
-            $decoded = json_decode($row['field_template'], true);
-            $row['field_template'] = $decoded !== null ? $decoded : $row['field_template'];
-        }
-        Response::success($row);
+        Response::success($stmt->fetch());
     }
 
     if ($method === 'DELETE') {

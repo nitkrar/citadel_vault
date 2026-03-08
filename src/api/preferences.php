@@ -37,6 +37,7 @@ if ($method === 'PUT') {
 
     $allowedKeys = [
         'vault_key_type', 'auto_lock_mode', 'auto_lock_timeout', 'audit_ip_mode',
+        'vault_persist_session',
     ];
 
     // Track if audit_ip_mode changed for security logging
