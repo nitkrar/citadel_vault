@@ -15,7 +15,7 @@ export function EncryptionProvider({ children, user }) {
   const [mustResetPassword, setMustResetPassword] = useState(false);
   const [preferences, setPreferences] = useState({});
   const [pageNotices, setPageNotices] = useState({});
-  const [vaultPromptForced, setVaultPromptForced] = useState(false);
+  const [vaultPromptForced, setVaultPromptForced] = useState(null); // null = initial, true = forced, false = skipped
 
   const autoLockTimerRef = useRef(null);
   const activityTimerRef = useRef(null);
