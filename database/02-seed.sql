@@ -15,18 +15,8 @@ SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
 INSERT INTO `users` (`id`, `username`, `email`, `password_hash`, `role`, `is_active`)
 VALUES (0, '__ghost__', 'ghost@system.internal', '', 'ghost', 0);
 
--- Site admin (id=1): default administrator, must change password on first login
--- Default password: Citadel@2024 (bcrypt cost 12)
-INSERT INTO `users` (`username`, `email`, `password_hash`, `role`, `must_reset_password`, `is_active`, `email_verified`)
-VALUES (
-    'citadel_site_admin',
-    'admin@localhost',
-    '$2y$12$7wv8yGgAxWFTFultxJtvuONCO2uENuqsuicY37eal958TRwkf665S',
-    'admin',
-    0,
-    1,
-    1
-);
+-- Admin user: create via scripts/setup_admin.php instead of hardcoded hash.
+-- Usage: php scripts/setup_admin.php <username> <email> <password>
 
 -- =============================================================================
 -- ENTRY TEMPLATES — Global (owner_id = NULL)

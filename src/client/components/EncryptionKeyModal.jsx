@@ -59,8 +59,9 @@ export default function EncryptionKeyModal() {
   // Determine visibility & effective mode
   // ------------------------------------------------------------------
   const forceChangeMode = isTruthy(mustResetVaultKey) && isTruthy(isUnlocked);
-  const standardVisible = !isTruthy(isUnlocked) && isTruthy(vaultPromptForced);
-  const needsSetup = !isTruthy(isUnlocked) && !isTruthy(vaultKeyExists);
+  const standardVisible = !isTruthy(isUnlocked) && vaultPromptForced === true;
+  // Auto-show setup only if user hasn't skipped (null = initial show, false = skipped)
+  const needsSetup = !isTruthy(isUnlocked) && !isTruthy(vaultKeyExists) && vaultPromptForced !== false;
 
   // Auto-show for setup or when vault prompt forced
   const isVisible = forceChangeMode || standardVisible || needsSetup || showRecovery;
