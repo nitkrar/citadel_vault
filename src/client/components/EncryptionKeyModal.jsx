@@ -18,6 +18,7 @@ import { getVaultKeyMinLength, VAULT_KEY_MINIMUMS } from '../lib/defaults';
 export default function EncryptionKeyModal() {
   const {
     isUnlocked,
+    isLoading,
     vaultKeyExists,
     vaultPromptForced,
     mustResetVaultKey,
@@ -30,6 +31,8 @@ export default function EncryptionKeyModal() {
 
   const { mustChangePassword } = useAuth();
 
+  // Block vault modal while loading (prevents flash of setup modal on refresh)
+  if (isLoading) return null;
   // Block vault modal if password change is required first
   if (mustChangePassword) return null;
 
