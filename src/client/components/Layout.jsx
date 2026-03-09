@@ -41,7 +41,7 @@ export function useHideAmounts() {
 
 export default function Layout() {
   const { user, logout, isSiteAdmin } = useAuth();
-  const { isUnlocked, vaultKeyExists, lock: lockVault, promptVault } = useEncryption();
+  const { isUnlocked, isLoading, vaultKeyExists, lock: lockVault, promptVault } = useEncryption();
 
   const [hideAmounts, setHideAmounts] = useState(() => {
     return localStorage.getItem('pv_hide_amounts') === 'true';
@@ -289,7 +289,12 @@ export default function Layout() {
 
         {/* Main Content */}
         <main className="main-content">
-          {!isUnlocked && !hideVaultBanner && (
+          {isLoading && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh' }}>
+              <div className="spinner" />
+            </div>
+          )}
+          {!isLoading && !isUnlocked && !hideVaultBanner && (
             <div className="alert alert-warning" style={{ margin: 'var(--space-lg)', marginBottom: 0, justifyContent: 'space-between' }}>
               <div className="flex items-center gap-2">
                 <Lock size={18} style={{ flexShrink: 0 }} />
@@ -305,7 +310,7 @@ export default function Layout() {
               </button>
             </div>
           )}
-          {showPasskeyBanner && (
+          {!isLoading && showPasskeyBanner && (
             <div className="alert alert-info" style={{ margin: 'var(--space-lg)', marginBottom: 0, justifyContent: 'space-between' }}>
               <div className="flex items-center gap-2">
                 <Fingerprint size={18} style={{ flexShrink: 0 }} />
@@ -327,8 +332,8 @@ export default function Layout() {
               </div>
             </div>
           )}
-          <PageNotice />
-          <Outlet />
+          {!isLoading && <PageNotice />}
+          {!isLoading && <Outlet />}
         </main>
 
         {showShortcuts && (
