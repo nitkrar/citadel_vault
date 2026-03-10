@@ -154,11 +154,12 @@ if ($method === 'POST' && $action === 'login') {
     $mustChangeVaultKey = false;
     $adminActionMessage = null;
     try {
-        $stmt2 = $db->prepare("SELECT must_reset_vault_key FROM user_vault_keys WHERE user_id = ?");
+        $stmt2 = $db->prepare("SELECT must_reset_vault_key, admin_action_message FROM user_vault_keys WHERE user_id = ?");
         $stmt2->execute([$user['id']]);
         $vkRow = $stmt2->fetch(PDO::FETCH_ASSOC);
         if ($vkRow) {
             $mustChangeVaultKey = (bool)($vkRow['must_reset_vault_key'] ?? false);
+            $adminActionMessage = $vkRow['admin_action_message'] ?? null;
         }
     } catch (Exception $e) {
         // Table may not exist — default to false
@@ -180,7 +181,7 @@ if ($method === 'POST' && $action === 'login') {
             'username'              => $user['username'],
             'email'                 => $user['email'],
             'role'                  => $user['role'],
-            'must_reset_password'  => $mustChangePassword,
+            'must_change_password'  => $mustChangePassword,
             'must_change_vault_key' => $mustChangeVaultKey,
             'admin_action_message'  => $adminActionMessage,
         ],
@@ -378,19 +379,20 @@ if ($method === 'GET' && $action === 'me') {
         Response::error('User not found.', 404);
     }
 
-    // Map new column names to what the client expects
-    $user['must_reset_password'] = (bool)($user['must_reset_password'] ?? false);
+    // Map DB column to what the client expects
+    $user['must_change_password'] = (bool)($user['must_reset_password'] ?? false);
     unset($user['must_reset_password']);
 
     // Check vault key status from user_vault_keys table
     $user['must_change_vault_key'] = false;
     $user['admin_action_message'] = null;
     try {
-        $stmt2 = $db->prepare("SELECT must_reset_vault_key FROM user_vault_keys WHERE user_id = ?");
+        $stmt2 = $db->prepare("SELECT must_reset_vault_key, admin_action_message FROM user_vault_keys WHERE user_id = ?");
         $stmt2->execute([$userId]);
         $vkRow = $stmt2->fetch(PDO::FETCH_ASSOC);
         if ($vkRow) {
             $user['must_change_vault_key'] = (bool)($vkRow['must_reset_vault_key'] ?? false);
+            $user['admin_action_message'] = $vkRow['admin_action_message'] ?? null;
         }
     } catch (Exception $e) {
         // Table may not exist — defaults already set

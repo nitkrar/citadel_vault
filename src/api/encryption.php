@@ -160,6 +160,7 @@ if ($method === 'POST' && $action === 'update-vault-key') {
         'vault_key_salt'       => $body['vault_key_salt'],
         'encrypted_dek'        => $body['encrypted_dek'],
         'must_reset_vault_key' => 0,
+        'admin_action_message' => null,
     ]);
 
     $ipHash = Encryption::hashIp($_SERVER['REMOTE_ADDR'] ?? null);
@@ -215,6 +216,7 @@ if ($method === 'POST' && $action === 'update-all') {
         'encrypted_dek_recovery' => $body['encrypted_dek_recovery'],
         'recovery_key_encrypted' => $body['recovery_key_encrypted'],
         'must_reset_vault_key'   => 0,
+        'admin_action_message'   => null,
     ]);
 
     $ipHash = Encryption::hashIp($_SERVER['REMOTE_ADDR'] ?? null);

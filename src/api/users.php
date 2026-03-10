@@ -39,7 +39,12 @@ if ($method === 'GET') {
         }
 
         $stmt = $db->query(
-            "SELECT id, username, display_name, email, role, is_active, created_at FROM users ORDER BY id"
+            "SELECT u.id, u.username, u.display_name, u.email, u.role, u.is_active, u.created_at,
+                    CASE WHEN vk.user_id IS NOT NULL THEN 1 ELSE 0 END AS has_vault_key,
+                    COALESCE(vk.must_reset_vault_key, 0) AS must_reset_vault_key
+             FROM users u
+             LEFT JOIN user_vault_keys vk ON vk.user_id = u.id
+             ORDER BY u.id"
         );
         Response::success($stmt->fetchAll());
     }
@@ -137,8 +142,8 @@ if ($method === 'PUT') {
         $message = $body['message'] ?? null;
 
         // must_reset_vault_key is on user_vault_keys table, not users
-        $stmt = $db->prepare("UPDATE user_vault_keys SET must_reset_vault_key = 1 WHERE user_id = ?");
-        $stmt->execute([$id]);
+        $stmt = $db->prepare("UPDATE user_vault_keys SET must_reset_vault_key = 1, admin_action_message = ? WHERE user_id = ?");
+        $stmt->execute([$message, $id]);
         Response::success(['message' => 'User will be forced to change their vault key on next session.']);
     }
 

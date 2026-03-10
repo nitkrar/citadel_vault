@@ -11,8 +11,6 @@ export function EncryptionProvider({ children, user }) {
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [vaultKeyExists, setVaultKeyExists] = useState(false);
-  const [mustResetVaultKey, setMustResetVaultKey] = useState(false);
-  const [mustResetPassword, setMustResetPassword] = useState(false);
   const [preferences, setPreferences] = useState({});
   const [pageNotices, setPageNotices] = useState({});
   const [vaultPromptForced, setVaultPromptForced] = useState(null); // null = initial, true = forced, false = skipped
@@ -117,12 +115,7 @@ export function EncryptionProvider({ children, user }) {
         throw new Error('Vault not set up.');
       }
 
-      // 2. Check must_reset_vault_key
-      if (isTruthy(keyMaterial.must_reset_vault_key)) {
-        setMustResetVaultKey(true);
-      }
-
-      // 3. Derive key and unwrap DEK client-side
+      // 2. Derive key and unwrap DEK client-side
       const success = await crypto.unlockVault(
         {
           vault_key_salt: keyMaterial.vault_key_salt,
@@ -228,7 +221,6 @@ export function EncryptionProvider({ children, user }) {
 
     // 3. Send new blobs to server
     await api.post('/encryption.php?action=update-vault-key', newBlobs);
-    setMustResetVaultKey(false);
 
     return { success: true };
   }, []);
@@ -277,7 +269,6 @@ export function EncryptionProvider({ children, user }) {
       setPreferences(prefs);
 
       setIsUnlocked(true);
-      setMustResetVaultKey(false);
       setVaultPromptForced(false);
       startAutoLock(prefs);
 
@@ -340,9 +331,6 @@ export function EncryptionProvider({ children, user }) {
         if (cancelled) return;
         const keyMaterial = apiData({ data });
         setVaultKeyExists(isTruthy(keyMaterial.has_vault_key));
-        if (isTruthy(keyMaterial.must_reset_vault_key)) {
-          setMustResetVaultKey(true);
-        }
 
         // Try to restore session from sessionStorage (refresh persistence)
         // Session data only exists if user had "persist_in_tab" when they unlocked.
@@ -407,8 +395,6 @@ export function EncryptionProvider({ children, user }) {
     isLoading,
     vaultKeyExists,
     vaultPromptForced,
-    mustResetVaultKey,
-    mustResetPassword,
     preferences,
     pageNotices,
 

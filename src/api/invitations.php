@@ -77,7 +77,7 @@ if ($method === 'POST' && $action === 'create') {
         $inviterName = $stmt2->fetchColumn() ?: 'Someone';
 
         $result = Mailer::sendInvite($email, $inviteUrl, $inviterName);
-        $emailSent = ($result === true);
+        $emailSent = ($result['success'] ?? false);
     }
 
     Response::success([

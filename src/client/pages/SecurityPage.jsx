@@ -57,6 +57,7 @@ export default function SecurityPage() {
     const minLen = VAULT_KEY_MINIMUMS[newKeyType] || 8;
     if (!currentKey) { setChangeError('Current key is required.'); return; }
     if (newKey.length < minLen) { setChangeError(`New key must be at least ${minLen} characters.`); return; }
+    if (newKey === currentKey) { setChangeError('New key must be different from your current key.'); return; }
     if (newKey !== confirmKey) { setChangeError('New keys do not match.'); return; }
     setChangingKey(true);
     try {
