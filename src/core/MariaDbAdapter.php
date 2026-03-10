@@ -90,11 +90,29 @@ class MariaDbAdapter implements StorageAdapter {
         return (int)$this->db->lastInsertId();
     }
 
-    public function updateEntry(int $userId, int $entryId, string $encryptedData): bool {
+    public function updateEntry(int $userId, int $entryId, string $encryptedData, ?string $entryType = null, ?int $templateId = null): bool {
+        $setClauses = ['encrypted_data = ?'];
+        $params = [$encryptedData];
+
+        if ($entryType !== null) {
+            if (!in_array($entryType, self::VALID_ENTRY_TYPES, true)) {
+                throw new InvalidArgumentException("Invalid entry type: '{$entryType}'.");
+            }
+            $setClauses[] = 'entry_type = ?';
+            $params[] = $entryType;
+        }
+        if ($templateId !== null) {
+            $setClauses[] = 'template_id = ?';
+            $params[] = $templateId;
+        }
+
+        $params[] = $entryId;
+        $params[] = $userId;
+
         $stmt = $this->db->prepare(
-            'UPDATE vault_entries SET encrypted_data = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL'
+            'UPDATE vault_entries SET ' . implode(', ', $setClauses) . ' WHERE id = ? AND user_id = ? AND deleted_at IS NULL'
         );
-        $stmt->execute([$encryptedData, $entryId, $userId]);
+        $stmt->execute($params);
         return $stmt->rowCount() > 0;
     }
 

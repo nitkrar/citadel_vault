@@ -105,13 +105,22 @@ class InMemoryAdapter implements StorageAdapter {
         return $id;
     }
 
-    public function updateEntry(int $userId, int $entryId, string $encryptedData): bool {
+    public function updateEntry(int $userId, int $entryId, string $encryptedData, ?string $entryType = null, ?int $templateId = null): bool {
         $entry = $this->entries[$entryId] ?? null;
         if (!$entry || $entry['user_id'] !== $userId || $entry['deleted_at'] !== null) {
             return false;
         }
         $this->entries[$entryId]['encrypted_data'] = $encryptedData;
         $this->entries[$entryId]['updated_at'] = date('Y-m-d H:i:s');
+        if ($entryType !== null) {
+            if (!in_array($entryType, self::VALID_ENTRY_TYPES, true)) {
+                throw new InvalidArgumentException("Invalid entry type: '{$entryType}'.");
+            }
+            $this->entries[$entryId]['entry_type'] = $entryType;
+        }
+        if ($templateId !== null) {
+            $this->entries[$entryId]['template_id'] = $templateId;
+        }
         return true;
     }
 

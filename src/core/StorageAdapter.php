@@ -39,9 +39,10 @@ interface StorageAdapter {
 
     /**
      * Update an existing entry's encrypted data. Ownership enforced.
+     * Optionally change entry_type and template_id.
      * @return bool True if updated, false if not found / not owned
      */
-    function updateEntry(int $userId, int $entryId, string $encryptedData): bool;
+    function updateEntry(int $userId, int $entryId, string $encryptedData, ?string $entryType = null, ?int $templateId = null): bool;
 
     /**
      * Soft-delete an entry (sets deleted_at). Ownership enforced.
