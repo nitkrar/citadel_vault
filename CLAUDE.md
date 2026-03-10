@@ -63,11 +63,16 @@
 - Key resolved items: vault key policy, rate limiting, progressive lockout, fail-closed defaults, CSP headers, JWT base64url
 - Pending: JWT in localStorage, no JWT revocation, RSA-2048, console.error in prod
 
-## Pending Decisions & Follow-ups
-> PROMPT USER once per session: "There are pending items in CLAUDE.md — want to review or address any?"
+## Backlog & Decisions
+> PROMPT USER once per session: "There are backlog items and pending decisions in CLAUDE.md — want to review or work on any?"
 
+### Backlog (features & fixes)
+- **Reference data caching**: Countries/currencies are fetched from `reference.php` on every page load (VaultPage, AdminPage, BulkWizard). Should cache in IndexedDB with TTL (e.g., 24h). Centralize into a shared hook or utility instead of duplicating fetch calls. Expand later to cache templates too.
 - **Dead code in auth.php (lines ~715-730)**: Server-side data session token logic (`DATA_SESSION_EXPIRY_TIMED`, `DATA_SESSION_EXPIRY_LOGIN`, `vault_session_preference` column) — references constants not defined in config.php and a column not in schema. Should be removed.
-- **Session vs Manual auto-lock**: Currently functionally identical when `persist_in_tab` is set (both rely on sessionStorage which clears on tab close). Consider whether Manual should use localStorage for true cross-tab persistence, or remove Manual as an option.
 - **Keyboard shortcuts on mobile**: Currently hidden. User mentioned possibly adding gesture-based equivalents (e.g., long-press to lock) — deferred.
 - **SMTP setup for prod**: SMTP is disabled. Needed for: invite emails, lockout notifications, password reset, email verification. Decide on email provider for HelioHost.
+- **Portfolio overhaul**: Currency-aware aggregation, breakdowns by asset type/account type/country. See MEMORY.md for full details.
+
+### Pending Decisions
+- **Session vs Manual auto-lock**: Currently functionally identical when `persist_in_tab` is set (both rely on sessionStorage which clears on tab close). Consider whether Manual should use localStorage for true cross-tab persistence, or remove Manual as an option.
 - **Security audit pending items**: JWT in localStorage (XSS risk), no JWT revocation mechanism, RSA-2048 (consider upgrading to 4096), console.error in production code.
