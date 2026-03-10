@@ -183,7 +183,9 @@ if ($method === 'POST' && $action === 'bulk-update') {
         if (empty($entry['id']) || empty($entry['encrypted_data'])) {
             Response::error('Each entry requires id and encrypted_data.', 400);
         }
-        if ($storage->updateEntry($userId, (int)$entry['id'], $entry['encrypted_data'])) {
+        $bulkType = $entry['entry_type'] ?? null;
+        $bulkTpl  = isset($entry['template_id']) ? (int)$entry['template_id'] : null;
+        if ($storage->updateEntry($userId, (int)$entry['id'], $entry['encrypted_data'], $bulkType, $bulkTpl)) {
             $updated++;
         }
     }
@@ -222,7 +224,14 @@ if ($method === 'PUT' && $id) {
         Response::error('Missing encrypted_data.', 400);
     }
 
-    if (!$storage->updateEntry($userId, $id, $encryptedData)) {
+    $entryType  = $body['entry_type'] ?? null;
+    $templateId = isset($body['template_id']) ? (int)$body['template_id'] : null;
+
+    if ($entryType !== null && !in_array($entryType, $validTypes, true)) {
+        Response::error("Invalid entry type: $entryType", 400);
+    }
+
+    if (!$storage->updateEntry($userId, $id, $encryptedData, $entryType, $templateId)) {
         Response::error('Entry not found.', 404);
     }
 
