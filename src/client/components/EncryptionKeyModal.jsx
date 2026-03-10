@@ -3,7 +3,6 @@ import { KeyRound, Copy, Check, AlertTriangle, Shield, Download } from 'lucide-r
 import { useEncryption } from '../contexts/EncryptionContext';
 import { useAuth } from '../contexts/AuthContext';
 import Modal from '../components/Modal';
-import { isTruthy } from '../lib/checks';
 import { getVaultKeyMinLength, VAULT_KEY_MINIMUMS } from '../lib/defaults';
 
 /**
@@ -21,7 +20,6 @@ export default function EncryptionKeyModal() {
     isLoading,
     vaultKeyExists,
     vaultPromptForced,
-    mustResetVaultKey,
     setup,
     unlock,
     changeVaultKey,
@@ -29,15 +27,10 @@ export default function EncryptionKeyModal() {
     skipVault,
   } = useEncryption();
 
-  const { mustChangePassword } = useAuth();
-
-  // Block vault modal while loading (prevents flash of setup modal on refresh)
-  if (isLoading) return null;
-  // Block vault modal if password change is required first
-  if (mustChangePassword) return null;
+  const { mustChangePassword, mustChangeVaultKey, clearMustChangeVaultKey, adminActionMessage } = useAuth();
 
   // ------------------------------------------------------------------
-  // Local state
+  // Local state (must be declared before any early returns — Rules of Hooks)
   // ------------------------------------------------------------------
   const [mode, setMode] = useState(null); // null = auto-detect
   const [keyType, setKeyType] = useState('alphanumeric');
@@ -55,29 +48,36 @@ export default function EncryptionKeyModal() {
   const [savedConfirmed, setSavedConfirmed] = useState(false);
   const [showRecovery, setShowRecovery] = useState(false);
 
-  // For force change (when mustResetVaultKey)
+  // For force change (when mustChangeVaultKey)
   const [oldVaultKey, setOldVaultKey] = useState('');
+
+  // Block vault modal while loading (prevents flash of setup modal on refresh)
+  if (isLoading) return null;
+  // Block vault modal if password change is required first
+  if (mustChangePassword) return null;
 
   // ------------------------------------------------------------------
   // Determine visibility & effective mode
   // ------------------------------------------------------------------
-  const forceChangeMode = isTruthy(mustResetVaultKey) && isTruthy(isUnlocked);
-  const standardVisible = !isTruthy(isUnlocked) && vaultPromptForced === true;
+  const forceChangeMode = mustChangeVaultKey && isUnlocked;
+  // When mustChangeVaultKey is set but not yet unlocked, force the unlock modal (no skip)
+  const forceUnlockForChange = mustChangeVaultKey && !isUnlocked && vaultKeyExists;
+  const standardVisible = !isUnlocked && vaultPromptForced === true;
   // Auto-show setup only if user hasn't skipped (null = initial show, false = skipped)
-  const needsSetup = !isTruthy(isUnlocked) && !isTruthy(vaultKeyExists) && vaultPromptForced !== false;
+  const needsSetup = !isUnlocked && !vaultKeyExists && vaultPromptForced !== false;
 
   // Auto-show for setup or when vault prompt forced
-  const isVisible = forceChangeMode || standardVisible || needsSetup || showRecovery;
+  const isVisible = forceChangeMode || forceUnlockForChange || standardVisible || needsSetup || showRecovery;
 
   const effectiveMode = mode
     || (forceChangeMode ? 'force_change' : null)
-    || (isTruthy(vaultKeyExists) ? 'unlock' : 'setup');
+    || (vaultKeyExists ? 'unlock' : 'setup');
 
   if (!isVisible) return null;
 
   const minLen = getVaultKeyMinLength(keyType);
   const inputMode = keyType === 'numeric' ? 'numeric' : undefined;
-  const inputType = keyType === 'numeric' ? 'tel' : 'text';
+  const inputType = 'password';
   const inputProps = {
     type: inputType,
     ...(inputMode && { inputMode }),
@@ -136,7 +136,16 @@ export default function EncryptionKeyModal() {
     setSubmitting(true);
     try {
       await unlock(vaultKey);
-      resetForm();
+      // If force change is required, stay in modal — remember the old key and switch to force_change
+      // mustChangeVaultKey is from AuthContext (set at login, stable)
+      if (mustChangeVaultKey) {
+        setOldVaultKey(vaultKey);
+        setVaultKey('');
+        setError('');
+        // forceChangeMode will now be true (mustChangeVaultKey + isUnlocked), modal stays open
+      } else {
+        resetForm();
+      }
     } catch (err) {
       setError(err.response?.data?.error || err.message || 'Invalid vault key.');
     } finally {
@@ -168,11 +177,13 @@ export default function EncryptionKeyModal() {
     setError('');
     if (!oldVaultKey) { setError('Enter your current vault key.'); return; }
     if (newVaultKey.length < minLen) { setError(`New vault key must be at least ${minLen} characters.`); return; }
+    if (newVaultKey === oldVaultKey) { setError('New vault key must be different from your current key.'); return; }
     if (newVaultKey !== confirmNewKey) { setError('New vault keys do not match.'); return; }
 
     setSubmitting(true);
     try {
       await changeVaultKey(oldVaultKey, newVaultKey);
+      clearMustChangeVaultKey();
       resetForm();
     } catch (err) {
       setError(err.response?.data?.error || err.message || 'Failed to change vault key.');
@@ -274,12 +285,28 @@ export default function EncryptionKeyModal() {
           <div style={{ textAlign: 'center', marginBottom: 16 }}><KeyRound size={40} style={{ color: '#dc2626' }} /></div>
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 12px', marginBottom: 16, color: '#dc2626', fontSize: 13 }}>
             <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
-            <span>Your administrator requires you to change your vault key.</span>
+            <span>{adminActionMessage || 'Your administrator requires you to change your vault key.'}</span>
           </div>
           {error && errorBox}
+          {/* Only show current key field if not already provided from unlock step */}
+          {!oldVaultKey && (
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}>Current Vault Key</label>
+              <input {...inputProps} placeholder="Current key" value={oldVaultKey} onChange={(e) => setOldVaultKey(e.target.value)} autoFocus required style={inputStyle} />
+            </div>
+          )}
+          {/* Key type selector — same as setup */}
           <div style={{ marginBottom: 12 }}>
-            <label style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}>Current Vault Key</label>
-            <input {...inputProps} placeholder="Current key" value={oldVaultKey} onChange={(e) => setOldVaultKey(e.target.value)} autoFocus required style={inputStyle} />
+            <label style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}>New Key Type</label>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {Object.entries({ numeric: 'PIN', alphanumeric: 'Password', passphrase: 'Passphrase' }).map(([type, label]) => (
+                <button key={type} type="button" onClick={() => { setKeyType(type); setNewVaultKey(''); setConfirmNewKey(''); }}
+                  style={{ flex: 1, padding: '7px 8px', borderRadius: 8, border: `1px solid ${keyType === type ? '#2563eb' : '#d1d5db'}`, background: keyType === type ? '#eff6ff' : 'transparent', color: keyType === type ? '#2563eb' : '#6b7280', fontWeight: 500, fontSize: 13, cursor: 'pointer' }}>
+                  {label}
+                  <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>{VAULT_KEY_MINIMUMS[type]}+ chars</div>
+                </button>
+              ))}
+            </div>
           </div>
           <div style={{ marginBottom: 12 }}>
             <label style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}>New Vault Key</label>
@@ -393,24 +420,34 @@ export default function EncryptionKeyModal() {
   // ==================================================================
   const strength = getStrength(vaultKey);
   return (
-    <Modal isOpen={true} title="Unlock Your Vault" onClose={handleSkip}>
+    <Modal isOpen={true} title={forceUnlockForChange ? 'Vault Key Change Required' : 'Unlock Your Vault'} onClose={forceUnlockForChange ? null : handleSkip}>
       <form onSubmit={handleUnlock}>
-        <div style={{ textAlign: 'center', marginBottom: 16 }}><KeyRound size={40} style={{ color: '#2563eb' }} /></div>
-        <p style={{ color: '#6b7280', fontSize: 14, marginBottom: 16 }}>
-          Enter your vault key to decrypt your data.
-        </p>
+        <div style={{ textAlign: 'center', marginBottom: 16 }}><KeyRound size={40} style={{ color: forceUnlockForChange ? '#dc2626' : '#2563eb' }} /></div>
+        {forceUnlockForChange && (
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 12px', marginBottom: 16, color: '#dc2626', fontSize: 13 }}>
+            <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>{adminActionMessage || 'Your administrator requires you to change your vault key.'} Enter your current key to continue.</span>
+          </div>
+        )}
+        {!forceUnlockForChange && (
+          <p style={{ color: '#6b7280', fontSize: 14, marginBottom: 16 }}>
+            Enter your vault key to decrypt your data.
+          </p>
+        )}
         {error && errorBox}
         <div style={{ marginBottom: 20 }}>
           <label style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}>Vault Key</label>
           <input {...inputProps} placeholder="Enter vault key" value={vaultKey} onChange={(e) => setVaultKey(e.target.value)} autoFocus required style={inputStyle} />
         </div>
         <button type="submit" disabled={submitting} style={btnPrimary(submitting)}>
-          {submitting ? 'Unlocking...' : 'Unlock Vault'}
+          {submitting ? 'Unlocking...' : forceUnlockForChange ? 'Continue' : 'Unlock Vault'}
         </button>
         <button type="button" onClick={() => setMode('recovery')} style={{ ...btnSecondary, marginBottom: 8, color: '#f59e0b' }}>
           Forgot vault key? Use recovery key
         </button>
-        <button type="button" onClick={handleSkip} style={btnSecondary}>Skip for now</button>
+        {!forceUnlockForChange && (
+          <button type="button" onClick={handleSkip} style={btnSecondary}>Skip for now</button>
+        )}
       </form>
     </Modal>
   );

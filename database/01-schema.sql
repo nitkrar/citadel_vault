@@ -70,6 +70,7 @@ CREATE TABLE `user_vault_keys` (
     `public_key`                TEXT DEFAULT NULL,
     `encrypted_private_key`     TEXT DEFAULT NULL,
     `must_reset_vault_key`      TINYINT(1) NOT NULL DEFAULT 0,
+    `admin_action_message`      VARCHAR(500) DEFAULT NULL,
     `created_at`                TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updated_at`                TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
