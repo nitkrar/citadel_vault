@@ -37,6 +37,7 @@ export default function SecurityPage() {
   const [changingKey, setChangingKey] = useState(false);
   const [changeError, setChangeError] = useState('');
   const [changeSuccess, setChangeSuccess] = useState('');
+  const [showKeyValues, setShowKeyValues] = useState(false);
 
   // Key type change
   const [newKeyType, setNewKeyType] = useState(getUserPreference(preferences, 'vault_key_type'));
@@ -301,17 +302,22 @@ export default function SecurityPage() {
         ) : (
           <form onSubmit={handleChangeKey} style={{ maxWidth: 400 }}>
             {changeError && <div className="alert alert-danger mb-3">{changeError}</div>}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 4 }}>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowKeyValues(v => !v)} style={{ fontSize: 12, gap: 4 }}>
+                {showKeyValues ? <EyeOff size={14} /> : <Eye size={14} />} {showKeyValues ? 'Hide values' : 'Show values'}
+              </button>
+            </div>
             <div className="form-group">
               <label className="form-label">Current Vault Key</label>
-              <input className="form-control" type="text" value={currentKey} onChange={e => setCurrentKey(e.target.value)} autoComplete="off" autoFocus />
+              <input className="form-control" type={showKeyValues ? 'text' : 'password'} value={currentKey} onChange={e => setCurrentKey(e.target.value)} autoComplete="off" autoFocus />
             </div>
             <div className="form-group">
               <label className="form-label">New Vault Key ({VAULT_KEY_MINIMUMS[currentKeyType] || 8}+ characters)</label>
-              <input className="form-control" type="text" value={newKey} onChange={e => setNewKey(e.target.value)} autoComplete="off" />
+              <input className="form-control" type={showKeyValues ? 'text' : 'password'} value={newKey} onChange={e => setNewKey(e.target.value)} autoComplete="off" />
             </div>
             <div className="form-group">
               <label className="form-label">Confirm New Key</label>
-              <input className="form-control" type="text" value={confirmKey} onChange={e => setConfirmKey(e.target.value)} autoComplete="off" />
+              <input className="form-control" type={showKeyValues ? 'text' : 'password'} value={confirmKey} onChange={e => setConfirmKey(e.target.value)} autoComplete="off" />
             </div>
             <div className="flex gap-2">
               <button type="submit" className="btn btn-primary" disabled={changingKey}>{changingKey ? 'Changing...' : 'Change Key'}</button>

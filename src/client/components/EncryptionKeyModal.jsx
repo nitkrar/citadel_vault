@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { KeyRound, Copy, Check, AlertTriangle, Shield, Download } from 'lucide-react';
+import { KeyRound, Copy, Check, AlertTriangle, Shield, Download, Eye, EyeOff } from 'lucide-react';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { useAuth } from '../contexts/AuthContext';
 import Modal from '../components/Modal';
@@ -50,6 +50,7 @@ export default function EncryptionKeyModal() {
 
   // For force change (when mustChangeVaultKey)
   const [oldVaultKey, setOldVaultKey] = useState('');
+  const [showVaultKey, setShowVaultKey] = useState(false);
 
   // Block vault modal while loading (prevents flash of setup modal on refresh)
   if (isLoading) return null;
@@ -77,12 +78,20 @@ export default function EncryptionKeyModal() {
 
   const minLen = getVaultKeyMinLength(keyType);
   const inputMode = keyType === 'numeric' ? 'numeric' : undefined;
-  const inputType = 'password';
+  const inputType = showVaultKey ? 'text' : 'password';
   const inputProps = {
     type: inputType,
     ...(inputMode && { inputMode }),
     autoComplete: 'off',
   };
+  const eyeToggleRow = (
+    <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 4 }}>
+      <button type="button" onClick={() => setShowVaultKey(v => !v)}
+        style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px', color: '#6b7280', fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
+        {showVaultKey ? <EyeOff size={14} /> : <Eye size={14} />} {showVaultKey ? 'Hide' : 'Show'}
+      </button>
+    </div>
+  );
 
   // ------------------------------------------------------------------
   // Strength meter (simple visual feedback)
@@ -104,7 +113,7 @@ export default function EncryptionKeyModal() {
     setVaultKey(''); setConfirmKey(''); setError(''); setSubmitting(false);
     setRecoveryKeyDisplay(''); setCopiedRecovery(false); setSavedConfirmed(false);
     setShowRecovery(false); setMode(null); setRecoveryKeyInput('');
-    setNewVaultKey(''); setConfirmNewKey(''); setOldVaultKey('');
+    setNewVaultKey(''); setConfirmNewKey(''); setOldVaultKey(''); setShowVaultKey(false);
   };
 
   // ------------------------------------------------------------------
@@ -285,9 +294,17 @@ export default function EncryptionKeyModal() {
           <div style={{ textAlign: 'center', marginBottom: 16 }}><KeyRound size={40} style={{ color: '#dc2626' }} /></div>
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 12px', marginBottom: 16, color: '#dc2626', fontSize: 13 }}>
             <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
-            <span>{adminActionMessage || 'Your administrator requires you to change your vault key.'}</span>
+            <div>
+              <div>Your administrator requires you to change your vault key.</div>
+              {adminActionMessage && (
+                <div style={{ marginTop: 6, padding: '6px 10px', background: 'rgba(0,0,0,.04)', borderRadius: 6, fontStyle: 'italic', color: '#991b1b' }}>
+                  {adminActionMessage}
+                </div>
+              )}
+            </div>
           </div>
           {error && errorBox}
+          {eyeToggleRow}
           {/* Only show current key field if not already provided from unlock step */}
           {!oldVaultKey && (
             <div style={{ marginBottom: 12 }}>
@@ -345,6 +362,7 @@ export default function EncryptionKeyModal() {
             <label style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}>Recovery Key</label>
             <input type="text" placeholder="Enter your 32-character recovery key" value={recoveryKeyInput} onChange={(e) => setRecoveryKeyInput(e.target.value)} autoComplete="off" autoFocus required style={{ ...inputStyle, fontFamily: 'monospace' }} />
           </div>
+          {eyeToggleRow}
           <div style={{ marginBottom: 12 }}>
             <label style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}>New Vault Key</label>
             <input {...inputProps} placeholder={`${minLen}+ characters`} value={newVaultKey} onChange={(e) => setNewVaultKey(e.target.value)} required style={inputStyle} />
@@ -394,6 +412,7 @@ export default function EncryptionKeyModal() {
             </div>
           </div>
 
+          {eyeToggleRow}
           <div style={{ marginBottom: 12 }}>
             <label style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}>Vault Key</label>
             <input {...inputProps} placeholder={`${minLen}+ characters`} value={vaultKey} onChange={(e) => setVaultKey(e.target.value)} autoFocus required style={inputStyle} />
@@ -424,9 +443,19 @@ export default function EncryptionKeyModal() {
       <form onSubmit={handleUnlock}>
         <div style={{ textAlign: 'center', marginBottom: 16 }}><KeyRound size={40} style={{ color: forceUnlockForChange ? '#dc2626' : '#2563eb' }} /></div>
         {forceUnlockForChange && (
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 12px', marginBottom: 16, color: '#dc2626', fontSize: 13 }}>
-            <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
-            <span>{adminActionMessage || 'Your administrator requires you to change your vault key.'} Enter your current key to continue.</span>
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 12px', color: '#dc2626', fontSize: 13 }}>
+              <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+              <div>
+                <div>Your administrator requires you to change your vault key.</div>
+                {adminActionMessage && (
+                  <div style={{ marginTop: 6, padding: '6px 10px', background: 'rgba(0,0,0,.04)', borderRadius: 6, fontStyle: 'italic', color: '#991b1b' }}>
+                    {adminActionMessage}
+                  </div>
+                )}
+              </div>
+            </div>
+            <p style={{ color: '#6b7280', fontSize: 13, marginTop: 8 }}>Enter your current vault key to continue.</p>
           </div>
         )}
         {!forceUnlockForChange && (
@@ -435,6 +464,7 @@ export default function EncryptionKeyModal() {
           </p>
         )}
         {error && errorBox}
+        {eyeToggleRow}
         <div style={{ marginBottom: 20 }}>
           <label style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}>Vault Key</label>
           <input {...inputProps} placeholder="Enter vault key" value={vaultKey} onChange={(e) => setVaultKey(e.target.value)} autoFocus required style={inputStyle} />

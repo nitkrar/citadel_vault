@@ -1,21 +1,20 @@
 import { useState, useCallback } from 'react';
-import { Layers, Plus, Edit2, Trash2, Lock, AlertTriangle, ArrowUp, Globe, User } from 'lucide-react';
+import { Layers, Plus, Edit2, Trash2, AlertTriangle, ArrowUp, Globe, User } from 'lucide-react';
 import api from '../api/client';
 import Modal from '../components/Modal';
-import { useEncryption } from '../contexts/EncryptionContext';
 import useVaultData from '../hooks/useVaultData';
 import { apiData } from '../lib/checks';
 
-const FIELD_TYPES = ['text', 'secret', 'url', 'textarea', 'number', 'date'];
+const FIELD_TYPES = ['text', 'secret', 'url', 'textarea', 'number', 'date', 'account_link'];
+const ENTRY_TYPES = ['password', 'account', 'asset', 'license', 'insurance', 'custom'];
 
 export default function TemplatesPage() {
-  const { isUnlocked } = useEncryption();
   const [tab, setTab] = useState('global');
   const [showAdd, setShowAdd] = useState(false);
   const [editTemplate, setEditTemplate] = useState(null);
 
   // Form
-  const [form, setForm] = useState({ template_key: 'custom', name: '', icon: '', fields: [] });
+  const [form, setForm] = useState({ template_key: 'custom', name: '', icon: '', subtype: '', country_code: '', fields: [] });
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
 
@@ -74,12 +73,14 @@ export default function TemplatesPage() {
           template_key: form.template_key || 'custom',
           name: form.name,
           icon: form.icon || null,
+          subtype: form.subtype || null,
+          country_code: form.country_code || null,
           fields: form.fields,
         });
       }
       setShowAdd(false);
       setEditTemplate(null);
-      setForm({ template_key: 'custom', name: '', icon: '', fields: [] });
+      setForm({ template_key: 'custom', name: '', icon: '', subtype: '', country_code: '', fields: [] });
       refetch();
     } catch (err) {
       setFormError(err.response?.data?.error || 'Save failed.');
@@ -90,7 +91,7 @@ export default function TemplatesPage() {
 
   const openEdit = (template) => {
     const fields = typeof template.fields === 'string' ? JSON.parse(template.fields) : (template.fields || []);
-    setForm({ template_key: template.template_key, name: template.name, icon: template.icon || '', fields });
+    setForm({ template_key: template.template_key, name: template.name, icon: template.icon || '', subtype: template.subtype || '', country_code: template.country_code || '', fields });
     setEditTemplate(template);
     setFormError('');
   };
@@ -105,19 +106,11 @@ export default function TemplatesPage() {
     }
   };
 
-  if (!isUnlocked) {
-    return (
-      <div className="page-content">
-        <div className="empty-state"><Lock size={40} className="empty-icon" /><h3>Vault is locked</h3></div>
-      </div>
-    );
-  }
-
   return (
     <div className="page-content">
       <div className="page-header">
         <div><h1 className="page-title">Templates</h1><p className="page-subtitle">Manage entry field templates</p></div>
-        <button className="btn btn-primary" onClick={() => { setShowAdd(true); setEditTemplate(null); setForm({ template_key: 'custom', name: '', icon: '', fields: [{ key: 'title', label: 'Title', type: 'text', required: true }] }); setFormError(''); }}>
+        <button className="btn btn-primary" onClick={() => { setShowAdd(true); setEditTemplate(null); setForm({ template_key: 'custom', name: '', icon: '', subtype: '', country_code: '', fields: [{ key: 'title', label: 'Title', type: 'text', required: true }] }); setFormError(''); }}>
           <Plus size={16} /> New Template
         </button>
       </div>
@@ -159,9 +152,33 @@ export default function TemplatesPage() {
       <Modal isOpen={showAdd || !!editTemplate} onClose={() => { setShowAdd(false); setEditTemplate(null); }} title={editTemplate ? 'Edit Template' : 'New Template'}>
         <form onSubmit={handleSave}>
           {formError && <div className="alert alert-danger mb-3">{formError}</div>}
+          {!editTemplate && (
+            <div className="form-group">
+              <label className="form-label">Entry Type</label>
+              <select className="form-control" value={form.template_key} onChange={e => setForm(f => ({ ...f, template_key: e.target.value }))}>
+                {ENTRY_TYPES.map(t => <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}
+              </select>
+            </div>
+          )}
+          {editTemplate && (
+            <div className="form-group">
+              <label className="form-label">Entry Type</label>
+              <input className="form-control" value={form.template_key} disabled style={{ opacity: 0.6 }} />
+            </div>
+          )}
           <div className="form-group">
             <label className="form-label">Name</label>
             <input className="form-control" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required />
+          </div>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <div className="form-group" style={{ flex: 1 }}>
+              <label className="form-label">Subtype <span className="text-muted" style={{ fontSize: 11 }}>(optional)</span></label>
+              <input className="form-control" value={form.subtype} onChange={e => setForm(f => ({ ...f, subtype: e.target.value }))} placeholder="e.g. savings, stock, crypto" />
+            </div>
+            <div className="form-group" style={{ flex: 1 }}>
+              <label className="form-label">Country Code <span className="text-muted" style={{ fontSize: 11 }}>(optional)</span></label>
+              <input className="form-control" value={form.country_code} onChange={e => setForm(f => ({ ...f, country_code: e.target.value.toUpperCase() }))} placeholder="e.g. US, GB, IN" maxLength={2} />
+            </div>
           </div>
           <div className="form-group">
             <label className="form-label">Icon (lucide icon name)</label>
