@@ -11,6 +11,7 @@ export function AuthProvider({ children }) {
   const [mustChangePassword, setMustChangePassword] = useState(false);
   const [mustChangeVaultKey, setMustChangeVaultKey] = useState(false);
   const [adminActionMessage, setAdminActionMessage] = useState(null);
+  const [preferences, setPreferences] = useState({});
 
   // On mount, if we have a stored token, validate it and fetch user info
   useEffect(() => {
@@ -19,14 +20,17 @@ export function AuthProvider({ children }) {
       return;
     }
 
-    api
-      .get('/auth.php?action=me')
-      .then((res) => {
-        const u = res.data.data;
+    Promise.all([
+      api.get('/auth.php?action=me'),
+      api.get('/preferences.php'),
+    ])
+      .then(([meRes, prefsRes]) => {
+        const u = meRes.data.data;
         setUser(u);
         setMustChangePassword(!!u?.must_change_password);
         setMustChangeVaultKey(!!u?.must_change_vault_key);
         setAdminActionMessage(u?.admin_action_message || null);
+        setPreferences(prefsRes.data?.data || prefsRes.data || {});
       })
       .catch(() => {
         // Token is invalid or expired — clean up
@@ -36,6 +40,7 @@ export function AuthProvider({ children }) {
         setMustChangePassword(false);
         setMustChangeVaultKey(false);
         setAdminActionMessage(null);
+        setPreferences({});
       })
       .finally(() => {
         setLoading(false);
@@ -119,6 +124,13 @@ export function AuthProvider({ children }) {
     } catch {}
   };
 
+  const refreshPreferences = async () => {
+    try {
+      const res = await api.get('/preferences.php');
+      setPreferences(res.data?.data || res.data || {});
+    } catch {}
+  };
+
   const value = {
     user,
     token,
@@ -136,6 +148,8 @@ export function AuthProvider({ children }) {
     adminActionMessage,
     clearAdminActionMessage,
     refreshUser,
+    preferences,
+    refreshPreferences,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

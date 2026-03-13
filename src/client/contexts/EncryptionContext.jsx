@@ -4,15 +4,15 @@ import { isTruthy, apiData } from '../lib/checks';
 import * as crypto from '../lib/crypto';
 import { entryStore } from '../lib/entryStore';
 import { getUserPreference, PREFERENCE_DEFAULTS } from '../lib/defaults';
+import { useAuth } from './AuthContext';
 
 const EncryptionContext = createContext(null);
 
 export function EncryptionProvider({ children, user }) {
+  const { preferences } = useAuth();
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [vaultKeyExists, setVaultKeyExists] = useState(false);
-  const [preferences, setPreferences] = useState({});
-  const [pageNotices, setPageNotices] = useState({});
   const [vaultPromptForced, setVaultPromptForced] = useState(null); // null = initial, true = forced, false = skipped
 
   const autoLockTimerRef = useRef(null);
@@ -128,35 +128,20 @@ export function EncryptionProvider({ children, user }) {
         throw new Error('Invalid vault key.');
       }
 
-      // 4. Fetch all vault entries
+      // 4. Fetch vault entries (only encrypted data needs vault unlock)
       const { data: entriesResp } = await api.get('/vault.php');
       const entries = apiData({ data: entriesResp }) || [];
       await entryStore.putAll(entries);
 
-      // 5. Fetch templates
-      const { data: templatesResp } = await api.get('/templates.php');
-      const templates = apiData({ data: templatesResp }) || [];
-      await entryStore.putTemplates(templates);
-
-      // 6. Fetch preferences
-      const { data: prefsResp } = await api.get('/preferences.php');
-      const prefs = apiData({ data: prefsResp }) || {};
-      setPreferences(prefs);
-
-      // 7. Fetch page notices
-      const { data: noticesResp } = await api.get('/dashboard.php?action=page-notices');
-      const notices = apiData({ data: noticesResp }) || {};
-      setPageNotices(notices);
-
-      // 8. Set state
+      // 5. Set state
       setIsUnlocked(true);
       setVaultPromptForced(false);
 
-      // 9. Start auto-lock timer
-      startAutoLock(prefs);
+      // 6. Start auto-lock timer (preferences already loaded on mount)
+      startAutoLock(preferences);
 
-      // 10. Save session for refresh persistence if preference is on
-      if (getUserPreference(prefs, 'vault_persist_session') === 'persist_in_tab') {
+      // 7. Save session for refresh persistence if preference is on
+      if (getUserPreference(preferences, 'vault_persist_session') === 'persist_in_tab') {
         saveSession(keyMaterial, vaultKey);
       }
 
@@ -166,7 +151,7 @@ export function EncryptionProvider({ children, user }) {
     } finally {
       setIsLoading(false);
     }
-  }, [startAutoLock, saveSession]);
+  }, [startAutoLock, saveSession, preferences]);
 
   // ------------------------------------------------------------------
   // Setup vault (first time)
@@ -180,20 +165,11 @@ export function EncryptionProvider({ children, user }) {
       // 2. Send blobs to server for storage
       await api.post('/encryption.php?action=setup', result.keyMaterial);
 
-      // 3. Fetch preferences (may have been set during registration)
-      const { data: prefsResp } = await api.get('/preferences.php');
-      const prefs = apiData({ data: prefsResp }) || {};
-      setPreferences(prefs);
-
-      // 4. Fetch page notices
-      const { data: noticesResp } = await api.get('/dashboard.php?action=page-notices');
-      setPageNotices(apiData({ data: noticesResp }) || {});
-
-      // 5. Set state
+      // 3. Set state (preferences already loaded on mount)
       setIsUnlocked(true);
       setVaultKeyExists(true);
       setVaultPromptForced(false);
-      startAutoLock(prefs);
+      startAutoLock(preferences);
 
       // 6. Return recovery key for user to save
       return { recoveryKey: result.recoveryKey };
@@ -202,7 +178,7 @@ export function EncryptionProvider({ children, user }) {
     } finally {
       setIsLoading(false);
     }
-  }, [startAutoLock]);
+  }, [startAutoLock, preferences]);
 
   // ------------------------------------------------------------------
   // Change vault key
@@ -254,23 +230,13 @@ export function EncryptionProvider({ children, user }) {
         recovery_key_encrypted: result.recovery_key_encrypted,
       });
 
-      // 4. Load entries into IndexedDB
-      const { data: entriesResp } = await api.get('/vault.php');
-      const entries = apiData({ data: entriesResp }) || [];
-      await entryStore.putAll(entries);
-
-      // 5. Load templates
-      const { data: templatesResp } = await api.get('/templates.php');
-      await entryStore.putTemplates(apiData({ data: templatesResp }) || []);
-
-      // 6. Load preferences
-      const { data: prefsResp } = await api.get('/preferences.php');
-      const prefs = apiData({ data: prefsResp }) || {};
-      setPreferences(prefs);
+      // 4. Load vault entries
+      const { data: entriesResp2 } = await api.get('/vault.php');
+      await entryStore.putAll(apiData({ data: entriesResp2 }) || []);
 
       setIsUnlocked(true);
       setVaultPromptForced(false);
-      startAutoLock(prefs);
+      startAutoLock(preferences);
 
       return { recoveryKey: result.recoveryKey };
     } catch (err) {
@@ -278,7 +244,7 @@ export function EncryptionProvider({ children, user }) {
     } finally {
       setIsLoading(false);
     }
-  }, [startAutoLock]);
+  }, [startAutoLock, preferences]);
 
   // ------------------------------------------------------------------
   // View recovery key (vault must be unlocked, DEK available)
@@ -327,15 +293,14 @@ export function EncryptionProvider({ children, user }) {
     const init = async () => {
       setIsLoading(true);
       try {
+        // Fetch key material (preferences already loaded by AuthContext)
         const { data } = await api.get('/encryption.php?action=key-material');
         if (cancelled) return;
+
         const keyMaterial = apiData({ data });
         setVaultKeyExists(isTruthy(keyMaterial.has_vault_key));
 
         // Try to restore session from sessionStorage (refresh persistence)
-        // Session data only exists if user had "persist_in_tab" when they unlocked.
-        // Switching to "lock_on_refresh" clears it immediately in SecurityPage,
-        // so presence of session data = permission to restore. No API call needed.
         const savedVk = sessionStorage.getItem('pv_session_vk');
         const savedSalt = sessionStorage.getItem('pv_session_salt');
         const savedEdek = sessionStorage.getItem('pv_session_edek');
@@ -346,17 +311,10 @@ export function EncryptionProvider({ children, user }) {
               savedVk
             );
             if (success && !cancelled) {
-              const { data: entriesResp } = await api.get('/vault.php');
-              await entryStore.putAll(apiData({ data: entriesResp }) || []);
-              const { data: tplResp } = await api.get('/templates.php');
-              await entryStore.putTemplates(apiData({ data: tplResp }) || []);
-              const { data: prefsResp } = await api.get('/preferences.php');
-              const prefs = apiData({ data: prefsResp }) || {};
-              setPreferences(prefs);
-              const { data: noticesResp } = await api.get('/dashboard.php?action=page-notices');
-              setPageNotices(apiData({ data: noticesResp }) || {});
+              const { data: er } = await api.get('/vault.php');
+              await entryStore.putAll(apiData({ data: er }) || []);
               setIsUnlocked(true);
-              startAutoLock(prefs);
+              startAutoLock(preferences);
             }
           } catch {
             // Session restore failed — clear stale session, user must re-enter vault key
@@ -395,9 +353,6 @@ export function EncryptionProvider({ children, user }) {
     isLoading,
     vaultKeyExists,
     vaultPromptForced,
-    preferences,
-    pageNotices,
-
     // Methods
     unlock,
     lock,

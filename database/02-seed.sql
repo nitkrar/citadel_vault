@@ -39,7 +39,6 @@ INSERT INTO `entry_templates` (`template_key`, `owner_id`, `name`, `icon`, `coun
     JSON_OBJECT('key', 'institution',    'label', 'Institution',     'type', 'text',     'required', false),
     JSON_OBJECT('key', 'account_number', 'label', 'Account Number',  'type', 'secret',   'required', false),
     JSON_OBJECT('key', 'currency',       'label', 'Currency',        'type', 'text',     'required', false),
-    JSON_OBJECT('key', 'balance',        'label', 'Balance',         'type', 'number',   'required', false),
     JSON_OBJECT('key', 'notes',          'label', 'Notes',           'type', 'textarea', 'required', false)
 ));
 
@@ -51,7 +50,6 @@ INSERT INTO `entry_templates` (`template_key`, `owner_id`, `name`, `icon`, `coun
     JSON_OBJECT('key', 'account_number', 'label', 'Account Number',  'type', 'secret',   'required', false),
     JSON_OBJECT('key', 'interest_rate',  'label', 'Interest Rate %', 'type', 'number',   'required', false),
     JSON_OBJECT('key', 'currency',       'label', 'Currency',        'type', 'text',     'required', false),
-    JSON_OBJECT('key', 'balance',        'label', 'Balance',         'type', 'number',   'required', false),
     JSON_OBJECT('key', 'notes',          'label', 'Notes',           'type', 'textarea', 'required', false)
 )),
 ('account', NULL, 'Checking Account', 'bank', NULL, 'checking', JSON_ARRAY(
@@ -60,7 +58,6 @@ INSERT INTO `entry_templates` (`template_key`, `owner_id`, `name`, `icon`, `coun
     JSON_OBJECT('key', 'account_number', 'label', 'Account Number',  'type', 'secret',   'required', false),
     JSON_OBJECT('key', 'routing_number', 'label', 'Routing Number',  'type', 'secret',   'required', false),
     JSON_OBJECT('key', 'currency',       'label', 'Currency',        'type', 'text',     'required', false),
-    JSON_OBJECT('key', 'balance',        'label', 'Balance',         'type', 'number',   'required', false),
     JSON_OBJECT('key', 'notes',          'label', 'Notes',           'type', 'textarea', 'required', false)
 )),
 ('account', NULL, 'Brokerage Account', 'trending-up', NULL, 'brokerage', JSON_ARRAY(
@@ -68,7 +65,6 @@ INSERT INTO `entry_templates` (`template_key`, `owner_id`, `name`, `icon`, `coun
     JSON_OBJECT('key', 'institution',    'label', 'Broker',          'type', 'text',     'required', false),
     JSON_OBJECT('key', 'account_number', 'label', 'Account Number',  'type', 'secret',   'required', false),
     JSON_OBJECT('key', 'currency',       'label', 'Currency',        'type', 'text',     'required', false),
-    JSON_OBJECT('key', 'balance',        'label', 'Balance',         'type', 'number',   'required', false),
     JSON_OBJECT('key', 'notes',          'label', 'Notes',           'type', 'textarea', 'required', false)
 )),
 ('account', NULL, '401(k) / Retirement', 'lock', NULL, '401k', JSON_ARRAY(
@@ -77,24 +73,26 @@ INSERT INTO `entry_templates` (`template_key`, `owner_id`, `name`, `icon`, `coun
     JSON_OBJECT('key', 'account_number',    'label', 'Account Number',      'type', 'secret',   'required', false),
     JSON_OBJECT('key', 'employer_match',    'label', 'Employer Match %',    'type', 'number',   'required', false),
     JSON_OBJECT('key', 'currency',          'label', 'Currency',            'type', 'text',     'required', false),
-    JSON_OBJECT('key', 'balance',           'label', 'Balance',             'type', 'number',   'required', false),
     JSON_OBJECT('key', 'notes',             'label', 'Notes',               'type', 'textarea', 'required', false)
-)),
-('account', NULL, 'Credit Card', 'credit-card', NULL, 'credit_card', JSON_ARRAY(
+));
+
+-- Credit Card (is_liability = 1)
+INSERT INTO `entry_templates` (`template_key`, `owner_id`, `name`, `icon`, `country_code`, `subtype`, `is_liability`, `fields`) VALUES
+('account', NULL, 'Credit Card', 'credit-card', NULL, 'credit_card', 1, JSON_ARRAY(
     JSON_OBJECT('key', 'title',          'label', 'Card Name',       'type', 'text',     'required', true),
     JSON_OBJECT('key', 'institution',    'label', 'Issuer',          'type', 'text',     'required', false),
     JSON_OBJECT('key', 'card_number',    'label', 'Card Number',     'type', 'secret',   'required', false),
     JSON_OBJECT('key', 'credit_limit',   'label', 'Credit Limit',    'type', 'number',   'required', false),
     JSON_OBJECT('key', 'currency',       'label', 'Currency',        'type', 'text',     'required', false),
-    JSON_OBJECT('key', 'balance',        'label', 'Balance',         'type', 'number',   'required', false),
     JSON_OBJECT('key', 'notes',          'label', 'Notes',           'type', 'textarea', 'required', false)
-)),
+));
+
+INSERT INTO `entry_templates` (`template_key`, `owner_id`, `name`, `icon`, `country_code`, `subtype`, `fields`) VALUES
 ('account', NULL, 'Wallet / Prepaid', 'wallet', NULL, 'wallet', JSON_ARRAY(
     JSON_OBJECT('key', 'title',          'label', 'Wallet Name',    'type', 'text',     'required', true),
     JSON_OBJECT('key', 'provider',       'label', 'Provider',       'type', 'text',     'required', false),
     JSON_OBJECT('key', 'account_id',     'label', 'Account ID',     'type', 'secret',   'required', false),
     JSON_OBJECT('key', 'currency',       'label', 'Currency',       'type', 'text',     'required', false),
-    JSON_OBJECT('key', 'balance',        'label', 'Balance',        'type', 'number',   'required', false),
     JSON_OBJECT('key', 'notes',          'label', 'Notes',          'type', 'textarea', 'required', false)
 ));
 
@@ -105,7 +103,6 @@ INSERT INTO `entry_templates` (`template_key`, `owner_id`, `name`, `icon`, `coun
     JSON_OBJECT('key', 'institution',    'label', 'Bank',           'type', 'text',     'required', false),
     JSON_OBJECT('key', 'sort_code',      'label', 'Sort Code',      'type', 'secret',   'required', false),
     JSON_OBJECT('key', 'account_number', 'label', 'Account Number', 'type', 'secret',   'required', false),
-    JSON_OBJECT('key', 'balance',        'label', 'Balance',        'type', 'number',   'required', false),
     JSON_OBJECT('key', 'notes',          'label', 'Notes',          'type', 'textarea', 'required', false)
 )),
 ('account', NULL, 'US Bank Account', 'bank', 'US', NULL, JSON_ARRAY(
@@ -113,7 +110,6 @@ INSERT INTO `entry_templates` (`template_key`, `owner_id`, `name`, `icon`, `coun
     JSON_OBJECT('key', 'institution',    'label', 'Bank',           'type', 'text',     'required', false),
     JSON_OBJECT('key', 'routing_number', 'label', 'Routing Number', 'type', 'secret',   'required', false),
     JSON_OBJECT('key', 'account_number', 'label', 'Account Number', 'type', 'secret',   'required', false),
-    JSON_OBJECT('key', 'balance',        'label', 'Balance',        'type', 'number',   'required', false),
     JSON_OBJECT('key', 'notes',          'label', 'Notes',          'type', 'textarea', 'required', false)
 )),
 ('account', NULL, 'India Bank Account', 'bank', 'IN', NULL, JSON_ARRAY(
@@ -121,7 +117,6 @@ INSERT INTO `entry_templates` (`template_key`, `owner_id`, `name`, `icon`, `coun
     JSON_OBJECT('key', 'institution',    'label', 'Bank',           'type', 'text',     'required', false),
     JSON_OBJECT('key', 'ifsc_code',      'label', 'IFSC Code',      'type', 'text',     'required', false),
     JSON_OBJECT('key', 'account_number', 'label', 'Account Number', 'type', 'secret',   'required', false),
-    JSON_OBJECT('key', 'balance',        'label', 'Balance',        'type', 'number',   'required', false),
     JSON_OBJECT('key', 'notes',          'label', 'Notes',          'type', 'textarea', 'required', false)
 ));
 
@@ -131,14 +126,14 @@ INSERT INTO `entry_templates` (`template_key`, `owner_id`, `name`, `icon`, `coun
     JSON_OBJECT('key', 'title',              'label', 'Asset Name',      'type', 'text',         'required', true),
     JSON_OBJECT('key', 'linked_account_id',  'label', 'Linked Account',  'type', 'account_link', 'required', false),
     JSON_OBJECT('key', 'currency',           'label', 'Currency',        'type', 'text',         'required', false),
-    JSON_OBJECT('key', 'value',              'label', 'Value',           'type', 'number',       'required', false),
+    JSON_OBJECT('key', 'value',              'label', 'Value',           'type', 'number',       'required', false, 'portfolio_role', 'value'),
     JSON_OBJECT('key', 'notes',              'label', 'Notes',           'type', 'textarea',     'required', false)
 )),
 ('asset', NULL, 'Real Estate', 'home', NULL, 'real_estate', JSON_ARRAY(
     JSON_OBJECT('key', 'title',          'label', 'Property Name',  'type', 'text',     'required', true),
     JSON_OBJECT('key', 'address',        'label', 'Address',        'type', 'textarea', 'required', false),
     JSON_OBJECT('key', 'purchase_price', 'label', 'Purchase Price', 'type', 'number',   'required', false),
-    JSON_OBJECT('key', 'current_value',  'label', 'Current Value',  'type', 'number',   'required', false),
+    JSON_OBJECT('key', 'current_value',  'label', 'Current Value',  'type', 'number',   'required', false, 'portfolio_role', 'value'),
     JSON_OBJECT('key', 'currency',       'label', 'Currency',       'type', 'text',     'required', false),
     JSON_OBJECT('key', 'notes',          'label', 'Notes',          'type', 'textarea', 'required', false)
 )),
@@ -147,7 +142,7 @@ INSERT INTO `entry_templates` (`template_key`, `owner_id`, `name`, `icon`, `coun
     JSON_OBJECT('key', 'make_model',    'label', 'Make / Model',    'type', 'text',     'required', false),
     JSON_OBJECT('key', 'year',          'label', 'Year',            'type', 'number',   'required', false),
     JSON_OBJECT('key', 'vin',           'label', 'VIN',             'type', 'secret',   'required', false),
-    JSON_OBJECT('key', 'current_value', 'label', 'Current Value',   'type', 'number',   'required', false),
+    JSON_OBJECT('key', 'current_value', 'label', 'Current Value',   'type', 'number',   'required', false, 'portfolio_role', 'value'),
     JSON_OBJECT('key', 'currency',      'label', 'Currency',        'type', 'text',     'required', false),
     JSON_OBJECT('key', 'notes',         'label', 'Notes',           'type', 'textarea', 'required', false)
 )),
@@ -155,8 +150,8 @@ INSERT INTO `entry_templates` (`template_key`, `owner_id`, `name`, `icon`, `coun
     JSON_OBJECT('key', 'title',              'label', 'Name',             'type', 'text',         'required', true),
     JSON_OBJECT('key', 'linked_account_id',  'label', 'Linked Account',  'type', 'account_link', 'required', false),
     JSON_OBJECT('key', 'ticker',             'label', 'Ticker Symbol',   'type', 'text',         'required', false),
-    JSON_OBJECT('key', 'shares',             'label', 'Shares',          'type', 'number',       'required', false),
-    JSON_OBJECT('key', 'price_per_share',    'label', 'Price per Share', 'type', 'number',       'required', false),
+    JSON_OBJECT('key', 'shares',             'label', 'Shares',          'type', 'number',       'required', false, 'portfolio_role', 'quantity'),
+    JSON_OBJECT('key', 'price_per_share',    'label', 'Price per Share', 'type', 'number',       'required', false, 'portfolio_role', 'price'),
     JSON_OBJECT('key', 'currency',           'label', 'Currency',        'type', 'text',         'required', false),
     JSON_OBJECT('key', 'notes',              'label', 'Notes',           'type', 'textarea',     'required', false)
 )),
@@ -164,26 +159,27 @@ INSERT INTO `entry_templates` (`template_key`, `owner_id`, `name`, `icon`, `coun
     JSON_OBJECT('key', 'title',              'label', 'Bond Name',       'type', 'text',         'required', true),
     JSON_OBJECT('key', 'linked_account_id',  'label', 'Linked Account',  'type', 'account_link', 'required', false),
     JSON_OBJECT('key', 'issuer',             'label', 'Issuer',          'type', 'text',         'required', false),
-    JSON_OBJECT('key', 'face_value',         'label', 'Face Value',      'type', 'number',       'required', false),
+    JSON_OBJECT('key', 'face_value',         'label', 'Face Value',      'type', 'number',       'required', false, 'portfolio_role', 'value'),
     JSON_OBJECT('key', 'coupon_rate',        'label', 'Coupon Rate %',   'type', 'number',       'required', false),
     JSON_OBJECT('key', 'maturity_date',      'label', 'Maturity Date',   'type', 'date',         'required', false),
     JSON_OBJECT('key', 'currency',           'label', 'Currency',        'type', 'text',         'required', false),
     JSON_OBJECT('key', 'notes',              'label', 'Notes',           'type', 'textarea',     'required', false)
 )),
 ('asset', NULL, 'Cryptocurrency', 'bitcoin', NULL, 'crypto', JSON_ARRAY(
-    JSON_OBJECT('key', 'title',              'label', 'Name',            'type', 'text',         'required', true),
-    JSON_OBJECT('key', 'linked_account_id',  'label', 'Linked Account',  'type', 'account_link', 'required', false),
-    JSON_OBJECT('key', 'coin',               'label', 'Coin / Token',   'type', 'text',         'required', false),
-    JSON_OBJECT('key', 'quantity',            'label', 'Quantity',       'type', 'number',       'required', false),
-    JSON_OBJECT('key', 'wallet_address',     'label', 'Wallet Address', 'type', 'secret',       'required', false),
-    JSON_OBJECT('key', 'currency',           'label', 'Currency',       'type', 'text',         'required', false),
-    JSON_OBJECT('key', 'notes',              'label', 'Notes',          'type', 'textarea',     'required', false)
+    JSON_OBJECT('key', 'title',              'label', 'Name',              'type', 'text',         'required', true),
+    JSON_OBJECT('key', 'linked_account_id',  'label', 'Linked Account',    'type', 'account_link', 'required', false),
+    JSON_OBJECT('key', 'coin',               'label', 'Coin / Token',     'type', 'text',         'required', false),
+    JSON_OBJECT('key', 'quantity',            'label', 'Quantity',         'type', 'number',       'required', false, 'portfolio_role', 'quantity'),
+    JSON_OBJECT('key', 'price_per_unit',     'label', 'Price per Unit',   'type', 'number',       'required', false, 'portfolio_role', 'price'),
+    JSON_OBJECT('key', 'wallet_address',     'label', 'Wallet Address',   'type', 'secret',       'required', false),
+    JSON_OBJECT('key', 'currency',           'label', 'Currency',         'type', 'text',         'required', false),
+    JSON_OBJECT('key', 'notes',              'label', 'Notes',            'type', 'textarea',     'required', false)
 )),
 ('asset', NULL, 'Cash Equivalent', 'banknote', NULL, 'cash_equivalent', JSON_ARRAY(
     JSON_OBJECT('key', 'title',              'label', 'Name',            'type', 'text',         'required', true),
     JSON_OBJECT('key', 'linked_account_id',  'label', 'Linked Account',  'type', 'account_link', 'required', false),
     JSON_OBJECT('key', 'currency',           'label', 'Currency',        'type', 'text',         'required', false),
-    JSON_OBJECT('key', 'value',              'label', 'Value',           'type', 'number',       'required', false),
+    JSON_OBJECT('key', 'value',              'label', 'Value',           'type', 'number',       'required', false, 'portfolio_role', 'value'),
     JSON_OBJECT('key', 'notes',              'label', 'Notes',           'type', 'textarea',     'required', false)
 ));
 

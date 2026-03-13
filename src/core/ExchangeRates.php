@@ -59,9 +59,9 @@ class ExchangeRates {
         $historyStmt = null;
         try {
             $historyStmt = $db->prepare(
-                "INSERT INTO currency_rate_history (currency_id, rate_to_base, recorded_at)
-                 VALUES (?, ?, CURDATE())
-                 ON DUPLICATE KEY UPDATE rate_to_base = VALUES(rate_to_base)"
+                "INSERT INTO currency_rate_history (currency_id, rate_to_base, base_currency, recorded_at)
+                 VALUES (?, ?, ?, CURDATE())
+                 ON DUPLICATE KEY UPDATE rate_to_base = VALUES(rate_to_base), base_currency = VALUES(base_currency)"
             );
         } catch (Exception $e) {
             // Table may not exist yet
@@ -74,7 +74,7 @@ class ExchangeRates {
                 $updateStmt->execute([$rateToBase, $currency['id']]);
                 if ($historyStmt) {
                     try {
-                        $historyStmt->execute([$currency['id'], $rateToBase]);
+                        $historyStmt->execute([$currency['id'], $rateToBase, $baseCurrency]);
                     } catch (Exception $e) {
                         // History table may not exist — skip silently
                         $historyStmt = null;

@@ -1,8 +1,8 @@
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import { Layers, Plus, Edit2, Trash2, AlertTriangle, ArrowUp, Globe, User } from 'lucide-react';
 import api from '../api/client';
 import Modal from '../components/Modal';
-import useVaultData from '../hooks/useVaultData';
+import useTemplates from '../hooks/useTemplates';
 import { apiData } from '../lib/checks';
 
 const FIELD_TYPES = ['text', 'secret', 'url', 'textarea', 'number', 'date', 'account_link'];
@@ -18,13 +18,7 @@ export default function TemplatesPage() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
 
-  // ── Fetch templates ──────────────────────────────────────────────
-  const fetchTemplates = useCallback(async () => {
-    const { data: resp } = await api.get('/templates.php');
-    return apiData({ data: resp }) || [];
-  }, []);
-
-  const { data: templates, loading, refetch } = useVaultData(fetchTemplates, []);
+  const { templates, loading, refetchTemplates: refetch } = useTemplates();
 
   const globalTemplates = templates.filter(t => !t.owner_id);
   const myTemplates = templates.filter(t => t.owner_id);

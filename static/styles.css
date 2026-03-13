@@ -868,6 +868,11 @@ html.dark .modal-overlay {
   }
 }
 
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
 /* ---------- Empty State ---------- */
 .empty-state {
   text-align: center;
@@ -1112,7 +1117,8 @@ html.dark .modal-overlay {
 }
 
 /* Sidebar NavLink styling */
-.sidebar-nav a {
+.sidebar-nav a,
+.sidebar-nav button {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
@@ -1124,9 +1130,14 @@ html.dark .modal-overlay {
   cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast);
   text-decoration: none;
+  background: none;
+  border: none;
+  width: 100%;
+  text-align: left;
 }
 
-.sidebar-nav a:hover {
+.sidebar-nav a:hover,
+.sidebar-nav button:hover {
   background: var(--sidebar-hover);
   color: #f1f5f9;
   text-decoration: none;
@@ -1439,4 +1450,47 @@ td.td-checkbox input[type="checkbox"] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ========================================================================== */
+/* Portfolio Page                                                              */
+/* ========================================================================== */
+
+.portfolio-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+}
+
+.portfolio-chart-row {
+  display: flex;
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+  flex-wrap: wrap;
+}
+
+@media (max-width: 768px) {
+  .portfolio-summary-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .portfolio-chart-row {
+    flex-direction: column;
+  }
+
+  .tabs {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tab {
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
 }
