@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { EncryptionProvider } from './contexts/EncryptionContext';
+import { SyncProvider } from './contexts/SyncContext';
 import Modal from './components/Modal';
 import Layout from './components/Layout';
 import api from './api/client';
@@ -192,7 +193,11 @@ function AppRoutes() {
 // --- EncryptionWrapper ---
 function EncryptionWrapper({ children }) {
   const { user } = useAuth();
-  return <EncryptionProvider user={user}>{children}</EncryptionProvider>;
+  return (
+    <EncryptionProvider user={user}>
+      <SyncProvider>{children}</SyncProvider>
+    </EncryptionProvider>
+  );
 }
 
 // --- App ---

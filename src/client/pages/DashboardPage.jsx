@@ -26,11 +26,17 @@ function getGreeting() {
 
 export default function DashboardPage() {
   const { user } = useAuth();
-  const { isUnlocked, pageNotices } = useEncryption();
+  const { isUnlocked } = useEncryption();
 
   const fetchStats = useCallback(async () => {
-    const { data: resp } = await api.get('/dashboard.php?action=stats');
-    return apiData({ data: resp });
+    const [statsResp, noticesResp] = await Promise.all([
+      api.get('/dashboard.php?action=stats'),
+      api.get('/dashboard.php?action=page-notices'),
+    ]);
+    return {
+      ...apiData({ data: statsResp }),
+      _notices: apiData({ data: noticesResp }) || {},
+    };
   }, []);
 
   const { data: stats, loading, errorMessage } = useVaultData(fetchStats, null);
@@ -60,6 +66,7 @@ export default function DashboardPage() {
 
   const entryCounts = stats?.entry_counts || {};
   const totalEntries = Object.values(entryCounts).reduce((a, b) => a + b, 0);
+  const pageNotices = stats?._notices || {};
 
   return (
     <div className="page-content">

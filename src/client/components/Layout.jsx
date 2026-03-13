@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useEncryption } from '../contexts/EncryptionContext';
 import PageNotice from './PageNotice';
 import ShortcutOverlay from './ShortcutOverlay';
+import SyncToast from './SyncToast';
 import useKeyboardShortcuts from '../hooks/useKeyboardShortcuts';
 import { isWebAuthnSupported, registerPasskey } from './WebAuthnLogin';
 import api from '../api/client';
@@ -234,9 +235,7 @@ export default function Layout() {
                 <HelpCircle size={18} /> Help &amp; FAQ
               </a>
               {isDesktop && (
-                <button onClick={() => setShowShortcuts(true)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none', cursor: 'pointer', padding: '6px 12px', fontSize: 14, color: 'inherit', width: '100%', borderRadius: 6 }}
-                  className="nav-link-style">
+                <button onClick={() => setShowShortcuts(true)}>
                   <Keyboard size={18} /> Shortcuts
                   <kbd style={{ marginLeft: 'auto', fontSize: 10, opacity: 0.5, background: 'rgba(255,255,255,0.1)', borderRadius: 3, padding: '1px 5px' }}>Ctrl+/</kbd>
                 </button>
@@ -339,6 +338,7 @@ export default function Layout() {
         {showShortcuts && (
           <ShortcutOverlay onClose={() => setShowShortcuts(false)} settings={shortcutSettings} />
         )}
+        <SyncToast />
       </div>
     </HideAmountsContext.Provider>
   );

@@ -9,6 +9,7 @@ require_once __DIR__ . '/../core/Auth.php';
 require_once __DIR__ . '/../core/Encryption.php';
 require_once __DIR__ . '/../core/ExchangeRates.php';
 require_once __DIR__ . '/../core/Mailer.php';
+require_once __DIR__ . '/../core/Storage.php';
 
 Response::setCors();
 
@@ -400,6 +401,15 @@ if ($method === 'GET' && $action === 'me') {
 
     $user['id'] = (int)$user['id'];
 
+    // Add display_currency preference
+    try {
+        $storage = \Storage::adapter();
+        $prefs = $storage->getPreferences($userId);
+        $user['display_currency'] = $prefs['display_currency'] ?? null;
+    } catch (Exception $e) {
+        $user['display_currency'] = null;
+    }
+
     // Add RSA key status flags for profile display
     try {
         $stmt3 = $db->prepare("SELECT public_key, encrypted_private_key FROM users WHERE id = ?");
@@ -706,7 +716,7 @@ if ($method === 'POST' && $action === 'forgot-password') {
         // audit_log table may not exist — non-fatal
     }
 
-    // Generate JWT and create data session
+    // Generate JWT
     $tokenUser = [
         'id'       => $userId,
         'username' => $user['username'],
@@ -714,22 +724,6 @@ if ($method === 'POST' && $action === 'forgot-password') {
         'role'     => $user['role'],
     ];
     $token = Auth::generateToken($tokenUser);
-
-    // Create data session token
-    $pref = 'session';
-    try {
-        $stmt = $db->prepare("SELECT vault_session_preference FROM users WHERE id = ?");
-        $stmt->execute([$userId]);
-        $pref = $stmt->fetchColumn() ?: 'session';
-    } catch (Exception $e) {}
-
-    $expiry = match($pref) {
-        'timed' => time() + DATA_SESSION_EXPIRY_TIMED,
-        'login' => time() + DATA_SESSION_EXPIRY_LOGIN,
-        default => time() + DATA_SESSION_EXPIRY_SESSION,
-    };
-    $dataToken = Encryption::createDataSessionToken($dek, $expiry);
-    Encryption::setDataTokenCookie($dataToken, $expiry);
 
     Response::success([
         'token'        => $token,
@@ -740,8 +734,6 @@ if ($method === 'POST' && $action === 'forgot-password') {
             'role'     => $user['role'],
         ],
         'recovery_key' => $newRecoveryKey,
-        'data_token'   => $dataToken,
-        'expires_at'   => $expiry,
     ]);
 }
 

@@ -127,6 +127,9 @@ define('BCRYPT_COST', (int)env('BCRYPT_COST', 12));
 define('APP_NAME', env('APP_NAME', 'Personal Vault'));
 define('APP_TAGLINE', env('APP_TAGLINE', 'Secure Personal Hub'));
 
+// Sync polling
+define('SYNC_POLL_INTERVAL', (int)env('SYNC_POLL_INTERVAL', 900)); // 15 minutes
+
 // Registration
 define('SELF_REGISTRATION', filter_var(env('SELF_REGISTRATION', 'false'), FILTER_VALIDATE_BOOLEAN));
 define('REQUIRE_EMAIL_VERIFICATION', filter_var(env('REQUIRE_EMAIL_VERIFICATION', 'false'), FILTER_VALIDATE_BOOLEAN));

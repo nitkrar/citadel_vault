@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import api from '../api/client';
+import { invalidateReferenceCache } from '../hooks/useReferenceData';
 import Modal from '../components/Modal';
 import useSort from '../hooks/useSort';
 import SortableTh from '../components/SortableTh';
@@ -399,6 +400,7 @@ export default function AdminPage() {
     setRefreshingRates(true);
     try {
       await api.post('/reference.php?resource=refresh-rates');
+      invalidateReferenceCache('currencies');
       await loadCurrencies();
     } catch (err) {
       alert(err.response?.data?.error || 'Failed to refresh rates.');
@@ -412,6 +414,7 @@ export default function AdminPage() {
     setTogglingCurrency(c.id);
     try {
       await api.put(`/reference.php?resource=currencies&id=${c.id}`, { is_active: newActive });
+      invalidateReferenceCache('currencies');
       setCurrencies(prev => prev.map(cur => cur.id === c.id ? { ...cur, is_active: newActive } : cur));
     } catch (err) {
       alert(err.response?.data?.error || 'Failed to toggle currency.');

@@ -399,4 +399,16 @@ if ($resource === 'refresh-rates') {
     ]);
 }
 
+// ============================================================================
+// CONFIG — Expose server configuration to client
+// ============================================================================
+if ($resource === 'config') {
+    if ($method === 'GET') {
+        Response::success([
+            'base_currency' => BASE_CURRENCY,
+        ]);
+    }
+    Response::error('Method not allowed.', 405);
+}
+
 Response::error('Invalid resource.', 404);

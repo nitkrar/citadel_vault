@@ -38,7 +38,8 @@ class MariaDbAdapter implements StorageAdapter {
         $sql = 'SELECT ve.id, ve.entry_type, ve.template_id, ve.schema_version,
                        ve.encrypted_data, ve.created_at, ve.updated_at,
                        et.template_key, et.name AS template_name, et.icon AS template_icon,
-                       et.fields AS template_fields
+                       et.fields AS template_fields,
+                       et.subtype AS template_subtype, et.is_liability AS template_is_liability
                 FROM vault_entries ve
                 LEFT JOIN entry_templates et ON ve.template_id = et.id
                 WHERE ve.user_id = ? AND ve.deleted_at IS NULL';
@@ -64,7 +65,8 @@ class MariaDbAdapter implements StorageAdapter {
             'SELECT ve.id, ve.entry_type, ve.template_id, ve.schema_version,
                     ve.encrypted_data, ve.created_at, ve.updated_at,
                     et.template_key, et.name AS template_name, et.icon AS template_icon,
-                    et.fields AS template_fields
+                    et.fields AS template_fields,
+                    et.subtype AS template_subtype, et.is_liability AS template_is_liability
              FROM vault_entries ve
              LEFT JOIN entry_templates et ON ve.template_id = et.id
              WHERE ve.id = ? AND ve.user_id = ? AND ve.deleted_at IS NULL'
@@ -390,7 +392,7 @@ class MariaDbAdapter implements StorageAdapter {
     public function getTemplates(int $userId): array {
         // Return global templates (owner_id IS NULL) and user's own custom templates
         $stmt = $this->db->prepare(
-            'SELECT id, template_key, owner_id, name, icon, country_code, subtype,
+            'SELECT id, template_key, owner_id, name, icon, country_code, subtype, is_liability,
                     schema_version, fields, is_active, promotion_requested,
                     promotion_requested_at, created_at, updated_at
              FROM entry_templates
@@ -497,10 +499,12 @@ class MariaDbAdapter implements StorageAdapter {
             return null;
         }
         return [
-            'name'   => $row['template_name'],
-            'icon'   => $row['template_icon'] ?? null,
-            'key'    => $row['template_key'] ?? null,
-            'fields' => isset($row['template_fields']) ? (json_decode($row['template_fields'], true) ?? []) : [],
+            'name'         => $row['template_name'],
+            'icon'         => $row['template_icon'] ?? null,
+            'key'          => $row['template_key'] ?? null,
+            'subtype'      => $row['template_subtype'] ?? null,
+            'is_liability' => isset($row['template_is_liability']) ? (bool)(int)$row['template_is_liability'] : false,
+            'fields'       => isset($row['template_fields']) ? (json_decode($row['template_fields'], true) ?? []) : [],
         ];
     }
 }

@@ -59,6 +59,13 @@ export default function useVaultData(fetchFn, initialValue = null, options = {})
     refetch();
   }, [isUnlocked, refetch]);
 
+  // Listen for cross-device sync refresh events
+  useEffect(() => {
+    const handler = () => refetch();
+    window.addEventListener('vault-sync-refresh', handler);
+    return () => window.removeEventListener('vault-sync-refresh', handler);
+  }, [refetch]);
+
   const errorMessage = error
     ? error.response?.data?.error || error.message || 'An unexpected error occurred.'
     : null;

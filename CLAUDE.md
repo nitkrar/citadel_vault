@@ -67,11 +67,15 @@
 > PROMPT USER once per session: "There are backlog items and pending decisions in CLAUDE.md — want to review or work on any?"
 
 ### Backlog (features & fixes)
-- **Reference data caching**: Countries/currencies are fetched from `reference.php` on every page load (VaultPage, AdminPage, BulkWizard). Should cache in IndexedDB with TTL (e.g., 24h). Centralize into a shared hook or utility instead of duplicating fetch calls. Expand later to cache templates too.
-- **Dead code in auth.php (lines ~715-730)**: Server-side data session token logic (`DATA_SESSION_EXPIRY_TIMED`, `DATA_SESSION_EXPIRY_LOGIN`, `vault_session_preference` column) — references constants not defined in config.php and a column not in schema. Should be removed.
 - **Keyboard shortcuts on mobile**: Currently hidden. User mentioned possibly adding gesture-based equivalents (e.g., long-press to lock) — deferred.
 - **SMTP setup for prod**: SMTP is disabled. Needed for: invite emails, lockout notifications, password reset, email verification. Decide on email provider for HelioHost.
 - **Portfolio overhaul**: Currency-aware aggregation, breakdowns by asset type/account type/country. See MEMORY.md for full details.
+- **User-selectable base currency**: Portfolio should let users pick their display currency (e.g., USD, GBP, INR). Server stores rates as `X → GBP`. Cross-conversion via triangulation: `INR → GBP → USD` = `amount * rate_to_gbp / usd_rate_to_gbp`. Currently the `BASE_CURRENCY` env var (GBP) is server-only — needs client exposure and a per-user preference.
+- **Currency rates viewer**: Users should be able to see the exchange rate data we've pulled (all currencies with their `exchange_rate_to_base` and `last_updated` timestamp). Should show "last synced" (client poll time) and "last updated" (server `last_updated` from DB). Could live on the Portfolio page as a collapsible section, or a dedicated "Exchange Rates" page/modal. Helps users verify rates before trusting portfolio totals.
+- **Historical currency rates**: Users can view/select exchange rates from a specific past date. Server already stores rate history in `currency_rate_history` table. Expose via API and let users pick a date to see what rates were on that day. Useful for portfolio snapshots or verifying past valuations.
+- **User-configurable sync interval**: User setting in Profile to override the server default poll interval (e.g., 1 min, 5 min, 15 min, off). Stored as user preference. Falls back to server default if not set.
+- **Delta sync (future)**: Instead of full reload on sync, fetch only changed/new/deleted entries via `GET /vault.php?since=<timestamp>`. Needs soft deletes or tombstones. Optimization for when users have hundreds of entries.
+- **Web Worker scaffolding**: Set up a dedicated Web Worker for offloading CPU-intensive work (bulk encryption/decryption, snapshot creation, future import/export processing). DEK would be passed via `postMessage`. Not urgent for current entry counts but keeps getting deferred — should be designed as foundational infrastructure before the next feature that needs it.
 
 ### Pending Decisions
 - **Session vs Manual auto-lock**: Currently functionally identical when `persist_in_tab` is set (both rely on sessionStorage which clears on tab close). Consider whether Manual should use localStorage for true cross-tab persistence, or remove Manual as an option.

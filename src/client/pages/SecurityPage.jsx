@@ -26,8 +26,8 @@ function Section({ icon: Icon, title, defaultOpen = false, danger = false, child
 }
 
 export default function SecurityPage() {
-  const { isUnlocked, preferences, changeVaultKey, viewRecoveryKey, lock } = useEncryption();
-  const { user } = useAuth();
+  const { isUnlocked, changeVaultKey, viewRecoveryKey, lock } = useEncryption();
+  const { user, preferences } = useAuth();
 
   // ── Vault Key Change ─────────────────────────────────────────────
   const [showChangeKey, setShowChangeKey] = useState(false);
@@ -70,6 +70,38 @@ export default function SecurityPage() {
       setChangeError(err.message || 'Failed to change vault key.');
     } finally {
       setChangingKey(false);
+    }
+  };
+
+  // ── Login Password Change ────────────────────────────────────────
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassValues, setShowPassValues] = useState(false);
+  const [changingPw, setChangingPw] = useState(false);
+  const [pwError, setPwError] = useState('');
+  const [pwSuccess, setPwSuccess] = useState('');
+
+  const handleChangePassword = async (e) => {
+    e.preventDefault();
+    setPwError(''); setPwSuccess('');
+    if (!currentPassword || !newPassword) { setPwError('All fields are required.'); return; }
+    if (newPassword !== confirmPassword) { setPwError('New passwords do not match.'); return; }
+    if (newPassword.length < 8) { setPwError('Password must be at least 8 characters.'); return; }
+
+    setChangingPw(true);
+    try {
+      await api.put('/auth.php?action=password', {
+        current_password: currentPassword,
+        new_password: newPassword,
+        confirm_password: confirmPassword,
+      });
+      setPwSuccess('Password changed successfully.');
+      setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
+    } catch (err) {
+      setPwError(err.response?.data?.error || 'Failed to change password.');
+    } finally {
+      setChangingPw(false);
     }
   };
 
@@ -325,6 +357,40 @@ export default function SecurityPage() {
             </div>
           </form>
         )}
+      </Section>
+
+      {/* ── Login Password ────────────────────────────────────── */}
+      <Section icon={Lock} title="Login Password">
+        <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 12 }}>
+          This is your login password, separate from your vault key.
+        </p>
+        {pwSuccess && <div className="alert alert-success mb-3"><Check size={14} /> {pwSuccess}</div>}
+        <form onSubmit={handleChangePassword} style={{ maxWidth: 400 }}>
+          {pwError && <div className="alert alert-danger mb-3">{pwError}</div>}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 4 }}>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowPassValues(v => !v)} style={{ fontSize: 12, gap: 4 }}>
+              {showPassValues ? <EyeOff size={14} /> : <Eye size={14} />} {showPassValues ? 'Hide' : 'Show'}
+            </button>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Current Password</label>
+            <input className="form-control" type={showPassValues ? 'text' : 'password'} value={currentPassword}
+              onChange={e => setCurrentPassword(e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">New Password</label>
+            <input className="form-control" type={showPassValues ? 'text' : 'password'} value={newPassword}
+              onChange={e => setNewPassword(e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Confirm New Password</label>
+            <input className="form-control" type={showPassValues ? 'text' : 'password'} value={confirmPassword}
+              onChange={e => setConfirmPassword(e.target.value)} />
+          </div>
+          <button type="submit" className="btn btn-primary" disabled={changingPw}>
+            {changingPw ? 'Changing...' : 'Update Password'}
+          </button>
+        </form>
       </Section>
 
       {/* ── RSA Keys (Sharing) ─────────────────────────────────── */}

@@ -6,6 +6,9 @@ import { useEncryption } from '../contexts/EncryptionContext';
 import { entryStore } from '../lib/entryStore';
 import { VALID_ENTRY_TYPES } from '../lib/defaults';
 import { apiData } from '../lib/checks';
+import useCountries from '../hooks/useCountries';
+import useCurrencies from '../hooks/useCurrencies';
+import useTemplates from '../hooks/useTemplates';
 import ImportModal from '../components/ImportModal';
 import {
   Plus, Edit2, Trash2, Search, Eye, EyeOff, Copy, Check, Lock,
@@ -37,13 +40,12 @@ export default function VaultPage() {
 
   const [entries, setEntries] = useState([]);
   const [decryptedCache, setDecryptedCache] = useState({});
-  const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // Reference data
-  const [countries, setCountries] = useState([]);
-  const [currencies, setCurrencies] = useState([]);
+  const { countries } = useCountries();
+  const { currencies } = useCurrencies();
+  const { templates } = useTemplates();
 
   // Filters
   const [activeType, setActiveType] = useState('all');
@@ -66,28 +68,6 @@ export default function VaultPage() {
 
   // Post-save prompt for accounts (link/create assets)
   const [postSaveAccount, setPostSaveAccount] = useState(null); // entry object after save
-
-  // ── Fetch reference data (countries + currencies) ─────────────────
-  useEffect(() => {
-    if (!isUnlocked) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const [cRes, curRes] = await Promise.all([
-          api.get('/reference.php?resource=countries'),
-          api.get('/reference.php?resource=currencies'),
-        ]);
-        if (cancelled) return;
-        const rawCountries = apiData({ data: cRes.data }) || [];
-        const rawCurrencies = apiData({ data: curRes.data }) || [];
-        setCountries(rawCountries);
-        setCurrencies(rawCurrencies);
-      } catch {
-        // Non-critical — selectors will just be empty
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [isUnlocked]);
 
   // ── Formatted options for SearchableSelect ─────────────────────────
   const countryOptions = useMemo(() =>
@@ -142,8 +122,6 @@ export default function VaultPage() {
     setLoading(true);
     try {
       const raw = await entryStore.getAll();
-      const tpl = await entryStore.getAllTemplates();
-      setTemplates(tpl);
 
       // Decrypt all entries
       const cache = {};
