@@ -31,6 +31,7 @@ import {
   Moon,
   HelpCircle,
   Keyboard,
+  ExternalLink,
 } from 'lucide-react';
 
 // --- Hide Amounts Context ---
@@ -233,6 +234,7 @@ export default function Layout() {
               <span className="nav-section-label">Help</span>
               <a href="/help" target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <HelpCircle size={18} /> Help &amp; FAQ
+                <ExternalLink size={12} style={{ marginLeft: 'auto', opacity: 0.5 }} />
               </a>
               {isDesktop && (
                 <button onClick={() => setShowShortcuts(true)}>
