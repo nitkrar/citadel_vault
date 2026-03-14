@@ -59,6 +59,9 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: { '@': path.resolve(__dirname, 'src/client') },
     },
+    test: {
+      include: ['tests/unit/**/*.test.js'],
+    },
     server: {
       port: 5173,
       proxy: {
