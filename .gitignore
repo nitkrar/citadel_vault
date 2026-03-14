@@ -9,4 +9,4 @@ __pycache__/
 .claude/
 CLAUDE.md
 SECURITY_AUDIT*.md
-docs/plans/
+docs/
