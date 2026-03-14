@@ -19,6 +19,9 @@ RewriteRule ^static/ - [F,L]
 # Allow version.json through before the block rule
 RewriteRule ^(.*/)?(version\.json)$ - [L]
 
+# Allow robots.txt through
+RewriteRule ^robots\.txt$ - [L]
+
 # Block sensitive file types (RewriteRule-based — avoids Require/mod_authz_core issues on shared hosting)
 RewriteRule \.(env|sql|md|sh|py|lock|log|txt|json)$ - [F,L]
 
