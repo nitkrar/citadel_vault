@@ -107,7 +107,86 @@ export async function registerPasskey(api, name) {
 }
 
 // ============================================================================
-// Authentication Flow
+// Conditional Mediation (Autofill) Flow
+// ============================================================================
+
+let _mediationController = null;
+
+/**
+ * Start conditional mediation — passkeys appear in the browser autofill UI.
+ * Silently no-ops on unsupported browsers.
+ *
+ * @param {import('axios').AxiosInstance} api  Axios instance (no JWT needed)
+ * @param {(data: object) => void} onSuccess  Called with auth result on success
+ * @param {(err: Error) => void}   onError    Called on non-cancellation errors
+ */
+export async function startConditionalMediation(api, onSuccess, onError) {
+  try {
+    if (
+      !window.PublicKeyCredential ||
+      !PublicKeyCredential.isConditionalMediationAvailable ||
+      !(await PublicKeyCredential.isConditionalMediationAvailable())
+    ) {
+      return; // Browser doesn't support conditional mediation
+    }
+
+    // Get challenge from server
+    const optionsRes = await api.post('/webauthn.php?action=auth-options');
+    const { challengeId, publicKey } = optionsRes.data.data;
+
+    // Set up abort controller
+    _mediationController = new AbortController();
+
+    // Request credential with conditional mediation (autofill)
+    const assertion = await navigator.credentials.get({
+      publicKey: {
+        ...publicKey,
+        challenge: base64urlDecode(publicKey.challenge),
+        allowCredentials: [],
+      },
+      mediation: 'conditional',
+      signal: _mediationController.signal,
+    });
+
+    // Encode response for server
+    const clientDataJSON = base64urlEncode(assertion.response.clientDataJSON);
+    const authenticatorData = base64urlEncode(assertion.response.authenticatorData);
+    const signature = base64urlEncode(assertion.response.signature);
+    const credentialId = base64urlEncode(assertion.rawId);
+
+    // Verify with server
+    const verifyRes = await api.post('/webauthn.php?action=auth-verify', {
+      challengeId,
+      clientDataJSON,
+      authenticatorData,
+      signature,
+      credentialId,
+    });
+
+    _mediationController = null;
+    onSuccess(verifyRes.data.data);
+  } catch (err) {
+    _mediationController = null;
+    // Silently ignore user cancellation and abort
+    if (err.name === 'AbortError' || err.name === 'NotAllowedError') {
+      return;
+    }
+    if (onError) onError(err);
+  }
+}
+
+/**
+ * Abort any pending conditional mediation request.
+ */
+export function abortConditionalMediation() {
+  if (_mediationController) {
+    _mediationController.abort();
+    _mediationController = null;
+  }
+}
+
+// ============================================================================
+// Authentication Flow (Explicit / Button Click)
 // ============================================================================
 
 /**

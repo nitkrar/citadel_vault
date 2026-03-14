@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Database, Eye, EyeOff, Fingerprint, Lock, User } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { isWebAuthnSupported } from '../components/WebAuthnLogin';
+import { isWebAuthnSupported, startConditionalMediation, abortConditionalMediation } from '../components/WebAuthnLogin';
+import api from '../api/client';
 
 const APP_NAME = import.meta.env.VITE_APP_NAME || 'Personal Vault';
 const APP_TAGLINE = import.meta.env.VITE_APP_TAGLINE || 'Secure Personal Hub';
@@ -16,14 +17,35 @@ export default function LoginPage() {
   const [passkeySupported, setPasskeySupported] = useState(false);
   const [passkeyLoading, setPasskeyLoading] = useState(false);
 
-  const { login, loginWithPasskey } = useAuth();
+  const { login, loginWithToken, loginWithPasskey } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
-    setPasskeySupported(isWebAuthnSupported());
+    const supported = isWebAuthnSupported();
+    setPasskeySupported(supported);
+
+    if (supported) {
+      startConditionalMediation(
+        api,
+        (result) => {
+          loginWithToken(result);
+          navigate('/');
+        },
+        (err) => {
+          setError(
+            err.response?.data?.error ||
+              err.response?.data?.message ||
+              'Passkey authentication failed.'
+          );
+        }
+      );
+    }
+
+    return () => abortConditionalMediation();
   }, []);
 
   const handlePasskeyLogin = async () => {
+    abortConditionalMediation();
     setError('');
     setPasskeyLoading(true);
     try {
@@ -43,6 +65,7 @@ export default function LoginPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    abortConditionalMediation();
     setError('');
     setSubmitting(true);
 
@@ -91,6 +114,7 @@ export default function LoginPage() {
                 placeholder="Enter your username or email"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
+                autoComplete="username webauthn"
                 required
                 autoFocus
               />
@@ -108,6 +132,7 @@ export default function LoginPage() {
                 placeholder="Enter your password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
                 required
               />
               <button
