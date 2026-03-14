@@ -9,4 +9,6 @@ __pycache__/
 .claude/
 CLAUDE.md
 SECURITY_AUDIT*.md
+TODO.md
 docs/
+skills/
