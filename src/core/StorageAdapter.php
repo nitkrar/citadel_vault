@@ -136,6 +136,22 @@ interface StorageAdapter {
      */
     function createSnapshot(int $userId, string $date, string $encryptedData): int;
 
+    /**
+     * Create a snapshot with per-entry rows (split model).
+     * @param int    $userId        Owner user ID
+     * @param string $date          Snapshot date (YYYY-MM-DD)
+     * @param string $encryptedMeta Encrypted metadata blob (base_currency, date)
+     * @param array  $entries       Array of [entry_id => int|null, encrypted_data => string]
+     * @return int The new snapshot ID
+     */
+    function createSnapshotWithEntries(int $userId, string $date, string $encryptedMeta, array $entries): int;
+
+    /**
+     * Get snapshots with per-entry data for a user.
+     * @return array List of snapshots, each with 'entries' sub-array
+     */
+    function getSnapshotsWithEntries(int $userId, ?string $fromDate = null, ?string $toDate = null): array;
+
     // =========================================================================
     // Audit Log
     // =========================================================================

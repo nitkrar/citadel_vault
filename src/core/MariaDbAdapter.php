@@ -344,6 +344,99 @@ class MariaDbAdapter implements StorageAdapter {
         return (int)$this->db->lastInsertId();
     }
 
+    public function createSnapshotWithEntries(int $userId, string $date, string $encryptedMeta, array $entries): int {
+        $this->db->beginTransaction();
+        try {
+            // Insert header row
+            $stmt = $this->db->prepare(
+                'INSERT INTO portfolio_snapshots (user_id, snapshot_date, encrypted_data)
+                 VALUES (?, ?, ?)'
+            );
+            $stmt->execute([$userId, $date, $encryptedMeta]);
+            $snapshotId = (int)$this->db->lastInsertId();
+
+            // Batch insert entry rows
+            if (!empty($entries)) {
+                $stmt = $this->db->prepare(
+                    'INSERT INTO portfolio_snapshot_entries (snapshot_id, entry_id, encrypted_data)
+                     VALUES (?, ?, ?)'
+                );
+                foreach ($entries as $entry) {
+                    $stmt->execute([
+                        $snapshotId,
+                        $entry['entry_id'] ?? null,
+                        $entry['encrypted_data'],
+                    ]);
+                }
+            }
+
+            $this->db->commit();
+            return $snapshotId;
+        } catch (\Exception $e) {
+            $this->db->rollBack();
+            throw $e;
+        }
+    }
+
+    public function getSnapshotsWithEntries(int $userId, ?string $fromDate = null, ?string $toDate = null): array {
+        // Fetch snapshot headers
+        $sql = 'SELECT id, snapshot_date, snapshot_time, encrypted_data
+                FROM portfolio_snapshots
+                WHERE user_id = ?';
+        $params = [$userId];
+
+        if ($fromDate !== null) {
+            $sql .= ' AND snapshot_date >= ?';
+            $params[] = $fromDate;
+        }
+        if ($toDate !== null) {
+            $sql .= ' AND snapshot_date <= ?';
+            $params[] = $toDate;
+        }
+
+        $sql .= ' ORDER BY snapshot_date ASC, snapshot_time ASC';
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+        $snapshots = $stmt->fetchAll();
+
+        if (empty($snapshots)) {
+            return [];
+        }
+
+        // Collect snapshot IDs and build lookup
+        $snapshotIds = array_column($snapshots, 'id');
+        $indexed = [];
+        foreach ($snapshots as &$s) {
+            $s['entries'] = [];
+            $indexed[(int)$s['id']] = &$s;
+        }
+        unset($s);
+
+        // Fetch all entries for these snapshots in one query
+        $placeholders = implode(',', array_fill(0, count($snapshotIds), '?'));
+        $stmt = $this->db->prepare(
+            "SELECT snapshot_id, entry_id, encrypted_data
+             FROM portfolio_snapshot_entries
+             WHERE snapshot_id IN ({$placeholders})
+             ORDER BY id ASC"
+        );
+        $stmt->execute($snapshotIds);
+        $entryRows = $stmt->fetchAll();
+
+        foreach ($entryRows as $row) {
+            $sid = (int)$row['snapshot_id'];
+            if (isset($indexed[$sid])) {
+                $indexed[$sid]['entries'][] = [
+                    'entry_id'       => $row['entry_id'] !== null ? (int)$row['entry_id'] : null,
+                    'encrypted_data' => $row['encrypted_data'],
+                ];
+            }
+        }
+
+        return $snapshots;
+    }
+
     // =========================================================================
     // Audit Log
     // =========================================================================

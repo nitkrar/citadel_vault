@@ -16,6 +16,7 @@ import useSort from '../hooks/useSort';
 import SortableTh from '../components/SortableTh';
 import api from '../api/client';
 import { fmtCurrency, MASKED, apiData } from '../lib/checks';
+import { buildRateMap, recalculateSnapshot } from '../lib/portfolioAggregator';
 
 const CHART_COLORS = [
   '#3b82f6', '#22c55e', '#f59e0b', '#ef4444',
@@ -64,31 +65,41 @@ export default function PortfolioPage() {
     setExpandedGroups(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
-  // ── Save snapshot ──────────────────────────────────────────────
+  // ── Save snapshot (split model v3) ──────────────────────────────
   const handleSaveSnapshot = async () => {
     if (!portfolio) return;
     setSnapshotSaving(true);
     try {
-      const snapshotData = {
-        v: 2,
+      // Encrypt metadata header
+      const meta = {
         base_currency: baseCurrency,
-        display_currency: displayCurrency,
-        total_assets: portfolio.summary.total_assets,
-        total_liabilities: portfolio.summary.total_liabilities,
-        net_worth: portfolio.summary.net_worth,
-        asset_count: portfolio.summary.asset_count,
-        by_type: Object.entries(portfolio.by_type).map(([k, v]) => ({
-          type: k, label: v.label, total: v.total, count: v.count,
-        })),
-        by_currency: Object.entries(portfolio.by_currency).map(([k, v]) => ({
-          code: k, total: v.total, count: v.count,
-        })),
         date: new Date().toISOString(),
       };
-      const blob = await encrypt(snapshotData);
+      const encryptedMeta = await encrypt(meta);
+
+      // Encrypt each asset entry individually
+      const entries = [];
+      for (const asset of portfolio.assets) {
+        const entryBlob = {
+          name: asset.name,
+          template_name: asset.template_name,
+          subtype: asset.subtype,
+          is_liability: asset.is_liability,
+          currency: asset.currency,
+          raw_value: asset.rawValue,
+          icon: asset.icon,
+        };
+        const encryptedEntry = await encrypt(entryBlob);
+        entries.push({
+          entry_id: asset.id,
+          encrypted_data: encryptedEntry,
+        });
+      }
+
       await api.post('/snapshots.php', {
         snapshot_date: new Date().toISOString().split('T')[0],
-        encrypted_data: blob,
+        encrypted_meta: encryptedMeta,
+        entries,
       });
       alert('Snapshot saved.');
     } catch (err) {
@@ -199,7 +210,7 @@ export default function PortfolioPage() {
           {activeTab === 'type' && <TypeTab groups={p.by_type} fmtD={fmtD} />}
           {activeTab === 'assets' && <AllAssetsTab assets={p.assets} fmtD={fmtD} />}
           {activeTab === 'currencies' && <CurrencyTab groups={p.by_currency} fmtD={fmtD} />}
-          {activeTab === 'history' && <HistoryTab decrypt={decrypt} encrypt={encrypt} fmtD={fmtD} hideAmounts={hideAmounts} />}
+          {activeTab === 'history' && <HistoryTab decrypt={decrypt} encrypt={encrypt} fmtD={fmtD} hideAmounts={hideAmounts} currencies={currencies} displayCurrency={displayCurrency} baseCurrency={baseCurrency} />}
         </>
       )}
     </div>
@@ -557,10 +568,16 @@ function CurrencyTab({ groups, fmtD }) {
 // History Tab
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-function HistoryTab({ decrypt, fmtD, hideAmounts }) {
+function HistoryTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrency, baseCurrency }) {
   const [snapshots, setSnapshots] = useState([]);
   const [loadingSnap, setLoadingSnap] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [rateMode, setRateMode] = useState('current'); // 'current' | 'snapshot'
+  const [historicalRatesCache, setHistoricalRatesCache] = useState({}); // date → rateMap
+  const [loadingRates, setLoadingRates] = useState(false);
+
+  // Build current rate map from live currencies
+  const currentRateMap = useMemo(() => buildRateMap(currencies || []), [currencies]);
 
   const loadSnapshots = async () => {
     setLoadingSnap(true);
@@ -570,10 +587,26 @@ function HistoryTab({ decrypt, fmtD, hideAmounts }) {
       const decrypted = [];
       for (const s of raw) {
         try {
-          const d = await decrypt(s.data || s.encrypted_data);
-          decrypted.push({ ...s, _d: d });
+          // Decrypt meta blob
+          const meta = await decrypt(s.data || s.encrypted_data);
+
+          // Decrypt per-entry blobs if present (v3 split model)
+          let entries = null;
+          if (s.entries && s.entries.length > 0) {
+            entries = [];
+            for (const e of s.entries) {
+              try {
+                const d = await decrypt(e.encrypted_data);
+                entries.push({ ...d, entry_id: e.entry_id });
+              } catch {
+                // skip entries that fail to decrypt
+              }
+            }
+          }
+
+          decrypted.push({ ...s, _meta: meta, _entries: entries });
         } catch {
-          decrypted.push({ ...s, _d: null });
+          decrypted.push({ ...s, _meta: null, _entries: null });
         }
       }
       setSnapshots(decrypted);
@@ -581,6 +614,52 @@ function HistoryTab({ decrypt, fmtD, hideAmounts }) {
     setLoadingSnap(false);
     setLoaded(true);
   };
+
+  // Fetch historical rates for a specific date (cached)
+  const fetchHistoricalRates = async (date) => {
+    if (historicalRatesCache[date]) return historicalRatesCache[date];
+    setLoadingRates(true);
+    try {
+      const { data: resp } = await api.get(`/reference.php?resource=historical-rates&date=${date}`);
+      const ratesData = apiData({ data: resp });
+      if (ratesData?.rates) {
+        const rateMap = {};
+        for (const [code, rate] of Object.entries(ratesData.rates)) {
+          rateMap[code] = rate;
+        }
+        setHistoricalRatesCache(prev => ({ ...prev, [date]: rateMap }));
+        setLoadingRates(false);
+        return rateMap;
+      }
+    } catch { /* fallback to current */ }
+    setLoadingRates(false);
+    return null;
+  };
+
+  // Preload historical rates when switching to snapshot mode
+  const handleRateModeChange = async (mode) => {
+    setRateMode(mode);
+    if (mode === 'snapshot') {
+      const dates = [...new Set(snapshots.map(s => s.snapshot_date))];
+      for (const date of dates) {
+        if (!historicalRatesCache[date]) {
+          await fetchHistoricalRates(date);
+        }
+      }
+    }
+  };
+
+  // Compute summary for a v3 snapshot using recalculateSnapshot
+  const getSnapshotSummary = (snapshot) => {
+    if (!snapshot._entries || snapshot._entries.length === 0) return null;
+    const rateMap = rateMode === 'snapshot'
+      ? (historicalRatesCache[snapshot.snapshot_date] || currentRateMap)
+      : currentRateMap;
+    return recalculateSnapshot(snapshot._entries, rateMap, displayCurrency);
+  };
+
+  // Check if any snapshot has entries (v3)
+  const hasV3Snapshots = snapshots.some(s => s._entries && s._entries.length > 0);
 
   if (!loaded) {
     return (
@@ -606,17 +685,47 @@ function HistoryTab({ decrypt, fmtD, hideAmounts }) {
     );
   }
 
-  // Line chart data (need 2+ snapshots)
+  // Build chart data — use recalculateSnapshot for v3, fallback for legacy
   const chartData = snapshots
-    .filter(s => s._d)
-    .map(s => ({
-      date: s.snapshot_date,
-      net_worth: s._d.net_worth ?? s._d.total ?? (s._d.assets + (s._d.accounts || 0)),
-    }))
+    .filter(s => s._meta || s._entries)
+    .map(s => {
+      const summary = getSnapshotSummary(s);
+      if (summary) {
+        return { date: s.snapshot_date, net_worth: summary.net_worth };
+      }
+      // Legacy v2 fallback
+      const d = s._meta;
+      if (!d) return null;
+      return {
+        date: s.snapshot_date,
+        net_worth: d.net_worth ?? d.total ?? (d.assets + (d.accounts || 0)),
+      };
+    })
+    .filter(Boolean)
     .sort((a, b) => a.date.localeCompare(b.date));
 
   return (
     <>
+      {/* Rate toggle — only show if v3 snapshots exist */}
+      {hasV3Snapshots && (
+        <div className="card mb-4" style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>Rates:</span>
+          <button
+            className={`btn btn-sm ${rateMode === 'current' ? 'btn-primary' : 'btn-ghost'}`}
+            onClick={() => handleRateModeChange('current')}
+          >
+            Today's rates
+          </button>
+          <button
+            className={`btn btn-sm ${rateMode === 'snapshot' ? 'btn-primary' : 'btn-ghost'}`}
+            onClick={() => handleRateModeChange('snapshot')}
+            disabled={loadingRates}
+          >
+            {loadingRates ? 'Loading...' : 'Snapshot rates'}
+          </button>
+        </div>
+      )}
+
       {chartData.length >= 2 && (
         <div className="card mb-4" style={{ padding: 16 }}>
           <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Net Worth Over Time</h4>
@@ -646,7 +755,22 @@ function HistoryTab({ decrypt, fmtD, hideAmounts }) {
             </thead>
             <tbody>
               {[...snapshots].reverse().map((s, i) => {
-                const d = s._d;
+                // v3 split model — recalculate from entries
+                const summary = getSnapshotSummary(s);
+                if (summary) {
+                  return (
+                    <tr key={i}>
+                      <td>{s.snapshot_date}</td>
+                      <td style={{ textAlign: 'right', fontWeight: 500 }}>{fmtD(summary.net_worth)}</td>
+                      <td style={{ textAlign: 'right' }}>{fmtD(summary.total_assets)}</td>
+                      <td style={{ textAlign: 'right' }}>{fmtD(summary.total_liabilities)}</td>
+                      <td style={{ textAlign: 'right' }}>{summary.asset_count}</td>
+                    </tr>
+                  );
+                }
+
+                // Legacy v2/v1 fallback
+                const d = s._meta;
                 const isV2 = d?.v === 2;
                 return (
                   <tr key={i}>

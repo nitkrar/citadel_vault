@@ -81,6 +81,66 @@ export function buildSymbolMap(currencies) {
 }
 
 /**
+ * Recalculate a snapshot from its per-entry blobs using a given rate map.
+ * Used by HistoryTab to recompute totals at snapshot-time or current rates.
+ *
+ * @param {Array} entries - Decrypted snapshot entry blobs [{name, template_name, subtype, is_liability, currency, raw_value, icon}]
+ * @param {object} rateMap - Currency code → rate_to_base map
+ * @param {string} displayCurrency - User's display currency
+ * @returns {object} { total_assets, total_liabilities, net_worth, asset_count, by_type, by_currency, entries }
+ */
+export function recalculateSnapshot(entries, rateMap, displayCurrency) {
+  let totalAssets = 0;
+  let totalLiabilities = 0;
+  let assetCount = 0;
+  const byType = {};
+  const byCurrency = {};
+  const enrichedEntries = [];
+
+  for (const e of entries) {
+    if (!e || e.raw_value === undefined) continue;
+
+    const currency = e.currency || displayCurrency;
+    const displayValue = convertCurrency(e.raw_value, currency, displayCurrency, rateMap);
+
+    assetCount++;
+
+    if (e.is_liability) {
+      totalLiabilities += Math.abs(displayValue);
+    } else {
+      totalAssets += displayValue;
+    }
+
+    // Group by type
+    const typeKey = e.subtype || e.template_name || 'other';
+    if (!byType[typeKey]) {
+      byType[typeKey] = { total: 0, count: 0, label: e.template_name || typeKey };
+    }
+    byType[typeKey].total += displayValue;
+    byType[typeKey].count++;
+
+    // Group by currency
+    if (!byCurrency[currency]) {
+      byCurrency[currency] = { total: 0, count: 0 };
+    }
+    byCurrency[currency].total += displayValue;
+    byCurrency[currency].count++;
+
+    enrichedEntries.push({ ...e, displayValue });
+  }
+
+  return {
+    total_assets: totalAssets,
+    total_liabilities: totalLiabilities,
+    net_worth: totalAssets - totalLiabilities,
+    asset_count: assetCount,
+    by_type: byType,
+    by_currency: byCurrency,
+    entries: enrichedEntries,
+  };
+}
+
+/**
  * Main aggregation function. Returns structured portfolio data.
  *
  * @param {Array} entries - Decrypted vault entries [{id, entry_type, decrypted, template}]

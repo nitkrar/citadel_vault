@@ -297,6 +297,52 @@ class InMemoryAdapter implements StorageAdapter {
         return $id;
     }
 
+    private array $snapshotEntries = [];
+    private int $snapshotEntrySeq = 0;
+
+    public function createSnapshotWithEntries(int $userId, string $date, string $encryptedMeta, array $entries): int {
+        $id = ++$this->snapshotSeq;
+        $now = date('Y-m-d H:i:s');
+        $this->snapshots[$id] = [
+            'id'             => $id,
+            'user_id'        => $userId,
+            'snapshot_date'  => $date,
+            'snapshot_time'  => $now,
+            'encrypted_data' => $encryptedMeta,
+        ];
+
+        foreach ($entries as $entry) {
+            $eid = ++$this->snapshotEntrySeq;
+            $this->snapshotEntries[$eid] = [
+                'id'             => $eid,
+                'snapshot_id'    => $id,
+                'entry_id'       => $entry['entry_id'] ?? null,
+                'encrypted_data' => $entry['encrypted_data'],
+            ];
+        }
+
+        return $id;
+    }
+
+    public function getSnapshotsWithEntries(int $userId, ?string $fromDate = null, ?string $toDate = null): array {
+        $snapshots = $this->getSnapshots($userId, $fromDate, $toDate);
+
+        foreach ($snapshots as &$s) {
+            $s['entries'] = [];
+            foreach ($this->snapshotEntries as $e) {
+                if ($e['snapshot_id'] === $s['id']) {
+                    $s['entries'][] = [
+                        'entry_id'       => $e['entry_id'],
+                        'encrypted_data' => $e['encrypted_data'],
+                    ];
+                }
+            }
+        }
+        unset($s);
+
+        return $snapshots;
+    }
+
     // =========================================================================
     // Audit Log
     // =========================================================================

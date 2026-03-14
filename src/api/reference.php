@@ -400,6 +400,44 @@ if ($resource === 'refresh-rates') {
 }
 
 // ============================================================================
+// HISTORICAL RATES — Read from currency_rate_history by date
+// ============================================================================
+if ($resource === 'historical-rates') {
+    if ($method === 'GET') {
+        $date = Response::sanitizeDate($_GET['date'] ?? null);
+        if (!$date) {
+            Response::error('Valid date (YYYY-MM-DD) is required.', 400);
+        }
+
+        $stmt = $db->prepare(
+            'SELECT c.code, crh.rate_to_base, crh.base_currency
+             FROM currency_rate_history crh
+             JOIN currencies c ON crh.currency_id = c.id
+             WHERE crh.recorded_at = ?'
+        );
+        $stmt->execute([$date]);
+        $rows = $stmt->fetchAll();
+
+        if (empty($rows)) {
+            Response::error('No rates found for this date.', 404);
+        }
+
+        $rates = [];
+        $baseCurrency = $rows[0]['base_currency'];
+        foreach ($rows as $row) {
+            $rates[$row['code']] = (float)$row['rate_to_base'];
+        }
+
+        Response::success([
+            'date'          => $date,
+            'base_currency' => $baseCurrency,
+            'rates'         => $rates,
+        ]);
+    }
+    Response::error('Method not allowed.', 405);
+}
+
+// ============================================================================
 // CONFIG — Expose server configuration to client
 // ============================================================================
 if ($resource === 'config') {
