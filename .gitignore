@@ -12,3 +12,5 @@ SECURITY_AUDIT*.md
 TODO.md
 docs/
 skills/
+tests/.venv/
+.pytest_cache/

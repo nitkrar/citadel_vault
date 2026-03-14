@@ -7,8 +7,11 @@
     "dev": "vite",
     "build": "node scripts/bump-build.js && vite build && node scripts/write-version.js",
     "preview": "vite preview",
-    "test:setup": "python3 scripts/seed_data.py",
-    "test": "python3 scripts/test_api.py"
+    "test:setup": "python3 -m venv tests/.venv && tests/.venv/bin/pip install -q -r tests/requirements.txt",
+    "test": "vitest run && tests/.venv/bin/pytest tests/api/ -v",
+    "test:unit": "vitest run",
+    "test:api": "tests/.venv/bin/pytest tests/api/ -v",
+    "test:api:quick": "tests/.venv/bin/pytest tests/api/ -v --tb=short"
   },
   "dependencies": {
     "axios": "^1.13.0",
@@ -23,6 +26,7 @@
   "devDependencies": {
     "@vitejs/plugin-react": "^5.1.0",
     "vite": "^7.3.0",
-    "vite-plugin-pwa": "^1.2.0"
+    "vite-plugin-pwa": "^1.2.0",
+    "vitest": "^4.1.0"
   }
 }
