@@ -62,16 +62,20 @@ export function AuthProvider({ children }) {
     return res.data.data;
   };
 
-  const loginWithPasskey = async () => {
-    // No server-side data tokens in client-side encryption mode
-    const result = await authenticateWithPasskey(api);
-    const { token: newToken, user: newUser } = result;
+  const loginWithToken = (data) => {
+    const { token: newToken, user: newUser } = data;
     localStorage.setItem('pv_token', newToken);
     setToken(newToken);
     setUser(newUser);
     setMustChangePassword(!!newUser?.must_change_password);
     setMustChangeVaultKey(!!newUser?.must_change_vault_key);
     setAdminActionMessage(newUser?.admin_action_message || null);
+  };
+
+  const loginWithPasskey = async () => {
+    // No server-side data tokens in client-side encryption mode
+    const result = await authenticateWithPasskey(api);
+    loginWithToken(result);
     return result;
   };
 
@@ -136,6 +140,7 @@ export function AuthProvider({ children }) {
     token,
     loading,
     login,
+    loginWithToken,
     loginWithPasskey,
     logout,
     register,

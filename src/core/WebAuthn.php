@@ -363,7 +363,7 @@ function webauthnRegisterOptions(PDO $db, int $userId, string $username): array 
             'excludeCredentials'   => $excludeCredentials,
             'authenticatorSelection' => [
                 'authenticatorAttachment' => 'platform',
-                'residentKey'             => 'preferred',
+                'residentKey'             => 'required',
                 'userVerification'        => 'preferred',
             ],
         ],
@@ -492,22 +492,6 @@ function webauthnAuthOptions(PDO $db): array {
     $stmt->execute([$challengeB64]);
     $challengeId = (int)$db->lastInsertId();
 
-    // Get all registered credentials for allowCredentials
-    // (empty array = discoverable / resident key flow)
-    $stmt = $db->prepare(
-        "SELECT credential_id FROM user_credentials_webauthn"
-    );
-    $stmt->execute();
-    $allCreds = $stmt->fetchAll(PDO::FETCH_COLUMN);
-
-    $allowCredentials = [];
-    foreach ($allCreds as $credId) {
-        $allowCredentials[] = [
-            'type' => 'public-key',
-            'id'   => $credId,
-        ];
-    }
-
     $options = [
         'challengeId' => $challengeId,
         'publicKey'   => [
@@ -515,7 +499,7 @@ function webauthnAuthOptions(PDO $db): array {
             'challenge'         => $challengeB64,
             'timeout'           => 60000,
             'userVerification'  => 'preferred',
-            'allowCredentials'  => $allowCredentials,
+            'allowCredentials'  => [],
         ],
     ];
 
