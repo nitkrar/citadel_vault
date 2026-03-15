@@ -152,6 +152,7 @@ INSERT INTO `entry_templates` (`template_key`, `owner_id`, `name`, `icon`, `coun
     JSON_OBJECT('key', 'ticker',             'label', 'Ticker Symbol',   'type', 'text',         'required', false),
     JSON_OBJECT('key', 'shares',             'label', 'Shares',          'type', 'number',       'required', false, 'portfolio_role', 'quantity'),
     JSON_OBJECT('key', 'price_per_share',    'label', 'Price per Share', 'type', 'number',       'required', false, 'portfolio_role', 'price'),
+    JSON_OBJECT('key', 'cost_price',         'label', 'Cost Price',      'type', 'number',       'required', false),
     JSON_OBJECT('key', 'currency',           'label', 'Currency',        'type', 'text',         'required', false),
     JSON_OBJECT('key', 'notes',              'label', 'Notes',           'type', 'textarea',     'required', false)
 )),
@@ -171,6 +172,7 @@ INSERT INTO `entry_templates` (`template_key`, `owner_id`, `name`, `icon`, `coun
     JSON_OBJECT('key', 'coin',               'label', 'Coin / Token',     'type', 'text',         'required', false),
     JSON_OBJECT('key', 'quantity',            'label', 'Quantity',         'type', 'number',       'required', false, 'portfolio_role', 'quantity'),
     JSON_OBJECT('key', 'price_per_unit',     'label', 'Price per Unit',   'type', 'number',       'required', false, 'portfolio_role', 'price'),
+    JSON_OBJECT('key', 'cost_price',         'label', 'Cost Price',       'type', 'number',       'required', false),
     JSON_OBJECT('key', 'wallet_address',     'label', 'Wallet Address',   'type', 'secret',       'required', false),
     JSON_OBJECT('key', 'currency',           'label', 'Currency',         'type', 'text',         'required', false),
     JSON_OBJECT('key', 'notes',              'label', 'Notes',            'type', 'textarea',     'required', false)
@@ -560,6 +562,20 @@ INSERT INTO `countries` (`name`, `code`, `flag_emoji`, `display_order`) VALUES
 ('Yemen',                    'YE', '🇾🇪', 999),
 ('Zambia',                   'ZM', '🇿🇲', 999),
 ('Zimbabwe',                 'ZW', '🇿🇼', 999);
+
+-- =============================================================================
+-- EXCHANGES — Stock exchange reference data
+-- =============================================================================
+
+INSERT INTO `exchanges` (`country_code`, `name`, `suffix`, `display_order`) VALUES
+    ('US', 'NYSE',    '',   1),
+    ('US', 'NASDAQ',  '',   2),
+    ('GB', 'LSE',     'L',  1),
+    ('IN', 'NSE',     'NS', 1),
+    ('IN', 'BSE',     'BO', 2),
+    ('JP', 'TSE',     'T',  1),
+    ('HK', 'HKEX',    'HK', 1),
+    ('AU', 'ASX',     'AX', 1);
 
 -- =============================================================================
 -- LINK COUNTRIES TO DEFAULT CURRENCIES

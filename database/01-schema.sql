@@ -253,6 +253,44 @@ CREATE TABLE `currency_rate_history` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================================================
+-- STOCK / CRYPTO PRICE FETCH
+-- =============================================================================
+
+-- Exchanges reference table — maps countries to stock exchanges and Yahoo suffixes
+CREATE TABLE `exchanges` (
+    `id`            INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `country_code`  VARCHAR(10) NOT NULL,
+    `name`          VARCHAR(50) NOT NULL,
+    `suffix`        VARCHAR(10) NOT NULL DEFAULT '',
+    `display_order` INT NOT NULL DEFAULT 0,
+    PRIMARY KEY (`id`),
+    KEY `idx_exchanges_country` (`country_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Ticker price cache — server-side cache of Yahoo Finance prices
+CREATE TABLE `ticker_prices` (
+    `ticker`     VARCHAR(20) NOT NULL,
+    `exchange`   VARCHAR(50) DEFAULT NULL,
+    `price`      DECIMAL(15,8) NOT NULL,
+    `currency`   VARCHAR(10) NOT NULL,
+    `name`       VARCHAR(255) DEFAULT NULL,
+    `fetched_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`ticker`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Ticker price history — permanent daily price record
+CREATE TABLE `ticker_price_history` (
+    `id`          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `ticker`      VARCHAR(20) NOT NULL,
+    `exchange`    VARCHAR(50) DEFAULT NULL,
+    `price`       DECIMAL(15,8) NOT NULL,
+    `currency`    VARCHAR(10) NOT NULL,
+    `recorded_at` DATE NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_ticker_date` (`ticker`, `recorded_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================================================
 -- SUPPORTING TABLES (carried forward)
 -- =============================================================================
 
