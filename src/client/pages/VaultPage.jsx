@@ -28,6 +28,53 @@ const TYPE_META = {
 // Types that get country/currency selectors
 const TYPES_WITH_COUNTRY = ['account', 'asset', 'insurance', 'license'];
 
+// Inline editable number field for linked asset values
+function InlineNumberField({ label, value, currency, isEditing, editValue, saving, onStartEdit, onChange, onSave, onCancel }) {
+  const displayValue = value ? `${currency ? currency + ' ' : ''}${Number(value).toLocaleString()}` : '—';
+
+  if (isEditing) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <span className="text-muted" style={{ fontSize: 11 }}>{label}:</span>
+        <input
+          type="number"
+          className="form-control"
+          value={editValue}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); onSave(); } if (e.key === 'Escape') onCancel(); }}
+          autoFocus
+          disabled={saving}
+          step="any"
+          style={{ width: 110, height: 28, fontSize: 13, padding: '2px 6px' }}
+        />
+        <button className="btn btn-ghost btn-sm" onClick={onSave} disabled={saving} style={{ padding: '2px 4px' }}>
+          <Check size={13} />
+        </button>
+        <button className="btn btn-ghost btn-sm" onClick={onCancel} style={{ padding: '2px 4px' }}>
+          <X size={13} />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <span
+      onClick={onStartEdit}
+      title={`Click to edit ${label}`}
+      style={{
+        fontSize: 13, cursor: 'pointer', padding: '2px 6px', borderRadius: 4,
+        border: '1px solid transparent', transition: 'border-color .15s',
+      }}
+      onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--border)'}
+      onMouseLeave={e => e.currentTarget.style.borderColor = 'transparent'}
+    >
+      <span className="text-muted" style={{ fontSize: 11 }}>{label}: </span>
+      <span className="font-medium">{displayValue}</span>
+      <Edit2 size={10} style={{ marginLeft: 4, opacity: 0.4, verticalAlign: -1 }} />
+    </span>
+  );
+}
+
 function generatePassword(len = 20) {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+-=';
   const arr = new Uint32Array(len);
@@ -68,6 +115,11 @@ export default function VaultPage() {
 
   // Post-save prompt for accounts (link/create assets)
   const [postSaveAccount, setPostSaveAccount] = useState(null); // entry object after save
+  // Inline cash balance for account creation (Option B)
+  const [inlineCashBalance, setInlineCashBalance] = useState('');
+  // Inline editing of linked asset values
+  const [inlineEditAsset, setInlineEditAsset] = useState(null); // { id, field, value }
+  const [inlineEditSaving, setInlineEditSaving] = useState(false);
 
   // ── Formatted options for SearchableSelect ─────────────────────────
   const countryOptions = useMemo(() =>
@@ -223,8 +275,16 @@ export default function VaultPage() {
       setEntries(prev => [newEntry, ...prev]);
       setShowAdd(false);
       setForm({});
-      // Prompt to link/create assets after saving an account
-      if (savedType === 'account') {
+      // If inline balance was provided (Option B), auto-create Cash asset
+      if (savedType === 'account' && inlineCashBalance && parseFloat(inlineCashBalance) > 0) {
+        try {
+          await autoCreateCashAsset(newEntry, inlineCashBalance, savedForm);
+        } catch {
+          // Cash asset failed but account was saved — don't block
+        }
+        setInlineCashBalance('');
+      } else if (savedType === 'account') {
+        // No inline balance — show post-save modal (Option A)
         setPostSaveAccount(newEntry);
       }
     } catch (err) {
@@ -357,6 +417,76 @@ export default function VaultPage() {
     setShowAdd(true);
     setFormError('');
     setViewEntry(null);
+  };
+
+  // ── Open add-cash-asset modal pre-linked to an account (Option A) ──
+  const openAddCashAsset = (accountEntry) => {
+    const acctData = decryptedCache[accountEntry.id];
+    setFormType('asset');
+    const cashTpl = templates.find(t => t.template_key === 'asset' && t.subtype === 'cash' && !t.owner_id);
+    setFormTemplateId(cashTpl?.id || null);
+    const newForm = {
+      title: `${acctData?.title || 'Account'} — Cash`,
+      linked_account_id: String(accountEntry.id),
+    };
+    if (acctData?.country) newForm.country = acctData.country;
+    if (acctData?.currency) newForm.currency = acctData.currency;
+    setForm(newForm);
+    setShowAdd(true);
+    setFormError('');
+    setPostSaveAccount(null);
+  };
+
+  // ── Auto-create a Cash asset linked to an account (Option B) ──
+  const autoCreateCashAsset = async (accountEntry, balance, acctData) => {
+    const cashTpl = templates.find(t => t.template_key === 'asset' && t.subtype === 'cash' && !t.owner_id);
+    const cashForm = {
+      title: `${acctData?.title || 'Account'} — Cash`,
+      linked_account_id: String(accountEntry.id),
+      value: balance,
+    };
+    if (acctData?.country) cashForm.country = acctData.country;
+    if (acctData?.currency) cashForm.currency = acctData.currency;
+
+    const blob = await encrypt(cashForm);
+    const { data: resp } = await api.post('/vault.php', {
+      entry_type: 'asset',
+      template_id: cashTpl?.id || null,
+      encrypted_data: blob,
+    });
+    const cashId = apiData({ data: resp })?.id;
+    const cashEntry = {
+      id: cashId,
+      entry_type: 'asset',
+      template_id: cashTpl?.id || null,
+      data: blob,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    await entryStore.put(cashEntry);
+    setDecryptedCache(prev => ({ ...prev, [cashId]: cashForm }));
+    setEntries(prev => [cashEntry, ...prev]);
+  };
+
+  // ── Inline edit a linked asset field ────────────────────────────
+  const saveInlineAssetEdit = async (assetEntry, fieldKey, newValue) => {
+    const d = decryptedCache[assetEntry.id];
+    if (!d) return;
+    const updated = { ...d, [fieldKey]: newValue };
+    setInlineEditSaving(true);
+    try {
+      const blob = await encrypt(updated);
+      await api.put(`/vault.php?id=${assetEntry.id}`, { encrypted_data: blob });
+      const updatedEntry = { ...assetEntry, data: blob, updated_at: new Date().toISOString() };
+      await entryStore.put(updatedEntry);
+      setDecryptedCache(prev => ({ ...prev, [assetEntry.id]: updated }));
+      setEntries(prev => prev.map(e => e.id === assetEntry.id ? updatedEntry : e));
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to update.');
+    } finally {
+      setInlineEditSaving(false);
+      setInlineEditAsset(null);
+    }
   };
 
   // ── Open edit modal ──────────────────────────────────────────────
@@ -729,13 +859,34 @@ export default function VaultPage() {
       )}
 
       {/* Add Modal */}
-      <Modal isOpen={showAdd} onClose={() => setShowAdd(false)} title={`Add ${TYPE_META[formType]?.label?.replace(/s$/, '') || 'Entry'}`}>
+      <Modal isOpen={showAdd} onClose={() => { setShowAdd(false); setInlineCashBalance(''); }} title={`Add ${TYPE_META[formType]?.label?.replace(/s$/, '') || 'Entry'}`}>
         <form onSubmit={handleCreate}>
           {formError && <div className="alert alert-danger mb-3">{formError}</div>}
           {renderTypeAndTemplateSelectors()}
           {renderFormFields(getFormFields())}
+          {/* Option B: Inline cash balance for accounts */}
+          {formType === 'account' && (
+            <div className="form-group" style={{ marginTop: 12, padding: '12px 14px', background: 'var(--hover-bg, #f8f9fa)', borderRadius: 8, border: '1px dashed var(--border)' }}>
+              <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Briefcase size={14} /> Cash Balance <span className="text-muted" style={{ fontWeight: 400, fontSize: 12 }}>(optional)</span>
+              </label>
+              <p className="text-muted" style={{ fontSize: 12, marginBottom: 8 }}>
+                Enter a balance to automatically create a linked Cash asset.
+              </p>
+              <input
+                type="number"
+                className="form-control"
+                placeholder="0.00"
+                step="0.01"
+                min="0"
+                value={inlineCashBalance}
+                onChange={(e) => setInlineCashBalance(e.target.value)}
+                style={{ maxWidth: 200 }}
+              />
+            </div>
+          )}
           <div className="flex gap-2 mt-4">
-            <button type="button" className="btn btn-secondary" onClick={() => setShowAdd(false)}>Cancel</button>
+            <button type="button" className="btn btn-secondary" onClick={() => { setShowAdd(false); setInlineCashBalance(''); }}>Cancel</button>
             <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving...' : 'Create'}</button>
           </div>
         </form>
@@ -863,29 +1014,83 @@ export default function VaultPage() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 8 }}>
                   {linked.map(asset => {
                     const ad = decryptedCache[asset.id];
-                    const tplName = (() => {
-                      const tpl = templates.find(t => t.id === asset.template_id);
-                      return tpl?.subtype ? tpl.name : 'Asset';
-                    })();
+                    const tpl = templates.find(t => t.id === asset.template_id);
+                    const tplName = tpl?.subtype ? tpl.name : 'Asset';
+                    const tplFields = tpl?.fields ? (typeof tpl.fields === 'string' ? JSON.parse(tpl.fields) : tpl.fields) : [];
+                    // Find the editable value field (portfolio_role=value or portfolio_role=quantity)
+                    const valueField = tplFields.find(f => f.portfolio_role === 'value') || tplFields.find(f => f.key === 'value');
+                    const qtyField = tplFields.find(f => f.portfolio_role === 'quantity');
+                    const priceField = tplFields.find(f => f.portfolio_role === 'price');
+                    const isEditing = inlineEditAsset?.id === asset.id;
+
                     return (
                       <div
                         key={asset.id}
-                        onClick={() => setViewEntry(asset)}
                         style={{
-                          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                          padding: '8px 10px', borderRadius: 6, cursor: 'pointer',
-                          background: 'var(--hover-bg, #f5f5f5)', transition: 'background .15s',
+                          padding: '8px 10px', borderRadius: 6,
+                          background: 'var(--hover-bg, #f5f5f5)',
                         }}
-                        onMouseEnter={e => e.currentTarget.style.background = 'var(--border)'}
-                        onMouseLeave={e => e.currentTarget.style.background = 'var(--hover-bg, #f5f5f5)'}
                       >
-                        <div>
-                          <span className="font-medium" style={{ fontSize: 14 }}>{ad?.title || '(encrypted)'}</span>
-                          <span className="text-muted" style={{ fontSize: 12, marginLeft: 8 }}>{tplName}</span>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span className="font-medium" style={{ fontSize: 14 }}>{ad?.title || '(encrypted)'}</span>
+                            <span className="text-muted" style={{ fontSize: 12 }}>{tplName}</span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <button className="btn btn-ghost btn-sm" onClick={() => setViewEntry(asset)} title="View details">
+                              <Eye size={13} />
+                            </button>
+                            <button className="btn btn-ghost btn-sm" onClick={() => openEdit(asset)} title="Edit">
+                              <Edit2 size={13} />
+                            </button>
+                          </div>
                         </div>
-                        <div className="text-muted" style={{ fontSize: 13 }}>
-                          {ad?.currency || ''}{ad?.value ? ` ${ad.currency ? ' ' : ''}${ad.value}` : ''}
-                          {ad?.shares ? ` ${ad.shares} shares` : ''}
+                        {/* Inline editable value fields */}
+                        <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+                          {valueField && (
+                            <InlineNumberField
+                              label={valueField.label}
+                              value={ad?.[valueField.key] || ''}
+                              currency={ad?.currency}
+                              isEditing={isEditing && inlineEditAsset?.field === valueField.key}
+                              editValue={isEditing && inlineEditAsset?.field === valueField.key ? inlineEditAsset.value : ''}
+                              saving={inlineEditSaving}
+                              onStartEdit={() => setInlineEditAsset({ id: asset.id, field: valueField.key, value: ad?.[valueField.key] || '' })}
+                              onChange={(v) => setInlineEditAsset(prev => ({ ...prev, value: v }))}
+                              onSave={() => saveInlineAssetEdit(asset, valueField.key, inlineEditAsset?.value || '')}
+                              onCancel={() => setInlineEditAsset(null)}
+                            />
+                          )}
+                          {qtyField && (
+                            <InlineNumberField
+                              label={qtyField.label}
+                              value={ad?.[qtyField.key] || ''}
+                              isEditing={isEditing && inlineEditAsset?.field === qtyField.key}
+                              editValue={isEditing && inlineEditAsset?.field === qtyField.key ? inlineEditAsset.value : ''}
+                              saving={inlineEditSaving}
+                              onStartEdit={() => setInlineEditAsset({ id: asset.id, field: qtyField.key, value: ad?.[qtyField.key] || '' })}
+                              onChange={(v) => setInlineEditAsset(prev => ({ ...prev, value: v }))}
+                              onSave={() => saveInlineAssetEdit(asset, qtyField.key, inlineEditAsset?.value || '')}
+                              onCancel={() => setInlineEditAsset(null)}
+                            />
+                          )}
+                          {priceField && (
+                            <InlineNumberField
+                              label={priceField.label}
+                              value={ad?.[priceField.key] || ''}
+                              currency={ad?.currency}
+                              isEditing={isEditing && inlineEditAsset?.field === priceField.key}
+                              editValue={isEditing && inlineEditAsset?.field === priceField.key ? inlineEditAsset.value : ''}
+                              saving={inlineEditSaving}
+                              onStartEdit={() => setInlineEditAsset({ id: asset.id, field: priceField.key, value: ad?.[priceField.key] || '' })}
+                              onChange={(v) => setInlineEditAsset(prev => ({ ...prev, value: v }))}
+                              onSave={() => saveInlineAssetEdit(asset, priceField.key, inlineEditAsset?.value || '')}
+                              onCancel={() => setInlineEditAsset(null)}
+                            />
+                          )}
+                          {!valueField && !qtyField && !priceField && (
+                            <span className="text-muted" style={{ fontSize: 12 }}>No value fields</span>
+                          )}
                         </div>
                       </div>
                     );
@@ -1002,9 +1207,12 @@ export default function VaultPage() {
                   />
                 </div>
               )}
-              <div className="flex gap-2 mt-4">
-                <button className="btn btn-primary" onClick={() => { openAddLinkedAsset(postSaveAccount); setPostSaveAccount(null); }}>
-                  <Plus size={14} /> Create New Asset
+              <div className="flex gap-2 mt-4" style={{ flexWrap: 'wrap' }}>
+                <button className="btn btn-primary" onClick={() => { openAddCashAsset(postSaveAccount); }}>
+                  <Plus size={14} /> Add Cash Balance
+                </button>
+                <button className="btn btn-outline" onClick={() => { openAddLinkedAsset(postSaveAccount); setPostSaveAccount(null); }}>
+                  <Plus size={14} /> Other Asset
                 </button>
                 <button className="btn btn-secondary" onClick={() => setPostSaveAccount(null)}>
                   Skip
