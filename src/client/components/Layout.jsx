@@ -343,8 +343,8 @@ export default function Layout() {
             </div>
           )}
           {!isLoading && !isUnlocked && !hideVaultBanner && (
-            <div className="alert alert-warning" style={{ margin: 'var(--space-lg)', marginBottom: 0, justifyContent: 'space-between' }}>
-              <div className="flex items-center gap-2">
+            <div className="alert alert-warning" style={{ margin: 'var(--space-md)', marginBottom: 0, justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+              <div className="flex items-center gap-2" style={{ flex: '1 1 auto', minWidth: 0 }}>
                 <Lock size={18} style={{ flexShrink: 0 }} />
                 <div>
                   <strong>Vault is locked.</strong>{' '}
@@ -359,23 +359,23 @@ export default function Layout() {
             </div>
           )}
           {!isLoading && showPasskeyBanner && (
-            <div className="alert alert-info" style={{ margin: 'var(--space-lg)', marginBottom: 0, justifyContent: 'space-between' }}>
-              <div className="flex items-center gap-2">
+            <div className="alert alert-info" style={{ margin: 'var(--space-md)', marginBottom: 0, justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+              <div className="flex items-center gap-2" style={{ flex: '1 1 auto', minWidth: 0 }}>
                 <Fingerprint size={18} style={{ flexShrink: 0 }} />
                 <div>
                   <strong>Set up a passkey for faster sign-in?</strong>{' '}
                   Use your fingerprint or face to sign in next time.
                 </div>
               </div>
-              <div className="flex items-center gap-2" style={{ flexShrink: 0, flexWrap: 'wrap' }}>
+              <div className="flex items-center gap-2" style={{ flexShrink: 0, flexWrap: 'wrap', gap: 6 }}>
                 <button className="btn btn-sm btn-primary" onClick={handlePasskeySetup} disabled={passkeyBannerLoading}>
                   {passkeyBannerLoading ? 'Setting up...' : 'Set up'}
                 </button>
                 <button className="btn btn-sm btn-outline" onClick={dismissPasskeyBannerSession} style={{ fontSize: 12 }}>
-                  Maybe later
+                  Later
                 </button>
                 <button className="btn btn-sm btn-outline" onClick={dismissPasskeyBannerPermanent} style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                  Don't show again
+                  Don't show
                 </button>
               </div>
             </div>

@@ -18,9 +18,9 @@ export default function SyncToast() {
   if (!visible) return null;
 
   return (
-    <div style={{
+    <div className="sync-toast" style={{
       position: 'fixed',
-      bottom: 20,
+      bottom: 'calc(20px + env(safe-area-inset-bottom, 0px))',
       right: 20,
       zIndex: 9999,
       background: 'var(--color-primary, #0d9488)',

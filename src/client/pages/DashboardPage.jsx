@@ -98,7 +98,7 @@ export default function DashboardPage() {
       ) : (
         <>
           {/* Entry count cards */}
-          <div className="grid grid-cols-3 gap-4 mb-6" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 16 }}>
+          <div className="dashboard-stat-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12, marginBottom: 16 }}>
             {Object.entries(TYPE_META).map(([type, meta]) => {
               const Icon = meta.icon;
               const count = entryCounts[type] || 0;
@@ -117,7 +117,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Stats row */}
-          <div className="grid grid-cols-3 gap-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
             {/* Total */}
             <div className="card" style={{ padding: 16 }}>
               <div className="flex items-center gap-2 mb-2">

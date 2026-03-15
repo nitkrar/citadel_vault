@@ -780,15 +780,15 @@ export default function VaultPage() {
           <h1 className="page-title">Vault</h1>
           <p className="page-subtitle">All your encrypted entries in one place</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <button className="btn btn-ghost btn-sm" onClick={loadDeleted}><Undo2 size={14} /> Recently Deleted</button>
-          <button className="btn btn-secondary" onClick={() => setShowImport(true)}><Upload size={16} /> Import</button>
+          <button className="btn btn-secondary btn-sm" onClick={() => setShowImport(true)}><Upload size={14} /> Import</button>
           <button className="btn btn-primary" onClick={() => openAdd(activeType !== 'all' ? activeType : 'password')}><Plus size={16} /> New Entry</button>
         </div>
       </div>
 
       {/* Type filter tabs */}
-      <div className="flex gap-2 mb-4" style={{ flexWrap: 'wrap' }}>
+      <div className="vault-type-filters flex gap-2 mb-4" style={{ flexWrap: 'wrap' }}>
         <button className={`btn btn-sm ${!activeType || activeType === 'all' ? 'btn-primary' : 'btn-ghost'}`}
           onClick={() => { setActiveType('all'); sessionStorage.setItem('pv_vault_last_tab', 'all'); }}>
           All <span className="badge badge-muted" style={{ marginLeft: 4 }}>{counts.all}</span>
@@ -808,9 +808,9 @@ export default function VaultPage() {
 
       {/* Search */}
       <div className="flex gap-3 mb-4">
-        <div style={{ position: 'relative', flex: '1 1 260px' }}>
-          <Search size={16} style={{ position: 'absolute', left: 10, top: 10, color: 'var(--text-muted)' }} />
-          <input className="form-control" style={{ paddingLeft: 32 }} placeholder="Search across all fields..." value={search} onChange={e => setSearch(e.target.value)} />
+        <div style={{ position: 'relative', flex: '1 1 auto' }}>
+          <Search size={16} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }} />
+          <input className="form-control" style={{ paddingLeft: 36 }} placeholder="Search across all fields..." value={search} onChange={e => setSearch(e.target.value)} />
         </div>
       </div>
 
@@ -834,46 +834,84 @@ export default function VaultPage() {
               <button className="btn btn-primary btn-sm" onClick={() => openAdd(activeType)}><Plus size={14} /> Add {TYPE_META[activeType]?.label?.replace(/s$/, '') || 'Entry'}</button>
             </div>
           )}
-          <div className="table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  <th style={{ width: 40 }}>Type</th>
-                  <th>Title</th>
-                  <th>Details</th>
-                  <th style={{ width: 140 }}>Updated</th>
-                  <th style={{ width: 160 }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(entry => {
-                  const d = decryptedCache[entry.id];
-                  const meta = TYPE_META[entry.entry_type] || TYPE_META.custom;
-                  const Icon = meta.icon;
-                  const title = d?.title || '(encrypted)';
-                  // Show first non-title, non-notes field as detail
-                  const fields = getTemplateFields(entry);
-                  const detailField = fields.find(f => f.key !== 'title' && f.key !== 'notes' && f.key !== 'linked_account_id' && f.type !== 'textarea' && f.type !== 'secret' && f.type !== 'account_link' && d?.[f.key]);
-                  const detail = detailField ? d[detailField.key] : '';
 
-                  return (
-                    <tr key={entry.id} style={{ cursor: 'pointer' }} onClick={() => { setViewEntry(entry); }}>
-                      <td><Icon size={16} style={{ color: meta.color }} /></td>
-                      <td><span className="font-medium">{title}</span></td>
-                      <td><span className="text-muted">{typeof detail === 'string' ? (detail.length > 40 ? detail.slice(0, 40) + '...' : detail) : ''}</span></td>
-                      <td><span className="text-muted" style={{ fontSize: 13 }}>{entry.updated_at ? new Date(entry.updated_at).toLocaleDateString() : '--'}</span></td>
-                      <td>
-                        <div className="td-actions">
-                          <button className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); setViewEntry(entry); }}><Eye size={14} /></button>
-                          <button className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); openEdit(entry); }}><Edit2 size={14} /></button>
-                          <button className="btn btn-ghost btn-sm text-danger" onClick={e => { e.stopPropagation(); handleDelete(entry); }}><Trash2 size={14} /></button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          {/* Desktop table view */}
+          <div className="vault-table-desktop">
+            <div className="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th style={{ width: 40 }}>Type</th>
+                    <th>Title</th>
+                    <th>Details</th>
+                    <th style={{ width: 140 }}>Updated</th>
+                    <th style={{ width: 160 }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map(entry => {
+                    const d = decryptedCache[entry.id];
+                    const meta = TYPE_META[entry.entry_type] || TYPE_META.custom;
+                    const Icon = meta.icon;
+                    const title = d?.title || '(encrypted)';
+                    const fields = getTemplateFields(entry);
+                    const detailField = fields.find(f => f.key !== 'title' && f.key !== 'notes' && f.key !== 'linked_account_id' && f.type !== 'textarea' && f.type !== 'secret' && f.type !== 'account_link' && d?.[f.key]);
+                    const detail = detailField ? d[detailField.key] : '';
+                    return (
+                      <tr key={entry.id} style={{ cursor: 'pointer' }} onClick={() => { setViewEntry(entry); }}>
+                        <td><Icon size={16} style={{ color: meta.color }} /></td>
+                        <td><span className="font-medium">{title}</span></td>
+                        <td><span className="text-muted">{typeof detail === 'string' ? (detail.length > 40 ? detail.slice(0, 40) + '...' : detail) : ''}</span></td>
+                        <td><span className="text-muted" style={{ fontSize: 13 }}>{entry.updated_at ? new Date(entry.updated_at).toLocaleDateString() : '--'}</span></td>
+                        <td>
+                          <div className="td-actions">
+                            <button className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); setViewEntry(entry); }}><Eye size={14} /></button>
+                            <button className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); openEdit(entry); }}><Edit2 size={14} /></button>
+                            <button className="btn btn-ghost btn-sm text-danger" onClick={e => { e.stopPropagation(); handleDelete(entry); }}><Trash2 size={14} /></button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Mobile card view */}
+          <div className="vault-cards-mobile" style={{ padding: '8px' }}>
+            {filtered.map(entry => {
+              const d = decryptedCache[entry.id];
+              const meta = TYPE_META[entry.entry_type] || TYPE_META.custom;
+              const Icon = meta.icon;
+              const title = d?.title || '(encrypted)';
+              const fields = getTemplateFields(entry);
+              const detailField = fields.find(f => f.key !== 'title' && f.key !== 'notes' && f.key !== 'linked_account_id' && f.type !== 'textarea' && f.type !== 'secret' && f.type !== 'account_link' && d?.[f.key]);
+              const detail = detailField ? d[detailField.key] : '';
+              return (
+                <div
+                  key={entry.id}
+                  className="vault-entry-card"
+                  onClick={() => setViewEntry(entry)}
+                >
+                  <div className="vault-entry-card-icon" style={{ background: meta.color + '18' }}>
+                    <Icon size={18} style={{ color: meta.color }} />
+                  </div>
+                  <div className="vault-entry-card-body">
+                    <div className="vault-entry-card-title">{title}</div>
+                    {detail ? (
+                      <div className="vault-entry-card-detail">
+                        {typeof detail === 'string' ? (detail.length > 50 ? detail.slice(0, 50) + '...' : detail) : ''}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="vault-entry-card-actions">
+                    <button className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); openEdit(entry); }} title="Edit"><Edit2 size={14} /></button>
+                    <button className="btn btn-ghost btn-sm text-danger" onClick={e => { e.stopPropagation(); handleDelete(entry); }} title="Delete"><Trash2 size={14} /></button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

@@ -164,10 +164,10 @@ export default function LoginPage() {
           <>
             <div style={{ position: 'relative', margin: '20px 0' }}>
               <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center' }}>
-                <div style={{ width: '100%', borderTop: '1px solid var(--border-color)' }} />
+                <div style={{ width: '100%', borderTop: '1px solid var(--color-border)' }} />
               </div>
               <div style={{ position: 'relative', display: 'flex', justifyContent: 'center' }}>
-                <span style={{ padding: '0 12px', backgroundColor: 'var(--card-bg)', color: 'var(--text-muted)', fontSize: '0.75rem' }}>or</span>
+                <span style={{ padding: '0 12px', backgroundColor: 'var(--color-card)', color: 'var(--color-text-muted)', fontSize: '0.75rem' }}>or</span>
               </div>
             </div>
 
@@ -178,8 +178,8 @@ export default function LoginPage() {
               className="btn w-full btn-lg"
               style={{
                 background: 'none',
-                border: '1px solid var(--border-color)',
-                color: 'var(--text-color)',
+                border: '1px solid var(--color-border)',
+                color: 'var(--color-text)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
