@@ -186,12 +186,13 @@ export default function SettingsPage() {
           );
         })}
 
-        <div className="form-actions" style={{ paddingBottom: 'var(--space-xl, 32px)' }}>
+        <div className="form-actions">
           <button type="submit" className="btn btn-primary" disabled={saving || !hasChanges}>
             <Save size={16} /> {saving ? 'Saving...' : hasChanges ? 'Save Changes' : 'No Changes'}
           </button>
         </div>
       </form>
+      <div style={{ height: 60 }} />
     </div>
   );
 }
