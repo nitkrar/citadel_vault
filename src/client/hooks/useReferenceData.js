@@ -1,11 +1,38 @@
 import { useState, useEffect } from 'react';
 import api from '../api/client';
 
+const REFERENCE_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+const STORAGE_PREFIX = 'pv_ref_';
+
 /**
- * Module-level cache so data is fetched once per session
- * (survives page navigation within the SPA).
+ * Module-level cache — in-memory mirror of localStorage
+ * so we don't parse JSON on every hook call.
  */
 const cache = {};
+
+/** Read a key from localStorage into the in-memory cache if fresh. */
+function loadFromStorage(key) {
+  if (cache[key]) return true;
+  try {
+    const raw = localStorage.getItem(STORAGE_PREFIX + key);
+    if (!raw) return false;
+    const { data, ts } = JSON.parse(raw);
+    if (Date.now() - ts < REFERENCE_CACHE_TTL) {
+      cache[key] = data;
+      return true;
+    }
+    localStorage.removeItem(STORAGE_PREFIX + key);
+  } catch { /* corrupt entry — ignore */ }
+  return false;
+}
+
+/** Persist fetched data to localStorage and in-memory cache. */
+function saveToStorage(key, data) {
+  cache[key] = data;
+  try {
+    localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify({ data, ts: Date.now() }));
+  } catch { /* storage full — in-memory cache still works */ }
+}
 
 /**
  * useReferenceData — load and cache reference data lists.
@@ -21,12 +48,12 @@ const cache = {};
 export default function useReferenceData(configs, opts = {}) {
   const { deps = [] } = opts;
 
-  // Build initial state from cache
+  // Build initial state from cache (in-memory first, then localStorage)
   const buildState = () => {
     const state = {};
     let allCached = true;
     for (const { key } of configs) {
-      if (cache[key]) {
+      if (loadFromStorage(key)) {
         state[key] = cache[key];
       } else {
         state[key] = [];
@@ -42,7 +69,7 @@ export default function useReferenceData(configs, opts = {}) {
 
   useEffect(() => {
     // Determine which configs need fetching
-    const toFetch = configs.filter(({ key }) => !cache[key]);
+    const toFetch = configs.filter(({ key }) => !loadFromStorage(key));
     if (toFetch.length === 0) {
       // Everything cached — sync state in case deps changed
       const state = {};
@@ -62,7 +89,7 @@ export default function useReferenceData(configs, opts = {}) {
         api.get(url)
           .then((r) => {
             const list = r.data.data || r.data || [];
-            cache[key] = list;
+            saveToStorage(key, list);
             return { key, list };
           })
           .catch(() => ({ key, list: [] }))
@@ -95,7 +122,13 @@ export default function useReferenceData(configs, opts = {}) {
 export function invalidateReferenceCache(key) {
   if (key) {
     delete cache[key];
+    try { localStorage.removeItem(STORAGE_PREFIX + key); } catch {}
   } else {
     Object.keys(cache).forEach((k) => delete cache[k]);
+    try {
+      Object.keys(localStorage)
+        .filter((k) => k.startsWith(STORAGE_PREFIX))
+        .forEach((k) => localStorage.removeItem(k));
+    } catch {}
   }
 }
