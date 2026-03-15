@@ -78,15 +78,35 @@ if ($method === 'POST' && !$action) {
         $symbols = implode(',', $staleTickers);
         $url = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols=' . urlencode($symbols);
 
-        $ctx = stream_context_create([
-            'http' => [
-                'method'  => 'GET',
-                'header'  => "User-Agent: Mozilla/5.0\r\n",
-                'timeout' => 10,
-            ],
-        ]);
+        // Try cURL first (works on shared hosting where allow_url_fopen is off)
+        $response = false;
+        if (function_exists('curl_init')) {
+            $ch = curl_init($url);
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT        => 10,
+                CURLOPT_USERAGENT      => 'Mozilla/5.0',
+                CURLOPT_FOLLOWLOCATION => true,
+                CURLOPT_SSL_VERIFYPEER => true,
+            ]);
+            $response = curl_exec($ch);
+            if (curl_errno($ch)) {
+                $response = false;
+            }
+            curl_close($ch);
+        }
 
-        $response = @file_get_contents($url, false, $ctx);
+        // Fallback to file_get_contents
+        if ($response === false) {
+            $ctx = stream_context_create([
+                'http' => [
+                    'method'  => 'GET',
+                    'header'  => "User-Agent: Mozilla/5.0\r\n",
+                    'timeout' => 10,
+                ],
+            ]);
+            $response = @file_get_contents($url, false, $ctx);
+        }
 
         if ($response === false) {
             // Yahoo API unreachable — return cached results + errors for stale
