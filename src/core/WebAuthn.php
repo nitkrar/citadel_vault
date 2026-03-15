@@ -639,9 +639,9 @@ function webauthnVerifyAuth(
 
     require_once __DIR__ . '/Auth.php';
     $token = Auth::generateToken($user);
+    Auth::setAuthCookie($token);
 
     return [
-        'token'      => $token,
         'user'       => $user,
         'expires_in' => JWT_EXPIRY,
     ];

@@ -167,6 +167,7 @@ if ($method === 'POST' && $action === 'login') {
     }
 
     $token = Auth::generateToken($user);
+    Auth::setAuthCookie($token);
 
     // Once-per-day exchange rate refresh on first login of the day
     try {
@@ -176,7 +177,6 @@ if ($method === 'POST' && $action === 'login') {
     }
 
     Response::success([
-        'token' => $token,
         'user' => [
             'id'                    => (int)$user['id'],
             'username'              => $user['username'],
@@ -312,9 +312,9 @@ if ($method === 'POST' && $action === 'register') {
     ];
 
     $token = Auth::generateToken($user);
+    Auth::setAuthCookie($token);
 
     Response::success([
-        'token' => $token,
         'user' => [
             'id'                   => $newId,
             'username'             => $username,
@@ -609,8 +609,8 @@ if ($method === 'DELETE' && $action === 'self-delete') {
     $stmt = $db->prepare("DELETE FROM users WHERE id = ?");
     $stmt->execute([$userId]);
 
-    // Clear cookies
-    Encryption::clearDataTokenCookie();
+    // Clear auth cookie
+    Auth::clearAuthCookie();
 
     Response::success(['message' => 'Account deleted permanently.']);
 }
@@ -724,9 +724,9 @@ if ($method === 'POST' && $action === 'forgot-password') {
         'role'     => $user['role'],
     ];
     $token = Auth::generateToken($tokenUser);
+    Auth::setAuthCookie($token);
 
     Response::success([
-        'token'        => $token,
         'user'         => [
             'id'       => $userId,
             'username' => $user['username'],
@@ -735,6 +735,14 @@ if ($method === 'POST' && $action === 'forgot-password') {
         ],
         'recovery_key' => $newRecoveryKey,
     ]);
+}
+
+// ---------------------------------------------------------------------------
+// POST ?action=logout — Clear auth cookie
+// ---------------------------------------------------------------------------
+if ($method === 'POST' && $action === 'logout') {
+    Auth::clearAuthCookie();
+    Response::success(['message' => 'Logged out.']);
 }
 
 // ---------------------------------------------------------------------------

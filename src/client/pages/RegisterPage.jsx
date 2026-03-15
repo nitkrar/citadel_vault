@@ -132,16 +132,11 @@ export default function RegisterPage() {
         setVerificationSent(true);
         return;
       }
-      if (data.token) {
-        localStorage.setItem('pv_token', data.token);
-        // Set IP logging preference if user opted out
-        if (disableIpLogging) {
-          try { await api.put('/preferences.php', { audit_ip_mode: 'none' }); } catch {}
-        }
-        window.location.href = '/';
-      } else {
-        navigate('/login');
+      // Cookie set server-side — set preferences then redirect
+      if (disableIpLogging) {
+        try { await api.put('/preferences.php', { audit_ip_mode: 'none' }); } catch {}
       }
+      window.location.href = '/';
     } catch (err) {
       setError(
         err.response?.data?.error ||
