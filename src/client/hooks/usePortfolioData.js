@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef } from 'react';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { useAuth } from '../contexts/AuthContext';
 import { entryStore } from '../lib/entryStore';
@@ -8,6 +8,22 @@ import useCurrencies from './useCurrencies';
 import useTemplates from './useTemplates';
 import useAppConfig from './useAppConfig';
 import api from '../api/client';
+
+const PRICE_CACHE_KEY = 'pv_ticker_prices';
+
+function getCachedPrices() {
+  try {
+    const raw = sessionStorage.getItem(PRICE_CACHE_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw);
+  } catch { return {}; }
+}
+
+function setCachedPrices(prices) {
+  try {
+    sessionStorage.setItem(PRICE_CACHE_KEY, JSON.stringify(prices));
+  } catch { /* quota exceeded — ignore */ }
+}
 
 /**
  * usePortfolioData — React hook that wires aggregation to vault lifecycle.
@@ -82,6 +98,43 @@ export default function usePortfolioData() {
     api.put('/preferences.php', { display_currency: code }).catch(() => {});
   }, []);
 
+  // Refresh prices from server for stock/crypto entries
+  const refreshPrices = useCallback(async () => {
+    if (!decryptedEntries || decryptedEntries.length === 0) return { count: 0, prices: {} };
+
+    // Collect tickers from decrypted stock/crypto entries
+    const tickers = [];
+    for (const entry of decryptedEntries) {
+      const subtype = entry.template?.subtype;
+      if (subtype === 'stock' && entry.decrypted?.ticker) {
+        tickers.push(entry.decrypted.ticker);
+      } else if (subtype === 'crypto' && entry.decrypted?.coin) {
+        tickers.push(entry.decrypted.coin);
+      }
+    }
+
+    if (tickers.length === 0) return { count: 0, prices: {} };
+
+    const unique = [...new Set(tickers)];
+    const cached = getCachedPrices();
+
+    // Filter to only uncached tickers
+    const uncached = unique.filter(t => !cached[t]);
+
+    let fetchedPrices = {};
+    if (uncached.length > 0) {
+      const { data: resp } = await api.post('/prices.php', { tickers: uncached });
+      const result = resp?.data || resp;
+      fetchedPrices = result?.prices || {};
+    }
+
+    // Merge into cache
+    const merged = { ...cached, ...fetchedPrices };
+    setCachedPrices(merged);
+
+    return { count: Object.keys(fetchedPrices).length, prices: merged };
+  }, [decryptedEntries]);
+
   return {
     portfolio,
     loading: refLoading || entriesLoading,
@@ -92,5 +145,6 @@ export default function usePortfolioData() {
     baseCurrency,
     currencies,
     ratesLastUpdated: portfolio?.rates_last_updated || null,
+    refreshPrices,
   };
 }

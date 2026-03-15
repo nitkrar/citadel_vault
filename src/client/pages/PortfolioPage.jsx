@@ -39,12 +39,14 @@ export default function PortfolioPage() {
   const {
     portfolio, loading, error, refetch,
     displayCurrency, setDisplayCurrency, baseCurrency, currencies,
-    ratesLastUpdated,
+    ratesLastUpdated, refreshPrices,
   } = usePortfolioData();
 
   const [activeTab, setActiveTab] = useState('overview');
   const [expandedGroups, setExpandedGroups] = useState({});
   const [snapshotSaving, setSnapshotSaving] = useState(false);
+  const [priceRefreshing, setPriceRefreshing] = useState(false);
+  const [priceRefreshResult, setPriceRefreshResult] = useState(null);
 
   // Format helper respecting hideAmounts
   const fmt = useCallback((value, symbol = '') => {
@@ -63,6 +65,22 @@ export default function PortfolioPage() {
   // Toggle expandable group
   const toggleGroup = (key) => {
     setExpandedGroups(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  // ── Refresh prices ─────────────────────────────────────────────
+  const handleRefreshPrices = async () => {
+    setPriceRefreshing(true);
+    setPriceRefreshResult(null);
+    try {
+      const result = await refreshPrices();
+      setPriceRefreshResult(`Fetched ${result.count} price${result.count !== 1 ? 's' : ''}`);
+      setTimeout(() => setPriceRefreshResult(null), 5000);
+    } catch (err) {
+      setPriceRefreshResult('Failed to fetch prices');
+      setTimeout(() => setPriceRefreshResult(null), 5000);
+    } finally {
+      setPriceRefreshing(false);
+    }
   };
 
   // ── Save snapshot (split model v3) ──────────────────────────────
@@ -175,6 +193,9 @@ export default function PortfolioPage() {
               ))}
             </select>
           )}
+          <button className="btn btn-secondary" onClick={handleRefreshPrices} disabled={priceRefreshing || isEmpty}>
+            <RefreshCw size={16} className={priceRefreshing ? 'spin' : ''} /> {priceRefreshing ? 'Refreshing...' : 'Refresh Prices'}
+          </button>
           <button className="btn btn-primary" onClick={handleSaveSnapshot} disabled={snapshotSaving || isEmpty}>
             <Camera size={16} /> {snapshotSaving ? 'Saving...' : 'Snapshot'}
           </button>
@@ -204,7 +225,7 @@ export default function PortfolioPage() {
         </div>
       ) : (
         <>
-          {activeTab === 'overview' && <OverviewTab portfolio={p} fmtD={fmtD} hideAmounts={hideAmounts} />}
+          {activeTab === 'overview' && <OverviewTab portfolio={p} fmtD={fmtD} hideAmounts={hideAmounts} priceRefreshResult={priceRefreshResult} />}
           {activeTab === 'country' && <GroupTab groups={p.by_country} fmtD={fmtD} expanded={expandedGroups} toggle={toggleGroup} labelKey="country" />}
           {activeTab === 'account' && <GroupTab groups={p.by_account} fmtD={fmtD} expanded={expandedGroups} toggle={toggleGroup} labelKey="account" />}
           {activeTab === 'type' && <TypeTab groups={p.by_type} fmtD={fmtD} />}
@@ -221,7 +242,7 @@ export default function PortfolioPage() {
 // Overview Tab
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-function OverviewTab({ portfolio, fmtD, hideAmounts }) {
+function OverviewTab({ portfolio, fmtD, hideAmounts, priceRefreshResult }) {
   const { summary, by_country, by_type } = portfolio;
 
   const countryChartData = useMemo(() =>
@@ -249,14 +270,25 @@ function OverviewTab({ portfolio, fmtD, hideAmounts }) {
       .slice(0, 8),
   [by_country]);
 
+  const hasGainLoss = summary.total_gain_loss !== undefined && summary.total_gain_loss !== 0;
+  const glColor = summary.total_gain_loss > 0 ? 'var(--color-success, #16a34a)' : summary.total_gain_loss < 0 ? 'var(--color-danger, #dc2626)' : 'var(--color-text-muted)';
+
   return (
     <>
+      {priceRefreshResult && (
+        <div className="text-muted" style={{ fontSize: 12, marginBottom: 8, textAlign: 'right' }}>
+          {priceRefreshResult}
+        </div>
+      )}
       {/* Summary Cards */}
       <div className="portfolio-summary-grid">
         <SummaryCard label="Total Assets" value={fmtD(summary.total_assets)} color="var(--color-info)" />
         <SummaryCard label="Liabilities" value={fmtD(summary.total_liabilities)} color="var(--color-danger)" />
         <SummaryCard label="Net Worth" value={fmtD(summary.net_worth)} color="var(--color-success)" />
-        <SummaryCard label="Asset Count" value={hideAmounts ? MASKED : summary.asset_count} color="var(--color-text-muted)" />
+        {hasGainLoss
+          ? <SummaryCard label="Total Gain/Loss" value={fmtD(summary.total_gain_loss)} color={glColor} />
+          : <SummaryCard label="Asset Count" value={hideAmounts ? MASKED : summary.asset_count} color="var(--color-text-muted)" />
+        }
       </div>
 
       {/* Charts */}
@@ -446,6 +478,7 @@ function AllAssetsTab({ assets, fmtD }) {
   const { sorted, sortKey, sortDir, onSort } = useSort(assets, 'name', 'asc');
   const [selected, setSelected] = useState(new Set());
   const [deleting, setDeleting] = useState(false);
+  const hasAnyGainLoss = assets.some(a => a.gainLoss !== undefined);
 
   const toggleSelect = (id) => {
     setSelected(prev => {
@@ -499,6 +532,7 @@ function AllAssetsTab({ assets, fmtD }) {
                 <th>Type</th>
                 <th>Currency</th>
                 <SortableTh label="Value" field="displayValue" sortKey={sortKey} sortDir={sortDir} onSort={onSort} style={{ textAlign: 'right' }} />
+                {hasAnyGainLoss && <SortableTh label="Gain/Loss" field="gainLoss" sortKey={sortKey} sortDir={sortDir} onSort={onSort} style={{ textAlign: 'right' }} />}
               </tr>
             </thead>
             <tbody>
@@ -515,6 +549,21 @@ function AllAssetsTab({ assets, fmtD }) {
                   </td>
                   <td className="td-muted">{item.currency}</td>
                   <td style={{ textAlign: 'right', fontWeight: 500 }}>{fmtD(item.displayValue)}</td>
+                  {hasAnyGainLoss && (
+                    <td style={{
+                      textAlign: 'right', fontWeight: 500,
+                      color: item.gainLoss > 0 ? 'var(--color-success, #16a34a)' : item.gainLoss < 0 ? 'var(--color-danger, #dc2626)' : 'inherit',
+                    }}>
+                      {item.gainLoss !== undefined ? (
+                        <>
+                          {fmtD(item.gainLoss)}
+                          <span style={{ fontSize: 11, opacity: 0.7, marginLeft: 4 }}>
+                            ({item.gainLossPercent >= 0 ? '+' : ''}{item.gainLossPercent.toFixed(1)}%)
+                          </span>
+                        </>
+                      ) : '—'}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
