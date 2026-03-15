@@ -92,8 +92,17 @@ def admin_token(base_url):
     except requests.exceptions.JSONDecodeError:
         pytest.fail(f'Login returned non-JSON. Server may need restart from project root. Body: {resp.text[:200]}')
 
+    # Token is in httpOnly cookie (not in response body since JWT cookie migration)
     token = data.get('data', {}).get('token') or data.get('token')
-    assert token, f'No token in login response: {data}'
+    if not token:
+        # Extract from Set-Cookie header
+        cookie_header = resp.headers.get('Set-Cookie', '')
+        for part in cookie_header.split(';'):
+            part = part.strip()
+            if part.startswith('pv_auth='):
+                token = part.split('=', 1)[1]
+                break
+    assert token, f'No token in login response or cookie: {data}'
     return token
 
 

@@ -12,11 +12,12 @@ class Auth {
     public static function generateToken(array $user): string {
         $header = self::base64UrlEncode(json_encode(['alg' => 'HS256', 'typ' => 'JWT']));
         $payload = self::base64UrlEncode(json_encode([
-            'sub'      => $user['id'],
-            'username' => $user['username'],
-            'role'     => $user['role'],
-            'iat'      => time(),
-            'exp'      => time() + JWT_EXPIRY,
+            'sub'        => $user['id'],
+            'username'   => $user['username'],
+            'role'       => $user['role'],
+            'checked_at' => time(),
+            'iat'        => time(),
+            'exp'        => time() + JWT_EXPIRY,
         ]));
         $signature = self::base64UrlEncode(hash_hmac('sha256', "$header.$payload", JWT_SECRET, true));
         return "$header.$payload.$signature";
@@ -48,6 +49,17 @@ class Auth {
             'secure'   => $secure,
             'samesite' => 'Strict',
         ]);
+    }
+
+    /**
+     * Generate a JWT from an existing payload (for reissuing with updated claims).
+     * Preserves the original exp so the session doesn't extend.
+     */
+    private static function generateTokenFromPayload(array $payload): string {
+        $header = self::base64UrlEncode(json_encode(['alg' => 'HS256', 'typ' => 'JWT']));
+        $body = self::base64UrlEncode(json_encode($payload));
+        $signature = self::base64UrlEncode(hash_hmac('sha256', "$header.$body", JWT_SECRET, true));
+        return "$header.$body.$signature";
     }
 
     /**
@@ -92,8 +104,28 @@ class Auth {
             die(json_encode(['success' => false, 'error' => 'Invalid or expired token.']));
         }
 
-        // Check is_active and refresh role from database
+        // Skip DB check if checked_at is within the configured interval
+        $checkedAt = $payload['checked_at'] ?? 0;
+        $interval = 300; // default 5 minutes
+
+        if (time() - $checkedAt < $interval) {
+            return $payload;
+        }
+
+        // DB check: verify is_active and refresh role
         $db = Database::getInstance();
+
+        // Load auth_check_interval from system_settings (alongside the user check)
+        try {
+            $setting = Storage::adapter()->getSystemSetting('auth_check_interval');
+            if ($setting !== null) $interval = (int)$setting;
+        } catch (Exception $e) {}
+
+        // Re-check with the actual interval (may differ from default)
+        if ($interval !== 300 && time() - $checkedAt < $interval) {
+            return $payload;
+        }
+
         $stmt = $db->prepare("SELECT is_active, role FROM users WHERE id = ?");
         $stmt->execute([$payload['sub']]);
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -103,8 +135,12 @@ class Auth {
             die(json_encode(['success' => false, 'error' => 'Account has been deactivated.']));
         }
 
-        // Use DB role (not JWT-cached) for accurate checks
+        // Refresh role and checked_at, reissue JWT cookie
         $payload['role'] = $user['role'];
+        $payload['checked_at'] = time();
+        $newToken = self::generateTokenFromPayload($payload);
+        self::setAuthCookie($newToken);
+
         return $payload;
     }
 

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import api from '../api/client';
-import { Settings, Save, Clock, KeyRound } from 'lucide-react';
+import { Settings, Save, Clock, KeyRound, ShieldCheck, UserPlus } from 'lucide-react';
 import Section from '../components/Section';
 
 const TTL_OPTIONS = [
@@ -8,6 +8,18 @@ const TTL_OPTIONS = [
   { label: '6 hours',  value: '21600' },
   { label: '12 hours', value: '43200' },
   { label: '24 hours', value: '86400' },
+];
+
+const AUTH_CHECK_OPTIONS = [
+  { label: '1 minute',   value: '60' },
+  { label: '5 minutes',  value: '300' },
+  { label: '15 minutes', value: '900' },
+  { label: '30 minutes', value: '1800' },
+];
+
+const BOOLEAN_OPTIONS = [
+  { label: 'Enabled',  value: 'true' },
+  { label: 'Disabled', value: 'false' },
 ];
 
 const VAULT_TAB_OPTIONS = [
@@ -29,6 +41,9 @@ export default function SettingsPage() {
   // Local form state
   const [tickerPriceTtl, setTickerPriceTtl] = useState('86400');
   const [defaultVaultTab, setDefaultVaultTab] = useState('account');
+  const [authCheckInterval, setAuthCheckInterval] = useState('300');
+  const [selfRegistration, setSelfRegistration] = useState('false');
+  const [requireEmailVerification, setRequireEmailVerification] = useState('false');
 
   useEffect(() => {
     let cancelled = false;
@@ -37,8 +52,11 @@ export default function SettingsPage() {
         const res = await api.get('/settings.php');
         const data = res.data?.data || res.data || {};
         if (!cancelled) {
-          setTickerPriceTtl(data.ticker_price_ttl || '86400');
-          setDefaultVaultTab(data.default_vault_tab || 'account');
+          setTickerPriceTtl(data.ticker_price_ttl ?? '86400');
+          setDefaultVaultTab(data.default_vault_tab ?? 'account');
+          setAuthCheckInterval(data.auth_check_interval ?? '300');
+          setSelfRegistration(data.self_registration ?? 'false');
+          setRequireEmailVerification(data.require_email_verification ?? 'false');
         }
       } catch (err) {
         if (!cancelled) setError('Failed to load settings.');
@@ -60,6 +78,9 @@ export default function SettingsPage() {
       await api.put('/settings.php', {
         ticker_price_ttl: tickerPriceTtl,
         default_vault_tab: defaultVaultTab,
+        auth_check_interval: authCheckInterval,
+        self_registration: selfRegistration,
+        require_email_verification: requireEmailVerification,
       });
       setSuccess('Settings saved.');
       setTimeout(() => setSuccess(''), 3000);
@@ -89,6 +110,47 @@ export default function SettingsPage() {
       {success && <div className="alert alert-success">{success}</div>}
 
       <form onSubmit={handleSave}>
+        <Section icon={UserPlus} title="Registration" defaultOpen>
+          <div className="form-group">
+            <label htmlFor="self-registration">Self Registration</label>
+            <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
+              Allow anyone to create an account. When disabled, users can only join via invite.
+            </p>
+            <select
+              id="self-registration"
+              className="form-control"
+              value={selfRegistration}
+              onChange={(e) => setSelfRegistration(e.target.value)}
+              style={{ maxWidth: 240 }}
+            >
+              {BOOLEAN_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="form-group">
+            <label htmlFor="require-email-verification">Email Verification</label>
+            <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
+              Require new users to verify their email before they can sign in. Invited users are verified automatically.
+            </p>
+            <select
+              id="require-email-verification"
+              className="form-control"
+              value={requireEmailVerification}
+              onChange={(e) => setRequireEmailVerification(e.target.value)}
+              style={{ maxWidth: 240 }}
+            >
+              {BOOLEAN_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </Section>
+
         <Section icon={KeyRound} title="Default Vault Tab" defaultOpen>
           <div className="form-group">
             <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
@@ -124,6 +186,28 @@ export default function SettingsPage() {
               style={{ maxWidth: 240 }}
             >
               {TTL_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </Section>
+
+        <Section icon={ShieldCheck} title="Auth Check Interval" defaultOpen>
+          <div className="form-group">
+            <label htmlFor="auth-check-interval">Database Verification Interval</label>
+            <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
+              How often to verify user status (active/role) against the database. Between checks, the JWT token is trusted.
+            </p>
+            <select
+              id="auth-check-interval"
+              className="form-control"
+              value={authCheckInterval}
+              onChange={(e) => setAuthCheckInterval(e.target.value)}
+              style={{ maxWidth: 240 }}
+            >
+              {AUTH_CHECK_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
                   {opt.label}
                 </option>
