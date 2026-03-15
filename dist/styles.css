@@ -83,12 +83,15 @@
   --text: var(--color-text);
   --text-muted: var(--color-text-muted);
   --border: var(--color-border);
+  --border-color: var(--color-border);   /* alias for legacy inline styles */
+  --card-bg: var(--color-card);          /* alias for legacy inline styles */
   --primary: var(--color-primary);
   --primary-hover: var(--color-primary-hover);
   --success: var(--color-success);
   --warning: var(--color-warning);
   --danger: var(--color-danger);
   --info: var(--color-info);
+  --hover-bg: var(--color-hover);        /* alias for legacy inline styles */
 }
 
 /* ---------- CSS Custom Properties: Dark Theme ---------- */
@@ -131,6 +134,11 @@ html.dark {
 
   --scrollbar-thumb: #334155;
   --scrollbar-thumb-hover: #475569;
+
+  /* Dark mode aliases */
+  --border-color: var(--color-border);
+  --card-bg: var(--color-card);
+  --hover-bg: var(--color-hover);
 }
 
 /* ---------- Reset & Base ---------- */
@@ -420,6 +428,8 @@ tbody tr:hover {
   white-space: nowrap;
   text-decoration: none;
   font-family: inherit;
+  /* Minimum touch target for accessibility */
+  min-height: 36px;
 }
 
 .btn:disabled {
@@ -508,11 +518,13 @@ html.dark .btn-danger:hover:not(:disabled) {
   padding: 4px 10px;
   font-size: 12px;
   border-radius: var(--radius-sm);
+  min-height: 28px;
 }
 
 .btn-lg {
   padding: 12px 24px;
   font-size: 16px;
+  min-height: 48px;
 }
 
 .btn-icon {
@@ -581,6 +593,8 @@ html.dark .btn-danger:hover:not(:disabled) {
   border-radius: var(--radius-md);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
   line-height: 1.5;
+  /* Prevent iOS zoom on focus */
+  font-size: max(16px, 14px);
 }
 
 .form-control::placeholder {
@@ -597,6 +611,7 @@ html.dark .btn-danger:hover:not(:disabled) {
 textarea.form-control {
   min-height: 80px;
   resize: vertical;
+  font-size: 14px; /* override the max() for textareas */
 }
 
 select.form-control {
@@ -651,13 +666,14 @@ html.dark select.form-control {
 /* ---------- Alerts ---------- */
 .alert {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--space-sm);
   padding: 12px var(--space-md);
   border-radius: var(--radius-md);
   border: 1px solid;
   font-size: 14px;
   margin-bottom: var(--space-md);
+  flex-wrap: wrap;
 }
 
 .alert-success {
@@ -690,6 +706,13 @@ html.dark select.form-control {
   border-bottom: 1px solid var(--color-border);
   gap: 0;
   margin-bottom: var(--space-lg);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .tab {
@@ -706,6 +729,8 @@ html.dark select.form-control {
   border-right: none;
   font-family: inherit;
   margin-bottom: -1px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .tab:hover {
@@ -778,6 +803,7 @@ html.dark .modal-overlay {
   justify-content: space-between;
   padding: var(--space-md) var(--space-lg);
   border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
 }
 
 .modal-header h2,
@@ -787,9 +813,32 @@ html.dark .modal-overlay {
   color: var(--color-text);
 }
 
+/* Modal close button — was missing, caused unstyled button */
+.modal-close-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.modal-close-btn:hover {
+  background: var(--color-hover);
+  color: var(--color-text);
+}
+
 .modal-body {
   padding: var(--space-lg);
   overflow-y: auto;
+  flex: 1;
 }
 
 .modal-footer {
@@ -799,16 +848,18 @@ html.dark .modal-overlay {
   gap: var(--space-sm);
   padding: var(--space-md) var(--space-lg);
   border-top: 1px solid var(--color-border);
+  flex-shrink: 0;
 }
 
 /* ---------- Auth Pages ---------- */
 .auth-page {
   width: 100vw;
-  height: 100vh;
+  min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--auth-bg);
+  padding: var(--space-md);
 }
 
 .auth-card {
@@ -1021,9 +1072,13 @@ html.dark .modal-overlay {
   display: none; /* hidden on desktop */
 }
 
-/* ---------- Responsive ---------- */
+/* ==========================================================================
+   RESPONSIVE — Mobile First
+   ========================================================================== */
+
 @media (max-width: 768px) {
-  /* Mobile header — fixed top bar */
+
+  /* ── Mobile header — fixed top bar ── */
   .mobile-header {
     display: flex;
     align-items: center;
@@ -1032,9 +1087,8 @@ html.dark .modal-overlay {
     top: 0;
     left: 0;
     right: 0;
-    min-height: 48px;
-    padding: 0 var(--space-sm);
-    padding-top: env(safe-area-inset-top);
+    height: calc(52px + env(safe-area-inset-top));
+    padding: env(safe-area-inset-top) var(--space-sm) 0;
     background: var(--sidebar-bg);
     color: #f1f5f9;
     z-index: 800;
@@ -1047,6 +1101,7 @@ html.dark .modal-overlay {
     display: flex;
     align-items: center;
     gap: var(--space-sm);
+    color: #f1f5f9;
   }
 
   .mobile-header-actions {
@@ -1055,27 +1110,32 @@ html.dark .modal-overlay {
     gap: 2px;
   }
 
-  /* Sidebar — slide-in from left */
+  /* ── Sidebar — slide-in from left ── */
   .sidebar {
     position: fixed;
-    left: -260px;
+    left: -280px;
     top: 0;
     bottom: 0;
+    width: 280px;
+    min-width: 280px;
     z-index: 900;
     transition: left var(--transition-normal);
     padding-top: env(safe-area-inset-top);
+    /* Safe area on the left for notch devices */
+    padding-left: env(safe-area-inset-left);
   }
 
   .sidebar.open {
     left: 0;
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.35);
   }
 
-  /* Backdrop overlay behind sidebar */
+  /* ── Backdrop overlay behind sidebar ── */
   .sidebar-backdrop {
     display: block;
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.5);
+    background: rgba(0, 0, 0, 0.55);
     z-index: 899;
     opacity: 0;
     pointer-events: none;
@@ -1087,12 +1147,14 @@ html.dark .modal-overlay {
     pointer-events: auto;
   }
 
-  /* Main content adjustments */
+  /* ── Main content adjustments ── */
   .main-content {
     width: 100%;
-    padding: var(--space-md);
-    padding-top: calc(48px + env(safe-area-inset-top) + var(--space-md));
+    padding: var(--space-sm);
+    padding-top: calc(52px + env(safe-area-inset-top) + var(--space-sm));
     padding-bottom: calc(var(--space-md) + env(safe-area-inset-bottom));
+    padding-left: calc(var(--space-sm) + env(safe-area-inset-left));
+    padding-right: calc(var(--space-sm) + env(safe-area-inset-right));
   }
 
   .page-content {
@@ -1102,29 +1164,200 @@ html.dark .modal-overlay {
   .page-header {
     flex-direction: column;
     align-items: flex-start;
+    gap: var(--space-sm);
   }
 
+  /* Page header actions wrap nicely */
+  .page-header > div:last-child {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  /* ── Forms ── */
   .form-row {
     grid-template-columns: 1fr;
   }
 
+  /* Prevent iOS zoom on inputs — ensure at least 16px */
+  .form-control {
+    font-size: 16px;
+  }
+
+  /* ── Modals — bottom sheet on mobile ── */
+  .modal-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
   .modal-dialog {
     max-width: 100%;
-    margin: var(--space-sm);
+    width: 100%;
+    margin: 0;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    max-height: 92vh;
+    animation: modal-slide-up 250ms ease;
+    /* Safe area for home indicator */
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .modal-dialog.modal-lg,
+  .modal-dialog.modal-xl {
+    max-width: 100%;
+    width: 100%;
+  }
+
+  @keyframes modal-slide-up {
+    from {
+      opacity: 0;
+      transform: translateY(60px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* ── Auth pages ── */
+  .auth-page {
+    align-items: flex-start;
+    padding-top: calc(var(--space-xl) + env(safe-area-inset-top));
+    padding-bottom: calc(var(--space-xl) + env(safe-area-inset-bottom));
   }
 
   .auth-card {
-    margin: var(--space-md);
+    padding: var(--space-lg);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
   }
 
+  /* ── Tables — hide less important columns, keep readable ── */
+  /* The table-wrapper handles horizontal scroll as fallback */
+  .table-wrapper {
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  }
+
+  /* Vault table: hide "Details" and "Updated" columns on small screens */
+  table.vault-table thead th:nth-child(3),
+  table.vault-table thead th:nth-child(4),
+  table.vault-table tbody td:nth-child(3),
+  table.vault-table tbody td:nth-child(4) {
+    display: none;
+  }
+
+  /* Actions column: keep inline on mobile */
   .td-actions {
-    flex-direction: column;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    gap: 2px;
   }
 
-  /* Body scroll lock when sidebar is open */
+  /* Tighten action buttons on mobile */
+  .td-actions .btn-sm {
+    padding: 4px 6px;
+    min-height: 32px;
+    min-width: 32px;
+  }
+
+  /* ── Nav items — larger touch targets on mobile ── */
+  .sidebar-nav a,
+  .sidebar-nav button {
+    padding: 11px 12px;
+    min-height: 44px;
+  }
+
+  /* ── Tabs ── */
+  .tabs {
+    margin-bottom: var(--space-md);
+  }
+
+  .tab {
+    padding: 10px 12px;
+    font-size: 13px;
+  }
+
+  /* ── Bulk toolbar ── */
+  .bulk-toolbar {
+    flex-wrap: wrap;
+    position: sticky;
+    top: 0;
+  }
+
+  /* ── Passkey / alert banners ── */
+  .alert {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: var(--space-sm);
+  }
+
+  /* Alert action buttons in banner */
+  .alert > div:last-child {
+    flex-wrap: wrap;
+    gap: var(--space-xs);
+  }
+
+  /* ── SyncToast — safe area aware ── */
+  .sync-toast {
+    bottom: calc(20px + env(safe-area-inset-bottom));
+    left: var(--space-md);
+    right: var(--space-md);
+    max-width: none;
+  }
+
+  /* ── Body scroll lock when sidebar is open ── */
   body.sidebar-open {
     overflow: hidden;
     overscroll-behavior: contain;
+  }
+
+  /* ── Portfolio summary grid ── */
+  .portfolio-summary-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .portfolio-chart-row {
+    flex-direction: column;
+  }
+
+  /* ── Page title size ── */
+  .page-title {
+    font-size: 18px;
+  }
+
+  /* ── Vault type filter buttons — scrollable row ── */
+  .vault-type-filters {
+    display: flex;
+    gap: var(--space-xs);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 4px;
+    flex-wrap: nowrap;
+  }
+
+  .vault-type-filters::-webkit-scrollbar {
+    display: none;
+  }
+
+  .vault-type-filters .btn {
+    flex-shrink: 0;
+  }
+}
+
+/* ==========================================================================
+   Tablet adjustments (769px – 1024px)
+   ========================================================================== */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .sidebar {
+    width: 220px;
+    min-width: 220px;
+  }
+
+  .main-content {
+    padding: var(--space-md);
+  }
+
+  .page-content {
+    padding: var(--space-md);
   }
 }
 
@@ -1153,7 +1386,9 @@ html.dark .modal-overlay {
   color: var(--color-text);
 }
 
-/* ---------- Missing Component Styles (V2) ---------- */
+/* ==========================================================================
+   Component Styles (V2)
+   ========================================================================== */
 
 /* Sidebar header */
 .sidebar-header {
@@ -1207,6 +1442,7 @@ html.dark .modal-overlay {
   border: none;
   width: 100%;
   text-align: left;
+  min-height: 38px;
 }
 
 .sidebar-nav a:hover,
@@ -1237,6 +1473,7 @@ html.dark .modal-overlay {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-sm);
+  flex-wrap: wrap;
 }
 
 .vault-lock-indicator {
@@ -1257,8 +1494,8 @@ html.dark .modal-overlay {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   padding: 0;
   border: none;
   border-radius: var(--radius-md);
@@ -1287,6 +1524,7 @@ html.dark .modal-overlay {
   align-items: center;
   gap: var(--space-sm);
   margin-top: var(--space-md);
+  flex-wrap: wrap;
 }
 
 /* Sidebar footer btn overrides for dark context */
@@ -1300,9 +1538,9 @@ html.dark .modal-overlay {
   color: #f1f5f9;
 }
 
-/* ========================================================================== */
-/* Bulk Operations                                                            */
-/* ========================================================================== */
+/* ==========================================================================
+   Bulk Operations
+   ========================================================================== */
 
 /* Bulk toolbar — sticky bar when items are selected */
 .bulk-toolbar {
@@ -1455,9 +1693,9 @@ td.td-checkbox input[type="checkbox"] {
   border-top: 1px solid var(--border);
 }
 
-/* ========================================================================== */
-/* Share Item Picker — multi-select checkbox list                             */
-/* ========================================================================== */
+/* ==========================================================================
+   Share Item Picker — multi-select checkbox list
+   ========================================================================== */
 
 .share-item-picker {
   border: 1px solid var(--color-input-border);
@@ -1525,9 +1763,9 @@ td.td-checkbox input[type="checkbox"] {
   white-space: nowrap;
 }
 
-/* ========================================================================== */
-/* Portfolio Page                                                              */
-/* ========================================================================== */
+/* ==========================================================================
+   Portfolio Page
+   ========================================================================== */
 
 .portfolio-summary-grid {
   display: grid;
@@ -1543,27 +1781,123 @@ td.td-checkbox input[type="checkbox"] {
   flex-wrap: wrap;
 }
 
-@media (max-width: 768px) {
+/* ==========================================================================
+   Vault Page — mobile card view for entries
+   ========================================================================== */
+
+/* On mobile, vault entries render as cards instead of table rows */
+@media (max-width: 640px) {
+
+  /* Hide the desktop table entirely */
+  .vault-table-wrapper {
+    display: none;
+  }
+
+  /* Show the mobile card list */
+  .vault-card-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+  }
+
+  /* Each entry is a card */
+  .vault-entry-card {
+    background: var(--color-card);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-md);
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    cursor: pointer;
+    transition: background var(--transition-fast);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .vault-entry-card:active {
+    background: var(--color-hover);
+  }
+
+  .vault-entry-card-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .vault-entry-card-body {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .vault-entry-card-title {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--color-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .vault-entry-card-detail {
+    font-size: 12px;
+    color: var(--color-text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 2px;
+  }
+
+  .vault-entry-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+
+  /* On mobile, show the card list; hide the table */
+  .vault-table-desktop {
+    display: none;
+  }
+
+  .vault-cards-mobile {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+  }
+
+  /* Portfolio summary: 2 columns on small screens */
   .portfolio-summary-grid {
     grid-template-columns: repeat(2, 1fr);
   }
 
-  .portfolio-chart-row {
-    flex-direction: column;
+  /* Dashboard stat cards: 2 columns */
+  .dashboard-stat-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+}
+
+/* On larger mobile (641–768px), keep table but make it more compact */
+@media (min-width: 641px) and (max-width: 768px) {
+  .vault-table-desktop {
+    display: block;
   }
 
-  .tabs {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-  }
-
-  .tabs::-webkit-scrollbar {
+  .vault-cards-mobile {
     display: none;
   }
+}
 
-  .tab {
-    white-space: nowrap;
-    flex-shrink: 0;
+/* Desktop: always show table, never show card list */
+@media (min-width: 769px) {
+  .vault-table-desktop {
+    display: block;
+  }
+
+  .vault-cards-mobile {
+    display: none;
   }
 }
