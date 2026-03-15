@@ -20,7 +20,8 @@ import ImportExportPage from './pages/ImportExportPage';
 import SecurityPage from './pages/SecurityPage';
 import ProfilePage from './pages/ProfilePage';
 import TemplatesPage from './pages/TemplatesPage';
-import AdminPage from './pages/AdminPage';
+import UsersPage from './pages/UsersPage';
+import ReferenceDataPage from './pages/ReferenceDataPage';
 import SettingsPage from './pages/SettingsPage';
 import HomePage from './pages/HomePage';
 import HelpPage from './pages/HelpPage';
@@ -175,8 +176,11 @@ function AppRoutes() {
           <Route path="templates" element={<TemplatesPage />} />
           <Route path="security" element={<SecurityPage />} />
           <Route path="profile" element={<ProfilePage />} />
-          <Route path="admin" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
-          <Route path="settings" element={<ProtectedRoute adminOnly><SettingsPage /></ProtectedRoute>} />
+          <Route path="admin/users" element={<ProtectedRoute adminOnly><UsersPage /></ProtectedRoute>} />
+          <Route path="admin/reference" element={<ProtectedRoute adminOnly><ReferenceDataPage /></ProtectedRoute>} />
+          <Route path="admin/settings" element={<ProtectedRoute adminOnly><SettingsPage /></ProtectedRoute>} />
+          <Route path="admin" element={<Navigate to="/admin/users" replace />} />
+          <Route path="settings" element={<Navigate to="/admin/settings" replace />} />
         </Route>
 
         {/* Catch-all */}

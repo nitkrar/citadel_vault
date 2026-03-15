@@ -19,6 +19,7 @@ import {
   FileText,
   Share2,
   User,
+  Users,
   Shield,
   LogOut,
   Database,
@@ -288,17 +289,23 @@ export default function Layout() {
               <NavLink to="/profile" className={({ isActive }) => (isActive ? 'active' : '')}>
                 <User size={18} /> Profile
               </NavLink>
-              {isSiteAdmin && (
-                <NavLink to="/settings" className={({ isActive }) => (isActive ? 'active' : '')}>
-                  <Settings size={18} /> Settings
-                </NavLink>
-              )}
-              {isSiteAdmin && (
-                <NavLink to="/admin" className={({ isActive }) => (isActive ? 'active' : '')}>
-                  <Database size={18} /> Admin
-                </NavLink>
-              )}
             </div>
+
+            {/* Admin — visible to site admins only */}
+            {isSiteAdmin && (
+            <div className="nav-section">
+              <span className="nav-section-label">Admin</span>
+              <NavLink to="/admin/users" className={({ isActive }) => (isActive ? 'active' : '')}>
+                <Users size={18} /> Users
+              </NavLink>
+              <NavLink to="/admin/reference" className={({ isActive }) => (isActive ? 'active' : '')}>
+                <Database size={18} /> Reference Data
+              </NavLink>
+              <NavLink to="/admin/settings" className={({ isActive }) => (isActive ? 'active' : '')}>
+                <Settings size={18} /> System Settings
+              </NavLink>
+            </div>
+            )}
 
             {/* Help */}
             <div className="nav-section">
