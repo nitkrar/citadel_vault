@@ -1,5 +1,6 @@
 import { useState, Fragment } from 'react';
-import { User, Check, AlertTriangle, Edit2, Keyboard, ChevronDown, ChevronRight, Send, Copy, UserPlus, DollarSign, RefreshCw, KeyRound } from 'lucide-react';
+import { User, Check, AlertTriangle, Edit2, Keyboard, Send, Copy, UserPlus, DollarSign, RefreshCw, KeyRound } from 'lucide-react';
+import Section from '../components/Section';
 import api from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 import useKeyboardShortcuts from '../hooks/useKeyboardShortcuts';
@@ -87,8 +88,6 @@ export default function ProfilePage() {
     setSavingVaultTab(false);
   };
 
-  const [shortcutsOpen, setShortcutsOpen] = useState(false);
-
   // ── Profile edit ─────────────────────────────────────────────────
   const [editingProfile, setEditingProfile] = useState(false);
   const [editDisplayName, setEditDisplayName] = useState('');
@@ -164,15 +163,14 @@ export default function ProfilePage() {
   return (
     <div className="page-content">
       <div className="page-header">
-        <div><h1 className="page-title">Profile</h1><p className="page-subtitle">Account information</p></div>
+        <div><h1 className="page-title">Profile</h1><p className="page-subtitle">Account information &amp; preferences</p></div>
       </div>
 
       {/* Account Info */}
-      <div className="card mb-4" style={{ padding: 20 }}>
+      <Section icon={User} title="Account" defaultOpen>
         <div className="flex items-center justify-between mb-3">
-          <h3 className="flex items-center gap-2"><User size={18} /> Account</h3>
           {!editingProfile && (
-            <button className="btn btn-ghost btn-sm" onClick={openProfileEdit}><Edit2 size={14} /> Edit</button>
+            <button className="btn btn-ghost btn-sm" onClick={openProfileEdit} style={{ marginLeft: 'auto' }}><Edit2 size={14} /> Edit</button>
           )}
         </div>
 
@@ -210,11 +208,10 @@ export default function ProfilePage() {
             <span className="font-medium">{user?.created_at ? new Date(user.created_at).toLocaleDateString() : '--'}</span>
           </div>
         )}
-      </div>
+      </Section>
 
       {/* Invite Someone */}
-      <div className="card mb-4" style={{ padding: 20 }}>
-        <h3 className="flex items-center gap-2 mb-3"><UserPlus size={18} /> Invite Someone</h3>
+      <Section icon={UserPlus} title="Invite Someone">
         <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 12 }}>
           Send an invite link to someone you'd like to join. The link expires in 7 days.
         </p>
@@ -247,11 +244,10 @@ export default function ProfilePage() {
             <Send size={14} /> {inviteSending ? 'Sending...' : 'Send Invite'}
           </button>
         </form>
-      </div>
+      </Section>
 
       {/* Display Currency */}
-      <div className="card mb-4" style={{ padding: 20 }}>
-        <h3 className="flex items-center gap-2 mb-3"><DollarSign size={18} /> Display Currency</h3>
+      <Section icon={DollarSign} title="Display Currency">
         <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 12 }}>
           Choose which currency to display portfolio values in. Defaults to the server base currency.
         </p>
@@ -270,11 +266,10 @@ export default function ProfilePage() {
             <option key={c.code} value={c.code}>{c.symbol} {c.code} — {c.name}</option>
           ))}
         </select>
-      </div>
+      </Section>
 
       {/* Sync Interval */}
-      <div className="card mb-4" style={{ padding: 20 }}>
-        <h3 className="flex items-center gap-2 mb-3"><RefreshCw size={18} /> Sync Interval</h3>
+      <Section icon={RefreshCw} title="Sync Interval">
         <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 12 }}>
           How often to check for changes from other devices. Set to "Off" to disable automatic sync.
         </p>
@@ -292,11 +287,10 @@ export default function ProfilePage() {
             <option key={opt.value} value={opt.value}>{opt.label}</option>
           ))}
         </select>
-      </div>
+      </Section>
 
       {/* Default Vault Tab */}
-      <div className="card mb-4" style={{ padding: 20 }}>
-        <h3 className="flex items-center gap-2 mb-3"><KeyRound size={18} /> Default Vault Tab</h3>
+      <Section icon={KeyRound} title="Default Vault Tab">
         <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 12 }}>
           Which tab to show when you open the Vault page. Navigating from the dashboard overrides this.
         </p>
@@ -315,37 +309,28 @@ export default function ProfilePage() {
             <option key={opt.value} value={opt.value}>{opt.label}</option>
           ))}
         </select>
-      </div>
+      </Section>
 
       {/* Keyboard Shortcuts (desktop only) */}
       {isDesktop && (
-        <div className="card mb-4" style={{ padding: 0 }}>
-          <button type="button" onClick={() => setShortcutsOpen(!shortcutsOpen)}
-            style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '16px 20px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', fontSize: 16, fontWeight: 600 }}>
-            {shortcutsOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-            <Keyboard size={18} /> Keyboard Shortcuts
-          </button>
-          {shortcutsOpen && (
-            <div style={{ padding: '0 20px 20px' }}>
-              <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
-                Toggle individual shortcuts on or off. Uses the <kbd style={{ fontSize: 11, background: 'var(--bg-secondary, #f3f4f6)', border: '1px solid var(--border-color, #e5e7eb)', borderRadius: 3, padding: '1px 5px' }}>Ctrl</kbd> key (not Cmd on Mac).
-              </p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {SHORTCUT_DEFS.map(s => (
-                  <label key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px', borderRadius: 6, background: 'var(--bg-secondary, #f9fafb)', cursor: 'pointer', fontSize: 14 }}>
-                    <input type="checkbox" checked={!!shortcutSettings[s.id]} onChange={() => toggleShortcut(s.id)}
-                      style={{ width: 16, height: 16, cursor: 'pointer' }} />
-                    <kbd style={{ fontSize: 12, background: 'var(--bg, #fff)', border: '1px solid var(--border-color, #e5e7eb)', borderRadius: 4, padding: '2px 8px', fontFamily: 'monospace', minWidth: 56, textAlign: 'center' }}>
-                      Ctrl+{s.key === '/' ? '/' : s.key.toUpperCase()}
-                    </kbd>
-                    <span style={{ flex: 1 }}>{s.label}</span>
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{s.when}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
+        <Section icon={Keyboard} title="Keyboard Shortcuts">
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
+            Toggle individual shortcuts on or off. Uses the <kbd style={{ fontSize: 11, background: 'var(--bg-secondary, #f3f4f6)', border: '1px solid var(--border-color, #e5e7eb)', borderRadius: 3, padding: '1px 5px' }}>Ctrl</kbd> key (not Cmd on Mac).
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {SHORTCUT_DEFS.map(s => (
+              <label key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px', borderRadius: 6, background: 'var(--bg-secondary, #f9fafb)', cursor: 'pointer', fontSize: 14 }}>
+                <input type="checkbox" checked={!!shortcutSettings[s.id]} onChange={() => toggleShortcut(s.id)}
+                  style={{ width: 16, height: 16, cursor: 'pointer' }} />
+                <kbd style={{ fontSize: 12, background: 'var(--bg, #fff)', border: '1px solid var(--border-color, #e5e7eb)', borderRadius: 4, padding: '2px 8px', fontFamily: 'monospace', minWidth: 56, textAlign: 'center' }}>
+                  Ctrl+{s.key === '/' ? '/' : s.key.toUpperCase()}
+                </kbd>
+                <span style={{ flex: 1 }}>{s.label}</span>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{s.when}</span>
+              </label>
+            ))}
+          </div>
+        </Section>
       )}
     </div>
   );

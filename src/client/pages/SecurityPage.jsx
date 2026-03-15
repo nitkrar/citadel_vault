@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import {
   Shield, Key, Eye, EyeOff, Lock, Clock,
-  Copy, Check, Download, ChevronDown, ChevronRight, KeyRound, Plus,
+  Copy, Check, Download, KeyRound, Plus,
 } from 'lucide-react';
 import api from '../api/client';
 import { useEncryption } from '../contexts/EncryptionContext';
@@ -9,21 +9,7 @@ import { useAuth } from '../contexts/AuthContext';
 import useVaultData from '../hooks/useVaultData';
 import { apiData } from '../lib/checks';
 import { getUserPreference, VAULT_KEY_MINIMUMS } from '../lib/defaults';
-
-/** Collapsible section */
-function Section({ icon: Icon, title, defaultOpen = false, danger = false, children }) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div className="card mb-4" style={{ padding: 0, ...(danger ? { borderColor: '#fecaca' } : {}) }}>
-      <button type="button" onClick={() => setOpen(!open)}
-        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '16px 20px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', fontSize: 16, fontWeight: 600, color: danger ? '#dc2626' : 'inherit' }}>
-        {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-        <Icon size={18} /> {title}
-      </button>
-      {open && <div style={{ padding: '0 20px 20px' }}>{children}</div>}
-    </div>
-  );
-}
+import Section from '../components/Section';
 
 export default function SecurityPage() {
   const { isUnlocked, changeVaultKey, viewRecoveryKey, lock } = useEncryption();

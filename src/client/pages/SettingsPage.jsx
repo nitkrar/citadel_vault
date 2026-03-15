@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import api from '../api/client';
 import { Settings, Save, Clock, KeyRound } from 'lucide-react';
+import Section from '../components/Section';
 
 const TTL_OPTIONS = [
   { label: '1 hour',   value: '3600' },
@@ -88,59 +89,48 @@ export default function SettingsPage() {
       {success && <div className="alert alert-success">{success}</div>}
 
       <form onSubmit={handleSave}>
-        <div className="card mb-4">
-          <div className="card-header">
-            <h3><KeyRound size={18} /> Vault</h3>
+        <Section icon={KeyRound} title="Default Vault Tab" defaultOpen>
+          <div className="form-group">
+            <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
+              The tab shown when users open the Vault page. Users can override this in their Profile.
+            </p>
+            <select
+              id="default-vault-tab"
+              className="form-control"
+              value={defaultVaultTab}
+              onChange={(e) => setDefaultVaultTab(e.target.value)}
+              style={{ maxWidth: 240 }}
+            >
+              {VAULT_TAB_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
           </div>
-          <div className="card-body">
-            <div className="form-group">
-              <label htmlFor="default-vault-tab">Default Vault Tab</label>
-              <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
-                The tab shown when users open the Vault page. Users can override this in their Profile.
-              </p>
-              <select
-                id="default-vault-tab"
-                className="form-control"
-                value={defaultVaultTab}
-                onChange={(e) => setDefaultVaultTab(e.target.value)}
-                style={{ maxWidth: 240 }}
-              >
-                {VAULT_TAB_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-        </div>
+        </Section>
 
-        <div className="card mb-4">
-          <div className="card-header">
-            <h3><Clock size={18} /> Price Cache</h3>
+        <Section icon={Clock} title="Price Cache" defaultOpen>
+          <div className="form-group">
+            <label htmlFor="ticker-price-ttl">Price Cache Duration</label>
+            <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
+              How long to cache fetched stock/crypto prices before refreshing from the source.
+            </p>
+            <select
+              id="ticker-price-ttl"
+              className="form-control"
+              value={tickerPriceTtl}
+              onChange={(e) => setTickerPriceTtl(e.target.value)}
+              style={{ maxWidth: 240 }}
+            >
+              {TTL_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
           </div>
-          <div className="card-body">
-            <div className="form-group">
-              <label htmlFor="ticker-price-ttl">Price Cache Duration</label>
-              <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
-                How long to cache fetched stock/crypto prices before refreshing from the source.
-              </p>
-              <select
-                id="ticker-price-ttl"
-                className="form-control"
-                value={tickerPriceTtl}
-                onChange={(e) => setTickerPriceTtl(e.target.value)}
-                style={{ maxWidth: 240 }}
-              >
-                {TTL_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-        </div>
+        </Section>
 
         <div className="form-actions">
           <button type="submit" className="btn btn-primary" disabled={saving}>
