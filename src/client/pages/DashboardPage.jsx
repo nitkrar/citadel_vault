@@ -29,7 +29,7 @@ export default function DashboardPage() {
   const { isUnlocked } = useEncryption();
 
   const fetchStats = useCallback(async () => {
-    const [statsResp, noticesResp] = await Promise.all([
+    const [{ data: statsResp }, { data: noticesResp }] = await Promise.all([
       api.get('/dashboard.php?action=stats'),
       api.get('/dashboard.php?action=page-notices'),
     ]);
