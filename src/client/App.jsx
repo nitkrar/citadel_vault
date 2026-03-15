@@ -27,6 +27,7 @@ import HelpPage from './pages/HelpPage';
 import DevGuidePage from './pages/DevGuidePage';
 import FeaturesPage from './pages/FeaturesPage';
 import EncryptionKeyModal from './components/EncryptionKeyModal';
+import UpdateToast from './components/UpdateToast';
 
 // --- ProtectedRoute ---
 function ProtectedRoute({ children, adminOnly = false }) {
@@ -152,6 +153,7 @@ function AppRoutes() {
   return (
     <>
       <OfflineBanner />
+      <UpdateToast />
       <Routes>
         {/* Public routes */}
         <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />

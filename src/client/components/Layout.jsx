@@ -35,6 +35,7 @@ import {
   Settings,
   Menu,
   X,
+  RefreshCw,
 } from 'lucide-react';
 
 // --- Hide Amounts Context ---
@@ -294,8 +295,25 @@ export default function Layout() {
 
           <div className="sidebar-footer">
             {(import.meta.env.VITE_APP_VERSION || import.meta.env.VITE_BUILD_ID) && (
-              <div className="text-sm" style={{ color: 'var(--sidebar-text-muted)', marginBottom: 6, fontSize: 11 }}>
-                v{import.meta.env.VITE_APP_VERSION || '?'} build {import.meta.env.VITE_BUILD_ID || '?'}
+              <div className="flex items-center gap-2" style={{ color: 'var(--sidebar-text-muted)', marginBottom: 6, fontSize: 11 }}>
+                <span>v{import.meta.env.VITE_APP_VERSION || '?'} build {import.meta.env.VITE_BUILD_ID || '?'}</span>
+                <button
+                  title="Force refresh"
+                  onClick={async () => {
+                    if ('serviceWorker' in navigator) {
+                      const regs = await navigator.serviceWorker.getRegistrations();
+                      await Promise.all(regs.map(r => r.unregister()));
+                    }
+                    if ('caches' in window) {
+                      const keys = await caches.keys();
+                      await Promise.all(keys.map(k => caches.delete(k)));
+                    }
+                    window.location.reload();
+                  }}
+                  style={{ background: 'none', border: 'none', padding: 2, cursor: 'pointer', color: 'inherit', display: 'inline-flex' }}
+                >
+                  <RefreshCw size={11} />
+                </button>
               </div>
             )}
             <div className="sidebar-user-info">
