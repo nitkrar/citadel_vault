@@ -782,34 +782,23 @@ export default function AdminPage() {
                 <tr>
                   <SortableTh sortKey="id" current={countrySortKey} dir={countrySortDir} onSort={onCountrySort}>ID</SortableTh>
                   <SortableTh sortKey="flag_emoji" current={countrySortKey} dir={countrySortDir} onSort={onCountrySort}>Flag</SortableTh>
-                  <SortableTh sortKey="name" current={countrySortKey} dir={countrySortDir} onSort={onCountrySort}>Name</SortableTh>
-                  <SortableTh sortKey="code" current={countrySortKey} dir={countrySortDir} onSort={onCountrySort}>Code</SortableTh>
-                  <SortableTh sortKey="default_currency_name" current={countrySortKey} dir={countrySortDir} onSort={onCountrySort}>Default Currency</SortableTh>
-                  <SortableTh sortKey="field_template" current={countrySortKey} dir={countrySortDir} onSort={onCountrySort}>Field Template</SortableTh>
+                  <SortableTh sortKey="name" current={countrySortKey} dir={countrySortDir} onSort={onCountrySort}>Country</SortableTh>
+                  <SortableTh sortKey="code" current={countrySortKey} dir={countrySortDir} onSort={onCountrySort}>Country Code</SortableTh>
+                  <SortableTh sortKey="default_currency_code" current={countrySortKey} dir={countrySortDir} onSort={onCountrySort}>Default Currency</SortableTh>
                 </tr>
               </thead>
               <tbody>
-                {sortedCountries.map(c => {
-                  const hasTpl = !!(c.field_template && (Array.isArray(c.field_template) ? c.field_template.length > 0 : true));
-                  return (
+                {sortedCountries.map(c => (
                     <tr key={c.id}>
                       <td className="td-muted">{c.id}</td>
                       <td style={{ fontSize: 18 }}>{c.flag_emoji || '--'}</td>
                       <td className="font-medium">{c.name}</td>
                       <td className="td-muted font-mono">{c.code || '--'}</td>
-                      <td className="td-muted">{c.default_currency_code || c.default_currency_id || '--'}</td>
-                      <td>
-                        {hasTpl ? (
-                          <span className="badge badge-success">Configured</span>
-                        ) : (
-                          <span className="badge badge-muted">None</span>
-                        )}
-                      </td>
+                      <td className="td-muted">{c.default_currency_code ? `${c.default_currency_code} (${c.default_currency_symbol})` : '--'}</td>
                     </tr>
-                  );
-                })}
+                ))}
                 {countries.length === 0 && (
-                  <tr><td colSpan={6} className="text-center text-muted">No countries</td></tr>
+                  <tr><td colSpan={5} className="text-center text-muted">No countries</td></tr>
                 )}
               </tbody>
             </table>

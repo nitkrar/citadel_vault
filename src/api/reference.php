@@ -226,8 +226,11 @@ if ($resource === 'countries') {
 
     if ($method === 'GET') {
         $stmt = $db->query(
-            "SELECT id, name, code, flag_emoji, display_order, default_currency_id
-             FROM countries ORDER BY display_order ASC, name ASC"
+            "SELECT c.id, c.name, c.code, c.flag_emoji, c.display_order, c.default_currency_id,
+                    cu.code AS default_currency_code, cu.symbol AS default_currency_symbol
+             FROM countries c
+             LEFT JOIN currencies cu ON c.default_currency_id = cu.id
+             ORDER BY c.display_order ASC, c.name ASC"
         );
         Response::success($stmt->fetchAll());
     }
