@@ -197,6 +197,7 @@ function AppRoutes() {
 // --- EncryptionWrapper ---
 import useAppConfig from './hooks/useAppConfig';
 import * as workerDispatcher from './lib/workerDispatcher';
+import * as cachePolicy from './lib/cachePolicy';
 
 function EncryptionWrapper({ children }) {
   const { user } = useAuth();
@@ -208,6 +209,10 @@ function EncryptionWrapper({ children }) {
         workerMode: config.worker_mode,
         workerThreshold: config.worker_threshold,
         workerAdaptiveMs: config.worker_adaptive_ms,
+      });
+      cachePolicy.configure({
+        cacheMode: config.cache_mode,
+        cacheTtlHours: config.cache_ttl_hours,
       });
     }
   }, [config]);

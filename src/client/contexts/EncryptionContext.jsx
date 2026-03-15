@@ -6,6 +6,7 @@ import { entryStore } from '../lib/entryStore';
 import { getUserPreference, PREFERENCE_DEFAULTS } from '../lib/defaults';
 import { useAuth } from './AuthContext';
 import * as workerDispatcher from '../lib/workerDispatcher';
+import * as cachePolicy from '../lib/cachePolicy';
 
 const EncryptionContext = createContext(null);
 
@@ -25,7 +26,7 @@ export function EncryptionProvider({ children, user }) {
     const prevId = prevUserIdRef.current;
     prevUserIdRef.current = user?.id;
     if (prevId && prevId !== user?.id) {
-      entryStore.clear().catch(() => {});
+      cachePolicy.clearAll();
       workerDispatcher.terminate();
     }
   }, [user?.id]);
@@ -50,7 +51,7 @@ export function EncryptionProvider({ children, user }) {
       // Auto-lock fires
       crypto.lockVault();
       workerDispatcher.setKey(null);
-      // Keep encrypted entries in IndexedDB for offline unlock
+      cachePolicy.onVaultLock();
       setIsUnlocked(false);
     }, timeout * 1000);
   }, [clearAutoLock]);
@@ -109,7 +110,7 @@ export function EncryptionProvider({ children, user }) {
   const lock = useCallback(async () => {
     crypto.lockVault();
     workerDispatcher.setKey(null);
-    // Keep encrypted entries in IndexedDB for offline/instant unlock
+    await cachePolicy.onVaultLock();
     clearAutoLock();
     clearSession();
     setIsUnlocked(false);
@@ -145,16 +146,13 @@ export function EncryptionProvider({ children, user }) {
       // Cache DEK for worker dispatcher
       await workerDispatcher.setKey(crypto._getDekForContext());
 
-      // 4. Use cached entries from IndexedDB if available, otherwise fetch
-      const cached = await entryStore.getAll().catch(() => []);
-      if (cached.length > 0) {
-        // Entries already in IndexedDB — use them instantly.
-        // SyncContext will detect server changes and prompt refresh.
-      } else {
-        // First unlock or cleared store — fetch from server
+      // 4. Use cached entries if available and fresh, otherwise fetch from server
+      const hasCache = await cachePolicy.hasFreshCache();
+      if (!hasCache) {
         const { data: entriesResp } = await api.get('/vault.php');
         const entries = apiData({ data: entriesResp }) || [];
         await entryStore.putAll(entries);
+        cachePolicy.markCacheRefreshed();
       }
 
       // 5. Set state

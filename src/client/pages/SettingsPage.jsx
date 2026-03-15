@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import api from '../api/client';
-import { Settings, Save, Clock, KeyRound, ShieldCheck, UserPlus, Gauge } from 'lucide-react';
+import { Settings, Save, Clock, KeyRound, ShieldCheck, UserPlus, Gauge, Database } from 'lucide-react';
 import Section from '../components/Section';
 
 const TTL_OPTIONS = [
@@ -61,6 +61,8 @@ export default function SettingsPage() {
   const [requireEmailVerification, setRequireEmailVerification] = useState('false');
   const [inviteExpiryDays, setInviteExpiryDays] = useState('7');
   const [lockoutTier3Duration, setLockoutTier3Duration] = useState('7776000');
+  const [cacheMode, setCacheMode] = useState('instant_unlock');
+  const [cacheTtlHours, setCacheTtlHours] = useState('0');
   const [workerMode, setWorkerMode] = useState('count');
   const [workerThreshold, setWorkerThreshold] = useState('50');
   const [workerAdaptiveMs, setWorkerAdaptiveMs] = useState('100');
@@ -79,6 +81,8 @@ export default function SettingsPage() {
           setRequireEmailVerification(data.require_email_verification ?? 'false');
           setInviteExpiryDays(data.invite_expiry_days ?? '7');
           setLockoutTier3Duration(data.lockout_tier3_duration ?? '7776000');
+          setCacheMode(data.cache_mode ?? 'instant_unlock');
+          setCacheTtlHours(data.cache_ttl_hours ?? '0');
           setWorkerMode(data.worker_mode ?? 'count');
           setWorkerThreshold(data.worker_threshold ?? '50');
           setWorkerAdaptiveMs(data.worker_adaptive_ms ?? '100');
@@ -108,6 +112,8 @@ export default function SettingsPage() {
         require_email_verification: requireEmailVerification,
         invite_expiry_days: inviteExpiryDays,
         lockout_tier3_duration: lockoutTier3Duration,
+        cache_mode: cacheMode,
+        cache_ttl_hours: cacheTtlHours,
         worker_mode: workerMode,
         worker_threshold: workerThreshold,
         worker_adaptive_ms: workerAdaptiveMs,
@@ -282,6 +288,43 @@ export default function SettingsPage() {
               ))}
             </select>
           </div>
+        </Section>
+
+        <Section icon={Database} title="Cache &amp; Storage" defaultOpen={false}>
+          <div className="form-group">
+            <label htmlFor="cache-mode">Vault Cache Mode</label>
+            <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
+              Controls whether encrypted vault entries persist in the browser after vault lock.
+            </p>
+            <select
+              id="cache-mode"
+              className="form-control"
+              value={cacheMode}
+              onChange={(e) => setCacheMode(e.target.value)}
+              style={{ maxWidth: 360 }}
+            >
+              <option value="instant_unlock">Instant unlock — keep encrypted cache, unlock without server fetch</option>
+              <option value="always_fetch">Always fetch — clear cache on lock, fetch fresh from server each time</option>
+            </select>
+          </div>
+          {cacheMode === 'instant_unlock' && (
+            <div className="form-group">
+              <label htmlFor="cache-ttl">Cache Expiry (hours)</label>
+              <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
+                Auto-clear cached entries after this many hours. Set to 0 for no expiry (clear only on logout).
+              </p>
+              <input
+                id="cache-ttl"
+                type="number"
+                className="form-control"
+                value={cacheTtlHours}
+                onChange={(e) => setCacheTtlHours(e.target.value)}
+                min={0}
+                max={720}
+                style={{ maxWidth: 240 }}
+              />
+            </div>
+          )}
         </Section>
 
         <Section icon={Gauge} title="Performance" defaultOpen={false}>
