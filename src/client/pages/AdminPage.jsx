@@ -6,13 +6,14 @@ import useSort from '../hooks/useSort';
 import SortableTh from '../components/SortableTh';
 import {
   Users, Tag, Briefcase, Globe, DollarSign, Plus, Edit2,
-  Trash2, AlertTriangle, RefreshCw, Shield, Check, X, KeyRound, Lock, MessageSquare, Info, Search,
+  Trash2, AlertTriangle, RefreshCw, Shield, Check, X, KeyRound, Lock, MessageSquare, Info, Search, TrendingUp, Database,
 } from 'lucide-react';
 
 const TABS = [
   { key: 'users',        label: 'Users',         icon: Users },
   { key: 'countries',    label: 'Countries',      icon: Globe },
   { key: 'currencies',   label: 'Currencies',     icon: DollarSign },
+  { key: 'exchanges',    label: 'Exchanges',      icon: TrendingUp },
 ];
 
 export default function AdminPage() {
@@ -78,6 +79,19 @@ export default function AdminPage() {
   const [togglingCountry, setTogglingCountry] = useState(null);
   const [togglingCurrency, setTogglingCurrency] = useState(null);
 
+  // ===== EXCHANGES STATE =====
+  const [exchangeList, setExchangeList] = useState([]);
+  const [exchangesLoading, setExchangesLoading] = useState(false);
+  const [exchangeForm, setExchangeForm] = useState({ country_code: '', name: '', suffix: '', display_order: 0 });
+  const [exchangeSaving, setExchangeSaving] = useState(false);
+  const [exchangeSearch, setExchangeSearch] = useState('');
+  const [exchangeError, setExchangeError] = useState('');
+
+  // ===== TICKER CACHE STATE =====
+  const [tickerCache, setTickerCache] = useState([]);
+  const [tickerCacheLoading, setTickerCacheLoading] = useState(false);
+  const [clearingCache, setClearingCache] = useState(false);
+
   // ===== INLINE EDIT STATE =====
   const [inlineEdit, setInlineEdit] = useState(null); // { resource, id, field, value }
   const [inlineEditSaving, setInlineEditSaving] = useState(false);
@@ -128,6 +142,7 @@ export default function AdminPage() {
   }), [currencies]);
   const { sorted: sortedCountries, sortKey: countrySortKey, sortDir: countrySortDir, onSort: onCountrySort } = useSort(presortedCountries, '', 'asc');
   const { sorted: sortedCurrencies, sortKey: currSortKey, sortDir: currSortDir, onSort: onCurrSort } = useSort(presortedCurrencies, '', 'asc');
+  const { sorted: sortedExchanges, sortKey: exSortKey, sortDir: exSortDir, onSort: onExSort } = useSort(exchangeList, 'country_code', 'asc');
 
   // ===== LOAD FUNCTIONS =====
   const loadUsers = useCallback(async () => {
@@ -161,6 +176,24 @@ export default function AdminPage() {
     setCurrenciesLoading(false);
   }, []);
 
+  const loadExchanges = useCallback(async () => {
+    setExchangesLoading(true);
+    try {
+      const res = await api.get('/reference.php?resource=exchanges');
+      setExchangeList(res.data.data || []);
+    } catch { /* ignore */ }
+    setExchangesLoading(false);
+  }, []);
+
+  const loadTickerCache = useCallback(async () => {
+    setTickerCacheLoading(true);
+    try {
+      const res = await api.get('/prices.php?action=cache');
+      setTickerCache(res.data.data || []);
+    } catch { /* ignore */ }
+    setTickerCacheLoading(false);
+  }, []);
+
   // Load data for active tab
   useEffect(() => {
     switch (activeTab) {
@@ -169,8 +202,9 @@ export default function AdminPage() {
       case 'assetTypes': loadAssetTypes(); break;
       case 'countries': loadCountries(); loadCurrencies(); break;
       case 'currencies': loadCurrencies(); break;
+      case 'exchanges': loadExchanges(); loadTickerCache(); break;
     }
-  }, [activeTab, loadUsers, loadAccountTypes, loadAssetTypes, loadCountries, loadCurrencies]);
+  }, [activeTab, loadUsers, loadAccountTypes, loadAssetTypes, loadCountries, loadCurrencies, loadExchanges, loadTickerCache]);
 
   // ===== USER CRUD =====
   const openUserAdd = () => {
@@ -432,6 +466,53 @@ export default function AdminPage() {
     setRefreshingRates(false);
   };
 
+  // ===== EXCHANGE CRUD =====
+  const addExchange = async () => {
+    setExchangeError('');
+    if (!exchangeForm.country_code.trim() || !exchangeForm.name.trim()) {
+      setExchangeError('Country code and name are required.');
+      return;
+    }
+    setExchangeSaving(true);
+    try {
+      await api.post('/reference.php?resource=exchanges', {
+        country_code: exchangeForm.country_code.trim(),
+        name: exchangeForm.name.trim(),
+        suffix: exchangeForm.suffix.trim(),
+        display_order: Number(exchangeForm.display_order) || 0,
+      });
+      setExchangeForm({ country_code: '', name: '', suffix: '', display_order: 0 });
+      invalidateReferenceCache('exchanges');
+      await loadExchanges();
+    } catch (err) {
+      setExchangeError(err.response?.data?.error || 'Failed to add exchange.');
+    }
+    setExchangeSaving(false);
+  };
+
+  const deleteExchange = async (ex) => {
+    if (!window.confirm(`Delete exchange "${ex.name}" (${ex.country_code})?`)) return;
+    try {
+      await api.delete(`/reference.php?resource=exchanges&id=${ex.id}`);
+      invalidateReferenceCache('exchanges');
+      await loadExchanges();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to delete exchange.');
+    }
+  };
+
+  const clearTickerCache = async () => {
+    if (!window.confirm('Clear all cached ticker prices?')) return;
+    setClearingCache(true);
+    try {
+      await api.delete('/prices.php?action=cache');
+      setTickerCache([]);
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to clear cache.');
+    }
+    setClearingCache(false);
+  };
+
   // ===== COUNTRY TOGGLE =====
   const toggleCountryActive = async (c) => {
     const newActive = c.is_active ? 0 : 1;
@@ -470,6 +551,7 @@ export default function AdminPage() {
       invalidateReferenceCache(resource);
       if (resource === 'countries') await loadCountries();
       else if (resource === 'currencies') await loadCurrencies();
+      else if (resource === 'exchanges') await loadExchanges();
     } catch (err) {
       alert(err.response?.data?.error || 'Failed to save.');
     }
@@ -555,6 +637,7 @@ export default function AdminPage() {
       case 'assetTypes': return astLoading;
       case 'countries': return countriesLoading;
       case 'currencies': return currenciesLoading;
+      case 'exchanges': return exchangesLoading;
       default: return false;
     }
   };
@@ -1037,6 +1120,177 @@ export default function AdminPage() {
               </table>
             </div>
           </div>
+        );
+      })()}
+
+      {/* ===== EXCHANGES TAB ===== */}
+      {activeTab === 'exchanges' && !exchangesLoading && (() => {
+        const q = exchangeSearch.toLowerCase().trim();
+        const filtered = q
+          ? sortedExchanges.filter(e => e.name.toLowerCase().includes(q) || e.country_code.toLowerCase().includes(q) || (e.country_name || '').toLowerCase().includes(q))
+          : sortedExchanges;
+        return (
+          <>
+            <div className="card">
+              <div className="card-header">
+                <span className="card-title">Exchanges ({exchangeList.length})</span>
+                <div style={{ position: 'relative' }}>
+                  <Search size={14} style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="Search exchanges..."
+                    value={exchangeSearch}
+                    onChange={(e) => setExchangeSearch(e.target.value)}
+                    style={{ paddingLeft: 28, height: 32, fontSize: 13, width: 200 }}
+                  />
+                </div>
+              </div>
+              {exchangeError && (
+                <div className="alert alert-danger mb-3" style={{ margin: '0 16px' }}><AlertTriangle size={16} /><span>{exchangeError}</span></div>
+              )}
+              <div className="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <SortableTh sortKey="country_code" current={exSortKey} dir={exSortDir} onSort={onExSort}>Country</SortableTh>
+                      <SortableTh sortKey="name" current={exSortKey} dir={exSortDir} onSort={onExSort}>Exchange</SortableTh>
+                      <SortableTh sortKey="suffix" current={exSortKey} dir={exSortDir} onSort={onExSort}>Suffix</SortableTh>
+                      <SortableTh sortKey="display_order" current={exSortKey} dir={exSortDir} onSort={onExSort}>Order</SortableTh>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map(ex => (
+                      <tr key={ex.id}>
+                        <td>
+                          <EditableCell resource="exchanges" id={ex.id} field="country_code" value={ex.country_code} className="font-mono" />
+                          {ex.country_name && <span className="td-muted" style={{ marginLeft: 6, fontSize: 12 }}>{ex.country_name}</span>}
+                        </td>
+                        <td>
+                          <EditableCell resource="exchanges" id={ex.id} field="name" value={ex.name} className="font-medium" />
+                        </td>
+                        <td>
+                          <EditableCell resource="exchanges" id={ex.id} field="suffix" value={ex.suffix} className="font-mono" />
+                        </td>
+                        <td>
+                          <EditableCell resource="exchanges" id={ex.id} field="display_order" value={ex.display_order} />
+                        </td>
+                        <td>
+                          <button
+                            className="btn btn-ghost btn-sm btn-icon text-danger"
+                            title="Delete"
+                            onClick={() => deleteExchange(ex)}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {filtered.length === 0 && (
+                      <tr><td colSpan={5} className="text-center text-muted">
+                        {q ? 'No exchanges match your search' : 'No exchanges'}
+                      </td></tr>
+                    )}
+                    {/* Add new exchange row */}
+                    <tr style={{ background: 'var(--bg-secondary)' }}>
+                      <td>
+                        <input
+                          className="form-control form-control-sm"
+                          placeholder="CC"
+                          value={exchangeForm.country_code}
+                          onChange={e => setExchangeForm(p => ({ ...p, country_code: e.target.value }))}
+                          style={{ width: 60 }}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          className="form-control form-control-sm"
+                          placeholder="Exchange name"
+                          value={exchangeForm.name}
+                          onChange={e => setExchangeForm(p => ({ ...p, name: e.target.value }))}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          className="form-control form-control-sm"
+                          placeholder="Suffix"
+                          value={exchangeForm.suffix}
+                          onChange={e => setExchangeForm(p => ({ ...p, suffix: e.target.value }))}
+                          style={{ width: 80 }}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          className="form-control form-control-sm"
+                          type="number"
+                          value={exchangeForm.display_order}
+                          onChange={e => setExchangeForm(p => ({ ...p, display_order: e.target.value }))}
+                          style={{ width: 60 }}
+                        />
+                      </td>
+                      <td>
+                        <button
+                          className="btn btn-primary btn-sm"
+                          onClick={addExchange}
+                          disabled={exchangeSaving}
+                        >
+                          <Plus size={14} /> {exchangeSaving ? 'Adding...' : 'Add'}
+                        </button>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Ticker Price Cache */}
+            <div className="card" style={{ marginTop: 16 }}>
+              <div className="card-header">
+                <span className="card-title"><Database size={14} style={{ marginRight: 6, verticalAlign: -2 }} />Ticker Price Cache ({tickerCache.length})</span>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={clearTickerCache}
+                  disabled={clearingCache}
+                >
+                  <Trash2 size={14} /> {clearingCache ? 'Clearing...' : 'Clear Cache'}
+                </button>
+              </div>
+              {tickerCacheLoading ? (
+                <div className="loading-center" style={{ padding: 24 }}><div className="spinner" /></div>
+              ) : (
+                <div className="table-wrapper">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Ticker</th>
+                        <th>Price</th>
+                        <th>Currency</th>
+                        <th>Exchange</th>
+                        <th>Fetched At</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tickerCache.map(t => (
+                        <tr key={t.ticker}>
+                          <td className="font-medium font-mono">{t.ticker}</td>
+                          <td className="font-mono">{Number(t.price).toFixed(2)}</td>
+                          <td>{t.currency}</td>
+                          <td className="td-muted">{t.exchange || '--'}</td>
+                          <td className="td-muted">
+                            {t.fetched_at ? new Date(t.fetched_at + 'Z').toLocaleString() : '--'}
+                          </td>
+                        </tr>
+                      ))}
+                      {tickerCache.length === 0 && (
+                        <tr><td colSpan={5} className="text-center text-muted">No cached prices</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </>
         );
       })()}
 
