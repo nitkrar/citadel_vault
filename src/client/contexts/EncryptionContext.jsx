@@ -18,6 +18,17 @@ export function EncryptionProvider({ children, user }) {
 
   const autoLockTimerRef = useRef(null);
   const activityTimerRef = useRef(null);
+  const prevUserIdRef = useRef(user?.id);
+
+  // Clear IndexedDB on logout or user switch (security: don't leak entries across users)
+  useEffect(() => {
+    const prevId = prevUserIdRef.current;
+    prevUserIdRef.current = user?.id;
+    if (prevId && prevId !== user?.id) {
+      entryStore.clear().catch(() => {});
+      workerDispatcher.terminate();
+    }
+  }, [user?.id]);
 
   // ------------------------------------------------------------------
   // Auto-lock timer management
@@ -39,7 +50,7 @@ export function EncryptionProvider({ children, user }) {
       // Auto-lock fires
       crypto.lockVault();
       workerDispatcher.setKey(null);
-      entryStore.clear().catch(() => {});
+      // Keep encrypted entries in IndexedDB for offline unlock
       setIsUnlocked(false);
     }, timeout * 1000);
   }, [clearAutoLock]);
@@ -98,7 +109,7 @@ export function EncryptionProvider({ children, user }) {
   const lock = useCallback(async () => {
     crypto.lockVault();
     workerDispatcher.setKey(null);
-    await entryStore.clear().catch(() => {});
+    // Keep encrypted entries in IndexedDB for offline/instant unlock
     clearAutoLock();
     clearSession();
     setIsUnlocked(false);
@@ -134,10 +145,17 @@ export function EncryptionProvider({ children, user }) {
       // Cache DEK for worker dispatcher
       await workerDispatcher.setKey(crypto._getDekForContext());
 
-      // 4. Fetch vault entries (only encrypted data needs vault unlock)
-      const { data: entriesResp } = await api.get('/vault.php');
-      const entries = apiData({ data: entriesResp }) || [];
-      await entryStore.putAll(entries);
+      // 4. Use cached entries from IndexedDB if available, otherwise fetch
+      const cached = await entryStore.getAll().catch(() => []);
+      if (cached.length > 0) {
+        // Entries already in IndexedDB — use them instantly.
+        // SyncContext will detect server changes and prompt refresh.
+      } else {
+        // First unlock or cleared store — fetch from server
+        const { data: entriesResp } = await api.get('/vault.php');
+        const entries = apiData({ data: entriesResp }) || [];
+        await entryStore.putAll(entries);
+      }
 
       // 5. Set state
       setIsUnlocked(true);
