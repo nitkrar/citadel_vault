@@ -16,7 +16,11 @@ const TABS = [
 ];
 
 export default function AdminPage() {
-  const [activeTab, setActiveTab] = useState('users');
+  const [activeTab, setActiveTab] = useState(() => sessionStorage.getItem('pv_admin_last_tab') || 'users');
+  const handleTabChange = (tab) => {
+    setActiveTab(tab);
+    sessionStorage.setItem('pv_admin_last_tab', tab);
+  };
 
   // ===== USERS STATE =====
   const [users, setUsers] = useState([]);
@@ -451,7 +455,7 @@ export default function AdminPage() {
             <button
               key={t.key}
               className={`tab ${activeTab === t.key ? 'active' : ''}`}
-              onClick={() => setActiveTab(t.key)}
+              onClick={() => handleTabChange(t.key)}
             >
               <span className="flex items-center gap-1"><Icon size={14} /> {t.label}</span>
             </button>
