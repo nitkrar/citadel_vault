@@ -274,6 +274,7 @@ export default function ProfilePage() {
                     <th style={{ padding: '6px 10px', textAlign: 'left' }}>Email</th>
                     <th style={{ padding: '6px 10px', textAlign: 'left' }}>Status</th>
                     <th style={{ padding: '6px 10px', textAlign: 'left' }}>Sent</th>
+                    <th style={{ padding: '6px 10px', width: 60 }}></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -288,6 +289,25 @@ export default function ProfilePage() {
                       </td>
                       <td style={{ padding: '6px 10px', color: 'var(--color-text-muted)' }}>
                         {new Date(inv.created_at).toLocaleDateString()}
+                      </td>
+                      <td style={{ padding: '6px 10px' }}>
+                        {inv.status === 'pending' && (
+                          <button
+                            className="btn btn-ghost btn-sm text-danger"
+                            style={{ fontSize: 11, padding: '2px 8px' }}
+                            onClick={async () => {
+                              if (!confirm(`Revoke invite to ${inv.email}?`)) return;
+                              try {
+                                await api.delete(`/invitations.php?action=revoke&id=${inv.id}`);
+                                loadInviteHistory();
+                              } catch (err) {
+                                alert(err.response?.data?.error || 'Failed to revoke');
+                              }
+                            }}
+                          >
+                            Revoke
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
