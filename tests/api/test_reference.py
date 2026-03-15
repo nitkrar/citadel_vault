@@ -280,3 +280,99 @@ class TestInlineEditCurrencies:
         """PUT on non-existent currency should return 404."""
         resp = api.put('/reference.php?resource=currencies&id=999999', json={'name': 'Test'})
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Exchanges: CRUD operations
+# ---------------------------------------------------------------------------
+
+class TestExchanges:
+    """Tests for exchanges CRUD via /reference.php?resource=exchanges."""
+
+    def test_get_returns_seeded_list(self, api):
+        """GET exchanges should return at least 8 seeded exchanges."""
+        resp = api.get('/reference.php', params={'resource': 'exchanges'})
+        assert resp.status_code == 200
+        data = api.data(resp)
+        assert isinstance(data, list)
+        assert len(data) >= 8
+
+    def test_get_includes_country_name(self, api):
+        """GET exchanges should include country_name from JOIN."""
+        resp = api.get('/reference.php', params={'resource': 'exchanges'})
+        assert resp.status_code == 200
+        data = api.data(resp)
+        assert len(data) > 0
+        # At least one exchange should have a country_name (from the JOIN)
+        has_country_name = any(e.get('country_name') for e in data)
+        assert has_country_name, 'No exchange has a country_name from the JOIN'
+
+    def test_post_creates_exchange(self, api):
+        """POST should create a new exchange and return 201."""
+        payload = {
+            'country_code': 'ZZ',
+            'name': 'Test Exchange',
+            'suffix': 'ZZ',
+            'display_order': 99,
+        }
+        resp = api.post('/reference.php?resource=exchanges', json=payload)
+        assert resp.status_code == 201
+        data = api.data(resp)
+        assert data['name'] == 'Test Exchange'
+        assert data['country_code'] == 'ZZ'
+        assert data['suffix'] == 'ZZ'
+        # Cleanup
+        api.delete(f"/reference.php?resource=exchanges&id={data['id']}")
+
+    def test_post_missing_fields_400(self, api):
+        """POST with missing required fields should return 400."""
+        resp = api.post('/reference.php?resource=exchanges', json={'suffix': 'X'})
+        assert resp.status_code == 400
+
+    def test_put_updates_fields(self, api):
+        """PUT should update exchange fields."""
+        # Create a test exchange first
+        create_resp = api.post('/reference.php?resource=exchanges', json={
+            'country_code': 'ZZ', 'name': 'Update Test', 'suffix': 'UT',
+        })
+        assert create_resp.status_code == 201
+        ex_id = api.data(create_resp)['id']
+        try:
+            resp = api.put(f'/reference.php?resource=exchanges&id={ex_id}', json={
+                'name': 'Updated Name', 'suffix': 'UN',
+            })
+            assert resp.status_code == 200
+            data = api.data(resp)
+            assert data['name'] == 'Updated Name'
+            assert data['suffix'] == 'UN'
+        finally:
+            api.delete(f'/reference.php?resource=exchanges&id={ex_id}')
+
+    def test_put_nonexistent_404(self, api):
+        """PUT on non-existent exchange should return 404."""
+        resp = api.put('/reference.php?resource=exchanges&id=999999', json={'name': 'Ghost'})
+        assert resp.status_code == 404
+
+    def test_put_empty_body_400(self, api):
+        """PUT with empty body should return 400."""
+        # Use a seeded exchange
+        get_resp = api.get('/reference.php', params={'resource': 'exchanges'})
+        ex = api.data(get_resp)[0]
+        resp = api.put(f"/reference.php?resource=exchanges&id={ex['id']}", json={})
+        assert resp.status_code == 400
+
+    def test_delete_exchange(self, api):
+        """DELETE should remove a created exchange."""
+        create_resp = api.post('/reference.php?resource=exchanges', json={
+            'country_code': 'ZZ', 'name': 'Delete Me', 'suffix': 'DM',
+        })
+        assert create_resp.status_code == 201
+        ex_id = api.data(create_resp)['id']
+        resp = api.delete(f'/reference.php?resource=exchanges&id={ex_id}')
+        assert resp.status_code == 200
+        assert api.data(resp).get('deleted') is True
+
+    def test_delete_nonexistent_404(self, api):
+        """DELETE on non-existent exchange should return 404."""
+        resp = api.delete('/reference.php?resource=exchanges&id=999999')
+        assert resp.status_code == 404
