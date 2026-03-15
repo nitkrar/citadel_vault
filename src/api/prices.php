@@ -75,102 +75,85 @@ if ($method === 'POST' && !$action) {
     $errors = [];
 
     if (!empty($staleTickers)) {
-        $symbols = implode(',', $staleTickers);
-        $url = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols=' . urlencode($symbols);
+        foreach ($staleTickers as $ticker) {
+            // Use v8 chart API (v7 quote API now requires auth)
+            $url = 'https://query1.finance.yahoo.com/v8/finance/chart/'
+                 . urlencode($ticker) . '?interval=1d&range=1d';
 
-        // Try cURL first (works on shared hosting where allow_url_fopen is off)
-        $response = false;
-        if (function_exists('curl_init')) {
-            $ch = curl_init($url);
-            curl_setopt_array($ch, [
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_TIMEOUT        => 10,
-                CURLOPT_USERAGENT      => 'Mozilla/5.0',
-                CURLOPT_FOLLOWLOCATION => true,
-                CURLOPT_SSL_VERIFYPEER => true,
-            ]);
-            $response = curl_exec($ch);
-            if (curl_errno($ch)) {
-                $response = false;
+            $response = false;
+            if (function_exists('curl_init')) {
+                $ch = curl_init($url);
+                curl_setopt_array($ch, [
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_TIMEOUT        => 10,
+                    CURLOPT_USERAGENT      => 'Mozilla/5.0',
+                    CURLOPT_FOLLOWLOCATION => true,
+                    CURLOPT_SSL_VERIFYPEER => true,
+                ]);
+                $response = curl_exec($ch);
+                if (curl_errno($ch)) $response = false;
+                curl_close($ch);
             }
-            curl_close($ch);
-        }
 
-        // Fallback to file_get_contents
-        if ($response === false) {
-            $ctx = stream_context_create([
-                'http' => [
-                    'method'  => 'GET',
-                    'header'  => "User-Agent: Mozilla/5.0\r\n",
-                    'timeout' => 10,
-                ],
-            ]);
-            $response = @file_get_contents($url, false, $ctx);
-        }
-
-        if ($response === false) {
-            // Yahoo API unreachable — return cached results + errors for stale
-            foreach ($staleTickers as $t) {
-                $errors[$t] = 'Price service temporarily unavailable';
+            if ($response === false) {
+                $ctx = stream_context_create([
+                    'http' => [
+                        'method'  => 'GET',
+                        'header'  => "User-Agent: Mozilla/5.0\r\n",
+                        'timeout' => 10,
+                    ],
+                ]);
+                $response = @file_get_contents($url, false, $ctx);
             }
-        } else {
+
+            if ($response === false) {
+                $errors[$ticker] = 'Price service temporarily unavailable';
+                continue;
+            }
+
             $data = json_decode($response, true);
-            $quotes = $data['quoteResponse']['result'] ?? [];
+            $meta = $data['chart']['result'][0]['meta'] ?? null;
 
-            // Index quotes by symbol
-            $quoteMap = [];
-            foreach ($quotes as $q) {
-                $quoteMap[$q['symbol']] = $q;
+            if (!$meta || !isset($meta['regularMarketPrice'])) {
+                $errors[$ticker] = 'Ticker not found';
+                continue;
             }
 
-            foreach ($staleTickers as $ticker) {
-                if (!isset($quoteMap[$ticker])) {
-                    $errors[$ticker] = 'Ticker not found';
-                    continue;
-                }
+            $price = $meta['regularMarketPrice'];
+            $currency = $meta['currency'] ?? 'USD';
+            $exchange = $meta['fullExchangeName'] ?? $meta['exchangeName'] ?? '';
+            $name = $meta['longName'] ?? $meta['shortName'] ?? $ticker;
 
-                $q = $quoteMap[$ticker];
-                $price = $q['regularMarketPrice'] ?? null;
-                $currency = $q['currency'] ?? 'USD';
-                $exchange = $q['fullExchangeName'] ?? $q['exchange'] ?? '';
-                $name = $q['shortName'] ?? $q['longName'] ?? $ticker;
-
-                if ($price === null) {
-                    $errors[$ticker] = 'No price data available';
-                    continue;
-                }
-
-                // Normalize GBp (pence) to GBP
-                if ($currency === 'GBp') {
-                    $price = $price / 100;
-                    $currency = 'GBP';
-                }
-
-                // Upsert cache
-                $stmt = $db->prepare(
-                    'INSERT INTO ticker_prices (ticker, exchange, price, currency, name, fetched_at)
-                     VALUES (?, ?, ?, ?, ?, NOW())
-                     ON DUPLICATE KEY UPDATE exchange = VALUES(exchange), price = VALUES(price),
-                     currency = VALUES(currency), name = VALUES(name), fetched_at = NOW()'
-                );
-                $stmt->execute([$ticker, $exchange, $price, $currency, $name]);
-
-                // Upsert history
-                $stmt = $db->prepare(
-                    'INSERT INTO ticker_price_history (ticker, exchange, price, currency, recorded_at)
-                     VALUES (?, ?, ?, ?, CURDATE())
-                     ON DUPLICATE KEY UPDATE price = VALUES(price), exchange = VALUES(exchange)'
-                );
-                $stmt->execute([$ticker, $exchange, $price, $currency]);
-
-                $results[$ticker] = [
-                    'price'    => (float)$price,
-                    'currency' => $currency,
-                    'exchange' => $exchange,
-                    'name'     => $name,
-                    'cached'   => false,
-                ];
+            // Normalize GBp (pence) to GBP
+            if ($currency === 'GBp') {
+                $price = $price / 100;
+                $currency = 'GBP';
             }
+
+            // Upsert cache
+            $stmt = $db->prepare(
+                'INSERT INTO ticker_prices (ticker, exchange, price, currency, name, fetched_at)
+                 VALUES (?, ?, ?, ?, ?, NOW())
+                 ON DUPLICATE KEY UPDATE exchange = VALUES(exchange), price = VALUES(price),
+                 currency = VALUES(currency), name = VALUES(name), fetched_at = NOW()'
+            );
+            $stmt->execute([$ticker, $exchange, $price, $currency, $name]);
+
+            // Upsert history
+            $stmt = $db->prepare(
+                'INSERT INTO ticker_price_history (ticker, exchange, price, currency, recorded_at)
+                 VALUES (?, ?, ?, ?, CURDATE())
+                 ON DUPLICATE KEY UPDATE price = VALUES(price), exchange = VALUES(exchange)'
+            );
+            $stmt->execute([$ticker, $exchange, $price, $currency]);
+
+            $results[$ticker] = [
+                'price'    => (float)$price,
+                'currency' => $currency,
+                'exchange' => $exchange,
+                'name'     => $name,
+                'cached'   => false,
+            ];
         }
     }
 
