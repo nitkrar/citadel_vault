@@ -184,6 +184,20 @@ export default function Layout() {
             {appName}
           </span>
           <div className="mobile-header-actions">
+            <button className="icon-btn" title="Refresh app"
+              onClick={async () => {
+                if ('serviceWorker' in navigator) {
+                  const regs = await navigator.serviceWorker.getRegistrations();
+                  await Promise.all(regs.map(r => r.unregister()));
+                }
+                if ('caches' in window) {
+                  const keys = await caches.keys();
+                  await Promise.all(keys.map(k => caches.delete(k)));
+                }
+                window.location.reload();
+              }}>
+              <RefreshCw size={18} />
+            </button>
             <button className="icon-btn" onClick={toggleDarkMode} title={darkMode ? 'Light mode' : 'Dark mode'}>
               {darkMode ? <Sun size={18} /> : <Moon size={18} />}
             </button>
