@@ -1,7 +1,9 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import api from '../api/client';
 import Modal from '../components/Modal';
 import SearchableSelect from '../components/SearchableSelect';
+import { useAuth } from '../contexts/AuthContext';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { entryStore } from '../lib/entryStore';
 import { VALID_ENTRY_TYPES } from '../lib/defaults';
@@ -9,6 +11,7 @@ import { apiData } from '../lib/checks';
 import useCountries from '../hooks/useCountries';
 import useCurrencies from '../hooks/useCurrencies';
 import useTemplates from '../hooks/useTemplates';
+import useAppConfig from '../hooks/useAppConfig';
 import ImportModal from '../components/ImportModal';
 import {
   Plus, Edit2, Trash2, Search, Eye, EyeOff, Copy, Check, Lock,
@@ -83,13 +86,32 @@ export default function VaultPage() {
   const [decryptedCache, setDecryptedCache] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const { preferences } = useAuth();
 
   const { countries } = useCountries();
   const { currencies } = useCurrencies();
   const { templates } = useTemplates();
+  const { config } = useAppConfig();
 
   // Filters
-  const [activeType, setActiveType] = useState('all');
+  const [searchParams] = useSearchParams();
+  const isValidTab = (t) => t && (VALID_ENTRY_TYPES.includes(t) || t === 'all');
+  const userPref = preferences?.default_vault_tab;
+  const siteDefault = config.default_vault_tab;
+  const [activeType, setActiveType] = useState(() => {
+    // Priority: query param > last tab (refresh) > rest deferred until loaded
+    const t = searchParams.get('type');
+    if (isValidTab(t)) return t;
+    const lastTab = sessionStorage.getItem('pv_vault_last_tab');
+    if (isValidTab(lastTab)) return lastTab;
+    return ''; // placeholder until preferences/config load
+  });
+  // Apply user preference or site default once loaded
+  useEffect(() => {
+    if (activeType) return; // already set from query param or session
+    if (isValidTab(userPref)) { setActiveType(userPref); return; }
+    if (isValidTab(siteDefault)) { setActiveType(siteDefault); return; }
+  }, [activeType, userPref, siteDefault]);
   const [search, setSearch] = useState('');
 
   // Modals
@@ -209,7 +231,7 @@ export default function VaultPage() {
   // ── Filtering ────────────────────────────────────────────────────
   const filtered = useMemo(() => {
     let list = entries;
-    if (activeType !== 'all') list = list.filter(e => e.entry_type === activeType);
+    if (activeType && activeType !== 'all') list = list.filter(e => e.entry_type === activeType);
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter(e => {
@@ -765,8 +787,8 @@ export default function VaultPage() {
 
       {/* Type filter tabs */}
       <div className="flex gap-2 mb-4" style={{ flexWrap: 'wrap' }}>
-        <button className={`btn btn-sm ${activeType === 'all' ? 'btn-primary' : 'btn-ghost'}`}
-          onClick={() => setActiveType('all')}>
+        <button className={`btn btn-sm ${!activeType || activeType === 'all' ? 'btn-primary' : 'btn-ghost'}`}
+          onClick={() => { setActiveType('all'); sessionStorage.setItem('pv_vault_last_tab', 'all'); }}>
           All <span className="badge badge-muted" style={{ marginLeft: 4 }}>{counts.all}</span>
         </button>
         {VALID_ENTRY_TYPES.map(type => {
@@ -774,7 +796,7 @@ export default function VaultPage() {
           const Icon = meta?.icon || Layers;
           return (
             <button key={type} className={`btn btn-sm ${activeType === type ? 'btn-primary' : 'btn-ghost'}`}
-              onClick={() => setActiveType(type)}>
+              onClick={() => { setActiveType(type); sessionStorage.setItem('pv_vault_last_tab', type); }}>
               <Icon size={14} /> {meta?.label || type}
               {counts[type] > 0 && <span className="badge badge-muted" style={{ marginLeft: 4 }}>{counts[type]}</span>}
             </button>
