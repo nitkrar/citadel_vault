@@ -17,6 +17,7 @@ import SortableTh from '../components/SortableTh';
 import api from '../api/client';
 import { fmtCurrency, MASKED, apiData } from '../lib/checks';
 import { buildRateMap, recalculateSnapshot } from '../lib/portfolioAggregator';
+import * as workerDispatcher from '../lib/workerDispatcher';
 
 const CHART_COLORS = [
   '#3b82f6', '#22c55e', '#f59e0b', '#ef4444',
@@ -96,23 +97,20 @@ export default function PortfolioPage() {
       };
       const encryptedMeta = await encrypt(meta);
 
-      const entries = [];
-      for (const asset of portfolio.assets) {
-        const entryBlob = {
-          name: asset.name,
-          template_name: asset.template_name,
-          subtype: asset.subtype,
-          is_liability: asset.is_liability,
-          currency: asset.currency,
-          raw_value: asset.rawValue,
-          icon: asset.icon,
-        };
-        const encryptedEntry = await encrypt(entryBlob);
-        entries.push({
-          entry_id: asset.id,
-          encrypted_data: encryptedEntry,
-        });
-      }
+      const entryBlobs = portfolio.assets.map(asset => ({
+        name: asset.name,
+        template_name: asset.template_name,
+        subtype: asset.subtype,
+        is_liability: asset.is_liability,
+        currency: asset.currency,
+        raw_value: asset.rawValue,
+        icon: asset.icon,
+      }));
+      const encryptedBlobs = await workerDispatcher.encryptBatch(entryBlobs, null);
+      const entries = portfolio.assets.map((a, i) => ({
+        entry_id: a.id,
+        encrypted_data: encryptedBlobs[i],
+      }));
 
       await api.post('/snapshots.php', {
         snapshot_date: new Date().toISOString().split('T')[0],
@@ -645,30 +643,29 @@ function HistoryTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrency, b
     try {
       const { data: resp } = await api.get('/snapshots.php');
       const raw = apiData({ data: resp }) || [];
-      const decrypted = [];
-      for (const s of raw) {
-        try {
-          // Decrypt meta blob
-          const meta = await decrypt(s.data || s.encrypted_data);
+      // Batch decrypt meta blobs
+      const metaBlobs = raw.map(s => s.data || s.encrypted_data);
+      const decryptedMetas = await workerDispatcher.decryptBatch(metaBlobs, null);
 
-          // Decrypt per-entry blobs if present (v3 split model)
-          let entries = null;
-          if (s.entries && s.entries.length > 0) {
-            entries = [];
-            for (const e of s.entries) {
-              try {
-                const d = await decrypt(e.encrypted_data);
-                entries.push({ ...d, entry_id: e.entry_id });
-              } catch {
-                // skip entries that fail to decrypt
-              }
+      const decrypted = [];
+      for (let i = 0; i < raw.length; i++) {
+        const s = raw[i];
+        const meta = decryptedMetas[i];
+
+        // Decrypt per-entry blobs if present (v3 split model)
+        let entries = null;
+        if (meta && s.entries && s.entries.length > 0) {
+          const entryBlobs = s.entries.map(e => e.encrypted_data);
+          const decryptedEntries = await workerDispatcher.decryptBatch(entryBlobs, null);
+          entries = [];
+          for (let j = 0; j < decryptedEntries.length; j++) {
+            if (decryptedEntries[j]) {
+              entries.push({ ...decryptedEntries[j], entry_id: s.entries[j].entry_id });
             }
           }
-
-          decrypted.push({ ...s, _meta: meta, _entries: entries });
-        } catch {
-          decrypted.push({ ...s, _meta: null, _entries: null });
         }
+
+        decrypted.push({ ...s, _meta: meta, _entries: entries });
       }
       setSnapshots(decrypted);
     } catch { /* silent */ }

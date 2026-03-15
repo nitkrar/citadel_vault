@@ -1,8 +1,8 @@
-import { useState, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { useAuth } from '../contexts/AuthContext';
 import { entryStore } from '../lib/entryStore';
-import { aggregatePortfolio } from '../lib/portfolioAggregator';
+import * as workerDispatcher from '../lib/workerDispatcher';
 import useVaultData from './useVaultData';
 import useCurrencies from './useCurrencies';
 import useTemplates from './useTemplates';
@@ -83,12 +83,19 @@ export default function usePortfolioData() {
 
   const { data: decryptedEntries, loading: entriesLoading, error, refetch } = useVaultData(fetchEntries, []);
 
-  // Run aggregation in useMemo (instant on currency switch)
-  const portfolio = useMemo(() => {
-    if (!decryptedEntries || decryptedEntries.length === 0 || !currencies || currencies.length === 0) {
-      return null;
+  // Run aggregation via worker dispatcher (async for worker path)
+  const [portfolio, setPortfolio] = useState(null);
+
+  useEffect(() => {
+    if (!decryptedEntries?.length || !currencies?.length) {
+      setPortfolio(null);
+      return;
     }
-    return aggregatePortfolio(decryptedEntries, currencies, baseCurrency, displayCurrency);
+    let cancelled = false;
+    workerDispatcher.aggregateBatch(decryptedEntries, currencies, baseCurrency, displayCurrency)
+      .then(r => { if (!cancelled) setPortfolio(r); })
+      .catch(() => { if (!cancelled) setPortfolio(null); });
+    return () => { cancelled = true; };
   }, [decryptedEntries, currencies, baseCurrency, displayCurrency]);
 
   // Save display currency preference to server
