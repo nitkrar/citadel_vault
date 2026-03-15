@@ -160,13 +160,15 @@ export default function VaultPage() {
   // Build a map: country_code → default currency_code
   const countryToCurrency = useMemo(() => {
     const map = {};
-    // Index currencies by ID for fast lookup (handle both string and number IDs)
+    // Prefer default_currency_code from API (JOIN), fallback to ID lookup
     const currById = {};
     for (const cu of currencies) {
       currById[Number(cu.id)] = cu.code;
     }
     for (const c of countries) {
-      if (c.default_currency_id) {
+      if (c.default_currency_code) {
+        map[c.code] = c.default_currency_code;
+      } else if (c.default_currency_id) {
         const code = currById[Number(c.default_currency_id)];
         if (code) map[c.code] = code;
       }
