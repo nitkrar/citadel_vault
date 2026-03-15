@@ -173,6 +173,31 @@ interface StorageAdapter {
     function getAuditLog(int $userId, ?string $fromDate = null, ?string $toDate = null): array;
 
     // =========================================================================
+    // System Settings (global KV store)
+    // =========================================================================
+
+    /**
+     * Get a single system setting by key.
+     * @return string|null The setting value, or null if not found
+     */
+    function getSystemSetting(string $key): ?string;
+
+    /**
+     * Get all system settings as key => value pairs.
+     * @return array Associative array of setting_key => setting_value
+     */
+    function getSystemSettings(): array;
+
+    /**
+     * Set a system setting (upsert).
+     * @param string   $key    Setting key
+     * @param string   $value  Setting value
+     * @param int|null $userId User ID performing the change (for audit trail)
+     * @return bool True on success
+     */
+    function setSystemSetting(string $key, string $value, ?int $userId = null): bool;
+
+    // =========================================================================
     // Templates
     // =========================================================================
 

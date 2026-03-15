@@ -32,6 +32,7 @@ import {
   HelpCircle,
   Keyboard,
   ExternalLink,
+  Settings,
 } from 'lucide-react';
 
 // --- Hide Amounts Context ---
@@ -150,7 +151,7 @@ export default function Layout() {
   const location = useLocation();
   const appName = import.meta.env.VITE_APP_NAME || 'Personal Vault';
   // Pages that don't need the vault locked banner
-  const hideVaultBanner = ['/profile', '/admin'].includes(location.pathname);
+  const hideVaultBanner = ['/profile', '/admin', '/settings'].includes(location.pathname);
   const appTagline = import.meta.env.VITE_APP_TAGLINE || 'Secure Personal Hub';
 
   return (
@@ -222,6 +223,11 @@ export default function Layout() {
               <NavLink to="/profile" className={({ isActive }) => (isActive ? 'active' : '')}>
                 <User size={18} /> Profile
               </NavLink>
+              {isSiteAdmin && (
+                <NavLink to="/settings" className={({ isActive }) => (isActive ? 'active' : '')}>
+                  <Settings size={18} /> Settings
+                </NavLink>
+              )}
               {isSiteAdmin && (
                 <NavLink to="/admin" className={({ isActive }) => (isActive ? 'active' : '')}>
                   <Database size={18} /> Admin

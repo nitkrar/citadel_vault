@@ -442,9 +442,12 @@ if ($resource === 'historical-rates') {
 // ============================================================================
 if ($resource === 'config') {
     if ($method === 'GET') {
-        Response::success([
-            'base_currency' => BASE_CURRENCY,
-        ]);
+        require_once __DIR__ . '/../core/Storage.php';
+        $systemSettings = Storage::adapter()->getSystemSettings();
+        Response::success(array_merge(
+            ['base_currency' => BASE_CURRENCY],
+            $systemSettings
+        ));
     }
     Response::error('Method not allowed.', 405);
 }
