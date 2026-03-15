@@ -201,6 +201,15 @@ export default function Layout() {
             <button className="icon-btn" onClick={toggleDarkMode} title={darkMode ? 'Light mode' : 'Dark mode'}>
               {darkMode ? <Sun size={18} /> : <Moon size={18} />}
             </button>
+            {isUnlocked ? (
+              <button className="icon-btn" onClick={lockVault} title="Lock vault">
+                <Lock size={18} />
+              </button>
+            ) : isTruthy(vaultKeyExists) ? (
+              <button className="icon-btn" onClick={promptVault} title="Unlock vault">
+                <KeyRound size={18} />
+              </button>
+            ) : null}
             <button className="icon-btn" onClick={toggleHideAmounts} title={hideAmounts ? 'Show amounts' : 'Hide amounts'}>
               {hideAmounts ? <EyeOff size={18} /> : <Eye size={18} />}
             </button>
