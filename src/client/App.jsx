@@ -195,8 +195,22 @@ function AppRoutes() {
 }
 
 // --- EncryptionWrapper ---
+import useAppConfig from './hooks/useAppConfig';
+import * as workerDispatcher from './lib/workerDispatcher';
+
 function EncryptionWrapper({ children }) {
   const { user } = useAuth();
+  const { config } = useAppConfig();
+
+  useEffect(() => {
+    if (config) {
+      workerDispatcher.configure({
+        workerEnabled: config.worker_enabled,
+        workerThreshold: config.worker_threshold,
+      });
+    }
+  }, [config]);
+
   return (
     <EncryptionProvider user={user}>
       <SyncProvider>{children}</SyncProvider>

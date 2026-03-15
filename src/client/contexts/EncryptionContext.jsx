@@ -5,6 +5,7 @@ import * as crypto from '../lib/crypto';
 import { entryStore } from '../lib/entryStore';
 import { getUserPreference, PREFERENCE_DEFAULTS } from '../lib/defaults';
 import { useAuth } from './AuthContext';
+import * as workerDispatcher from '../lib/workerDispatcher';
 
 const EncryptionContext = createContext(null);
 
@@ -37,6 +38,7 @@ export function EncryptionProvider({ children, user }) {
     autoLockTimerRef.current = setTimeout(() => {
       // Auto-lock fires
       crypto.lockVault();
+      workerDispatcher.setKey(null);
       entryStore.clear().catch(() => {});
       setIsUnlocked(false);
     }, timeout * 1000);
@@ -95,6 +97,7 @@ export function EncryptionProvider({ children, user }) {
   // ------------------------------------------------------------------
   const lock = useCallback(async () => {
     crypto.lockVault();
+    workerDispatcher.setKey(null);
     await entryStore.clear().catch(() => {});
     clearAutoLock();
     clearSession();
@@ -127,6 +130,9 @@ export function EncryptionProvider({ children, user }) {
       if (!success) {
         throw new Error('Invalid vault key.');
       }
+
+      // Cache DEK for worker dispatcher
+      await workerDispatcher.setKey(crypto._getDekForContext());
 
       // 4. Fetch vault entries (only encrypted data needs vault unlock)
       const { data: entriesResp } = await api.get('/vault.php');
@@ -341,6 +347,7 @@ export function EncryptionProvider({ children, user }) {
   useEffect(() => {
     return () => {
       clearAutoLock();
+      workerDispatcher.terminate();
     };
   }, [clearAutoLock]);
 
