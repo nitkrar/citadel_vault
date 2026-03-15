@@ -258,6 +258,7 @@ export function aggregatePortfolio(entries, currencies, baseCurrency, displayCur
       linked_account_id: linkedAccountId,
       icon: template?.icon || 'circle',
       template_name: template?.name || entryType,
+      _plaid: d._plaid || null,
     };
 
     // Add gain/loss if cost_price is available
