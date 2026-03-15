@@ -4,6 +4,7 @@ config/.env
 *.log
 .build-number
 .env.build
+.env.production.local
 __pycache__/
 *.pyc
 .claude/
