@@ -486,6 +486,20 @@ class InMemoryAdapter implements StorageAdapter {
         return $this->systemSettings;
     }
 
+    public function getSystemSettingsEnriched(): array {
+        $result = [];
+        foreach ($this->systemSettings as $key => $value) {
+            $result[$key] = [
+                'value'       => $value,
+                'type'        => 'config',
+                'category'    => 'general',
+                'description' => $key,
+                'options'     => null,
+            ];
+        }
+        return $result;
+    }
+
     public function setSystemSetting(string $key, string $value, ?int $userId = null): bool {
         $this->systemSettings[$key] = $value;
         return true;
