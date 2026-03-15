@@ -77,11 +77,11 @@ export default function EncryptionKeyModal() {
   if (!isVisible) return null;
 
   const minLen = getVaultKeyMinLength(keyType);
-  const inputMode = keyType === 'numeric' ? 'numeric' : undefined;
-  const inputType = showVaultKey ? 'text' : 'password';
+  const isNumeric = keyType === 'numeric';
+  const inputType = isNumeric && !showVaultKey ? 'tel' : (showVaultKey ? 'text' : 'password');
   const inputProps = {
     type: inputType,
-    ...(inputMode && { inputMode }),
+    ...(isNumeric && { inputMode: 'numeric', pattern: '[0-9]*' }),
     autoComplete: 'off',
   };
   const eyeToggleRow = (
