@@ -12,12 +12,19 @@ import { encryptEntry, decryptEntry } from './crypto';
 import { aggregatePortfolio } from './portfolioAggregator';
 
 // ── Configuration ────────────────────────────────────────────────────
-let config = { enabled: true, threshold: 50 };
+// worker_mode:
+//   disabled       — all ops on main thread (kill switch)
+//   count          — use worker when itemCount >= threshold (default)
+//   adaptive       — benchmark first bulk op vs adaptiveMs, sticks for session
+//   adaptive_decay — rolling avg of last 3 timings vs adaptiveMs (re-evaluates)
+const VALID_MODES = ['disabled', 'count', 'adaptive', 'adaptive_decay'];
+let config = { mode: 'count', threshold: 50, adaptiveMs: 100 };
 
-export function configure({ workerEnabled, workerThreshold }) {
+export function configure({ workerMode, workerThreshold, workerAdaptiveMs }) {
   config = {
-    enabled: workerEnabled !== '0' && workerEnabled !== false,
+    mode: VALID_MODES.includes(workerMode) ? workerMode : 'count',
     threshold: parseInt(workerThreshold, 10) || 50,
+    adaptiveMs: parseInt(workerAdaptiveMs, 10) || 100,
   };
 }
 
@@ -28,8 +35,55 @@ let cachedRawKey = null;
 let msgCounter = 0;
 const pendingMessages = new Map();
 
+// ── Adaptive timing ──────────────────────────────────────────────────
+const TIMING_HISTORY_KEY = 'pv_worker_timings';
+const MAX_TIMINGS = 3;
+let adaptiveDecision = null; // null = not yet decided, true/false = use worker
+
+function loadTimings() {
+  try {
+    return JSON.parse(sessionStorage.getItem(TIMING_HISTORY_KEY) || '[]');
+  } catch { return []; }
+}
+
+function saveTimings(timings) {
+  try {
+    sessionStorage.setItem(TIMING_HISTORY_KEY, JSON.stringify(timings.slice(-MAX_TIMINGS)));
+  } catch { /* quota */ }
+}
+
+function recordTiming(ms) {
+  if (config.mode === 'count') return;
+
+  if (config.mode === 'adaptive') {
+    // One-shot: decide on first measurement, stick for session
+    if (adaptiveDecision === null) {
+      adaptiveDecision = ms >= config.adaptiveMs;
+    }
+    return;
+  }
+
+  if (config.mode === 'adaptive_decay') {
+    // Rolling average of last 3 timings, re-evaluates each time
+    const timings = loadTimings();
+    timings.push(ms);
+    saveTimings(timings);
+    const recent = timings.slice(-MAX_TIMINGS);
+    const avg = recent.reduce((a, b) => a + b, 0) / recent.length;
+    adaptiveDecision = avg >= config.adaptiveMs;
+  }
+}
+
 function shouldUseWorker(itemCount) {
-  return config.enabled && itemCount >= config.threshold;
+  if (config.mode === 'disabled') return false;
+
+  if (config.mode === 'count') {
+    return itemCount >= config.threshold;
+  }
+
+  // adaptive or adaptive_decay: use timing decision if available, else fall back to count
+  if (adaptiveDecision !== null) return adaptiveDecision;
+  return itemCount >= config.threshold;
 }
 
 function getWorker() {
@@ -98,6 +152,7 @@ export async function setKey(cryptoKey) {
  */
 export async function decryptBatch(entries, dek) {
   if (!shouldUseWorker(entries.length)) {
+    const start = performance.now();
     const results = [];
     for (const blob of entries) {
       try {
@@ -106,6 +161,7 @@ export async function decryptBatch(entries, dek) {
         results.push(null);
       }
     }
+    recordTiming(performance.now() - start);
     return results;
   }
   await ensureWorkerKey();
@@ -120,10 +176,12 @@ export async function decryptBatch(entries, dek) {
  */
 export async function encryptBatch(items, dek) {
   if (!shouldUseWorker(items.length)) {
+    const start = performance.now();
     const results = [];
     for (const item of items) {
       results.push(await encryptEntry(item, dek));
     }
+    recordTiming(performance.now() - start);
     return results;
   }
   await ensureWorkerKey();
@@ -155,7 +213,9 @@ export function terminate() {
   }
   cachedRawKey = null;
   workerKeyInitialized = false;
+  adaptiveDecision = null;
   pendingMessages.clear();
+  try { sessionStorage.removeItem(TIMING_HISTORY_KEY); } catch { /* */ }
 }
 
 /**
