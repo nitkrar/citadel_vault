@@ -75,6 +75,7 @@ export default function AdminPage() {
   const [currenciesLoading, setCurrenciesLoading] = useState(false);
   const [refreshingRates, setRefreshingRates] = useState(false);
   const [currencySearch, setCurrencySearch] = useState('');
+  const [togglingCountry, setTogglingCountry] = useState(null);
   const [togglingCurrency, setTogglingCurrency] = useState(null);
 
   // ===== INLINE EDIT STATE =====
@@ -130,7 +131,7 @@ export default function AdminPage() {
   const loadCountries = useCallback(async () => {
     setCountriesLoading(true);
     try {
-      const res = await api.get('/reference.php?resource=countries');
+      const res = await api.get('/reference.php?resource=countries&all=1');
       setCountries(res.data.data || []);
     } catch { /* ignore */ }
     setCountriesLoading(false);
@@ -416,6 +417,20 @@ export default function AdminPage() {
     setRefreshingRates(false);
   };
 
+  // ===== COUNTRY TOGGLE =====
+  const toggleCountryActive = async (c) => {
+    const newActive = c.is_active ? 0 : 1;
+    setTogglingCountry(c.id);
+    try {
+      await api.put(`/reference.php?resource=countries&id=${c.id}`, { is_active: newActive });
+      invalidateReferenceCache('countries');
+      setCountries(prev => prev.map(co => co.id === c.id ? { ...co, is_active: newActive } : co));
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to toggle country.');
+    }
+    setTogglingCountry(null);
+  };
+
   // ===== CURRENCY TOGGLE =====
   const toggleCurrencyActive = async (c) => {
     const newActive = c.is_active ? 0 : 1;
@@ -478,7 +493,7 @@ export default function AdminPage() {
           >
             <option value="">-- None --</option>
             {currencies.map(cur => (
-              <option key={cur.id} value={cur.id}>{cur.code} ({cur.symbol})</option>
+              <option key={cur.id} value={cur.id}>{cur.code} ({cur.symbol}){Number(cur.is_active) ? '' : ' [inactive]'}</option>
             ))}
           </select>
         );
@@ -495,12 +510,24 @@ export default function AdminPage() {
         />
       );
     }
-    const displayValue = type === 'currency-select'
-      ? (value ? (() => { const cur = currencies.find(c => c.id == value); return cur ? `${cur.code} (${cur.symbol})` : '--'; })() : '--')
-      : (value || '--');
+    if (type === 'currency-select') {
+      const cur = value ? currencies.find(c => c.id == value) : null;
+      const isInactive = cur && !Number(cur.is_active);
+      const label = cur ? `${cur.code} (${cur.symbol})` : '--';
+      return (
+        <span
+          className={className}
+          style={{ cursor: 'pointer', color: isInactive ? 'var(--color-warning)' : undefined }}
+          title={isInactive ? 'This currency is inactive' : undefined}
+          onClick={() => setInlineEdit({ resource, id, field, value: value ?? '' })}
+        >
+          {label}{isInactive && <AlertTriangle size={13} style={{ marginLeft: 4, verticalAlign: -2 }} />}
+        </span>
+      );
+    }
     return (
       <span className={className} style={{ cursor: 'pointer' }} onClick={() => setInlineEdit({ resource, id, field, value: value ?? '' })}>
-        {displayValue}
+        {value || '--'}
       </span>
     );
   };
@@ -854,16 +881,18 @@ export default function AdminPage() {
       )}
 
       {/* ===== COUNTRIES TAB ===== */}
-      {activeTab === 'countries' && !countriesLoading && (
+      {activeTab === 'countries' && !countriesLoading && (() => {
+        const activeCount = countries.filter(c => Number(c.is_active)).length;
+        return (
         <div className="card">
           <div className="card-header">
-            <span className="card-title">Countries ({countries.length})</span>
+            <span className="card-title">{activeCount} of {countries.length} active</span>
           </div>
           <div className="table-wrapper">
             <table>
               <thead>
                 <tr>
-                  <SortableTh sortKey="id" current={countrySortKey} dir={countrySortDir} onSort={onCountrySort}>ID</SortableTh>
+                  <SortableTh sortKey="is_active" current={countrySortKey} dir={countrySortDir} onSort={onCountrySort} style={{ width: 60 }}>Active</SortableTh>
                   <SortableTh sortKey="flag_emoji" current={countrySortKey} dir={countrySortDir} onSort={onCountrySort}>Flag</SortableTh>
                   <SortableTh sortKey="name" current={countrySortKey} dir={countrySortDir} onSort={onCountrySort}>Country</SortableTh>
                   <SortableTh sortKey="code" current={countrySortKey} dir={countrySortDir} onSort={onCountrySort}>Country Code</SortableTh>
@@ -872,8 +901,17 @@ export default function AdminPage() {
               </thead>
               <tbody>
                 {sortedCountries.map(c => (
-                    <tr key={c.id}>
-                      <td className="td-muted">{c.id}</td>
+                    <tr key={c.id} style={{ opacity: Number(c.is_active) ? 1 : 0.55 }}>
+                      <td>
+                        <button
+                          className={`btn btn-ghost btn-sm btn-icon ${Number(c.is_active) ? 'text-success' : 'text-muted'}`}
+                          title={Number(c.is_active) ? 'Click to deactivate' : 'Click to activate'}
+                          onClick={() => toggleCountryActive(c)}
+                          disabled={togglingCountry === c.id}
+                        >
+                          {Number(c.is_active) ? <Check size={16} /> : <X size={16} />}
+                        </button>
+                      </td>
                       <td style={{ fontSize: 18 }}>
                         <EditableCell resource="countries" id={c.id} field="flag_emoji" value={c.flag_emoji} />
                       </td>
@@ -889,13 +927,14 @@ export default function AdminPage() {
                     </tr>
                 ))}
                 {countries.length === 0 && (
-                  <tr><td colSpan={5} className="text-center text-muted">No countries</td></tr>
+                  <tr><td colSpan={6} className="text-center text-muted">No countries</td></tr>
                 )}
               </tbody>
             </table>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* ===== CURRENCIES TAB ===== */}
       {activeTab === 'currencies' && !currenciesLoading && (() => {
