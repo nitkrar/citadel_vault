@@ -205,8 +205,9 @@ function EncryptionWrapper({ children }) {
   useEffect(() => {
     if (config) {
       workerDispatcher.configure({
-        workerEnabled: config.worker_enabled,
+        workerMode: config.worker_mode,
         workerThreshold: config.worker_threshold,
+        workerAdaptiveMs: config.worker_adaptive_ms,
       });
     }
   }, [config]);

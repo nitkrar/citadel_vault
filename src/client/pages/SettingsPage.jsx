@@ -61,8 +61,9 @@ export default function SettingsPage() {
   const [requireEmailVerification, setRequireEmailVerification] = useState('false');
   const [inviteExpiryDays, setInviteExpiryDays] = useState('7');
   const [lockoutTier3Duration, setLockoutTier3Duration] = useState('7776000');
-  const [workerEnabled, setWorkerEnabled] = useState('1');
+  const [workerMode, setWorkerMode] = useState('count');
   const [workerThreshold, setWorkerThreshold] = useState('50');
+  const [workerAdaptiveMs, setWorkerAdaptiveMs] = useState('100');
 
   useEffect(() => {
     let cancelled = false;
@@ -78,8 +79,9 @@ export default function SettingsPage() {
           setRequireEmailVerification(data.require_email_verification ?? 'false');
           setInviteExpiryDays(data.invite_expiry_days ?? '7');
           setLockoutTier3Duration(data.lockout_tier3_duration ?? '7776000');
-          setWorkerEnabled(data.worker_enabled ?? '1');
+          setWorkerMode(data.worker_mode ?? 'count');
           setWorkerThreshold(data.worker_threshold ?? '50');
+          setWorkerAdaptiveMs(data.worker_adaptive_ms ?? '100');
         }
       } catch (err) {
         if (!cancelled) setError('Failed to load settings.');
@@ -106,8 +108,9 @@ export default function SettingsPage() {
         require_email_verification: requireEmailVerification,
         invite_expiry_days: inviteExpiryDays,
         lockout_tier3_duration: lockoutTier3Duration,
-        worker_enabled: workerEnabled,
+        worker_mode: workerMode,
         worker_threshold: workerThreshold,
+        worker_adaptive_ms: workerAdaptiveMs,
       });
       setSuccess('Settings saved.');
       setTimeout(() => setSuccess(''), 3000);
@@ -283,37 +286,77 @@ export default function SettingsPage() {
 
         <Section icon={Gauge} title="Performance" defaultOpen={false}>
           <div className="form-group">
-            <label htmlFor="worker-enabled">Web Worker Encryption</label>
+            <label htmlFor="worker-mode">Worker Mode</label>
             <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
-              Use a Web Worker for encryption/decryption to keep the UI responsive. Disable if you experience compatibility issues.
+              Controls when bulk crypto operations are offloaded to a background Web Worker thread.
             </p>
             <select
-              id="worker-enabled"
+              id="worker-mode"
               className="form-control"
-              value={workerEnabled}
-              onChange={(e) => setWorkerEnabled(e.target.value)}
-              style={{ maxWidth: 240 }}
+              value={workerMode}
+              onChange={(e) => setWorkerMode(e.target.value)}
+              style={{ maxWidth: 300 }}
             >
-              <option value="1">Enabled</option>
-              <option value="0">Disabled</option>
+              <option value="disabled">Disabled — always main thread</option>
+              <option value="count">Count — use worker above entry threshold</option>
+              <option value="adaptive">Adaptive — benchmark first op, stick for session</option>
+              <option value="adaptive_decay">Adaptive (decay) — rolling average, re-evaluates</option>
             </select>
           </div>
-          <div className="form-group">
-            <label htmlFor="worker-threshold">Worker Batch Threshold</label>
-            <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
-              Number of vault entries above which encryption/decryption is offloaded to a Web Worker. Below this threshold, work runs on the main thread.
-            </p>
-            <input
-              id="worker-threshold"
-              type="number"
-              className="form-control"
-              value={workerThreshold}
-              onChange={(e) => setWorkerThreshold(e.target.value)}
-              min={1}
-              max={10000}
-              style={{ maxWidth: 240 }}
-            />
-          </div>
+          {workerMode === 'count' && (
+            <div className="form-group">
+              <label htmlFor="worker-threshold">Entry Count Threshold</label>
+              <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
+                Use worker when batch size exceeds this count.
+              </p>
+              <input
+                id="worker-threshold"
+                type="number"
+                className="form-control"
+                value={workerThreshold}
+                onChange={(e) => setWorkerThreshold(e.target.value)}
+                min={1}
+                max={10000}
+                style={{ maxWidth: 240 }}
+              />
+            </div>
+          )}
+          {(workerMode === 'adaptive' || workerMode === 'adaptive_decay') && (
+            <>
+              <div className="form-group">
+                <label htmlFor="worker-adaptive-ms">Timing Threshold (ms)</label>
+                <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
+                  Switch to worker if main thread operations exceed this duration.
+                </p>
+                <input
+                  id="worker-adaptive-ms"
+                  type="number"
+                  className="form-control"
+                  value={workerAdaptiveMs}
+                  onChange={(e) => setWorkerAdaptiveMs(e.target.value)}
+                  min={10}
+                  max={5000}
+                  style={{ maxWidth: 240 }}
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="worker-threshold-fallback">Fallback Count Threshold</label>
+                <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
+                  Used before first timing measurement is available.
+                </p>
+                <input
+                  id="worker-threshold-fallback"
+                  type="number"
+                  className="form-control"
+                  value={workerThreshold}
+                  onChange={(e) => setWorkerThreshold(e.target.value)}
+                  min={1}
+                  max={10000}
+                  style={{ maxWidth: 240 }}
+                />
+              </div>
+            </>
+          )}
         </Section>
 
         <div className="form-actions">
