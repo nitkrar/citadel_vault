@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import api from '../api/client';
-import { Settings, Save, Clock, KeyRound, ShieldCheck, UserPlus } from 'lucide-react';
+import { Settings, Save, Clock, KeyRound, ShieldCheck, UserPlus, Gauge } from 'lucide-react';
 import Section from '../components/Section';
 
 const TTL_OPTIONS = [
@@ -61,6 +61,8 @@ export default function SettingsPage() {
   const [requireEmailVerification, setRequireEmailVerification] = useState('false');
   const [inviteExpiryDays, setInviteExpiryDays] = useState('7');
   const [lockoutTier3Duration, setLockoutTier3Duration] = useState('7776000');
+  const [workerEnabled, setWorkerEnabled] = useState('1');
+  const [workerThreshold, setWorkerThreshold] = useState('50');
 
   useEffect(() => {
     let cancelled = false;
@@ -76,6 +78,8 @@ export default function SettingsPage() {
           setRequireEmailVerification(data.require_email_verification ?? 'false');
           setInviteExpiryDays(data.invite_expiry_days ?? '7');
           setLockoutTier3Duration(data.lockout_tier3_duration ?? '7776000');
+          setWorkerEnabled(data.worker_enabled ?? '1');
+          setWorkerThreshold(data.worker_threshold ?? '50');
         }
       } catch (err) {
         if (!cancelled) setError('Failed to load settings.');
@@ -102,6 +106,8 @@ export default function SettingsPage() {
         require_email_verification: requireEmailVerification,
         invite_expiry_days: inviteExpiryDays,
         lockout_tier3_duration: lockoutTier3Duration,
+        worker_enabled: workerEnabled,
+        worker_threshold: workerThreshold,
       });
       setSuccess('Settings saved.');
       setTimeout(() => setSuccess(''), 3000);
@@ -272,6 +278,41 @@ export default function SettingsPage() {
                 </option>
               ))}
             </select>
+          </div>
+        </Section>
+
+        <Section icon={Gauge} title="Performance" defaultOpen={false}>
+          <div className="form-group">
+            <label htmlFor="worker-enabled">Web Worker Encryption</label>
+            <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
+              Use a Web Worker for encryption/decryption to keep the UI responsive. Disable if you experience compatibility issues.
+            </p>
+            <select
+              id="worker-enabled"
+              className="form-control"
+              value={workerEnabled}
+              onChange={(e) => setWorkerEnabled(e.target.value)}
+              style={{ maxWidth: 240 }}
+            >
+              <option value="1">Enabled</option>
+              <option value="0">Disabled</option>
+            </select>
+          </div>
+          <div className="form-group">
+            <label htmlFor="worker-threshold">Worker Batch Threshold</label>
+            <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
+              Number of vault entries above which encryption/decryption is offloaded to a Web Worker. Below this threshold, work runs on the main thread.
+            </p>
+            <input
+              id="worker-threshold"
+              type="number"
+              className="form-control"
+              value={workerThreshold}
+              onChange={(e) => setWorkerThreshold(e.target.value)}
+              min={1}
+              max={10000}
+              style={{ maxWidth: 240 }}
+            />
           </div>
         </Section>
 
