@@ -1012,8 +1012,50 @@ html.dark .modal-overlay {
 /* ---------- Visibility ---------- */
 .hidden { display: none; }
 
+/* ---------- Mobile Header ---------- */
+.mobile-header {
+  display: none; /* hidden on desktop */
+}
+
+.sidebar-backdrop {
+  display: none; /* hidden on desktop */
+}
+
 /* ---------- Responsive ---------- */
 @media (max-width: 768px) {
+  /* Mobile header — fixed top bar */
+  .mobile-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    min-height: 48px;
+    padding: 0 var(--space-sm);
+    padding-top: env(safe-area-inset-top);
+    background: var(--sidebar-bg);
+    color: #f1f5f9;
+    z-index: 800;
+    border-bottom: 1px solid var(--sidebar-border);
+  }
+
+  .mobile-header-title {
+    font-size: 16px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+  }
+
+  .mobile-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+
+  /* Sidebar — slide-in from left */
   .sidebar {
     position: fixed;
     left: -260px;
@@ -1021,15 +1063,40 @@ html.dark .modal-overlay {
     bottom: 0;
     z-index: 900;
     transition: left var(--transition-normal);
+    padding-top: env(safe-area-inset-top);
   }
 
   .sidebar.open {
     left: 0;
   }
 
+  /* Backdrop overlay behind sidebar */
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 899;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--transition-normal);
+  }
+
+  .sidebar-backdrop.visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* Main content adjustments */
   .main-content {
     width: 100%;
     padding: var(--space-md);
+    padding-top: calc(48px + env(safe-area-inset-top) + var(--space-md));
+    padding-bottom: calc(var(--space-md) + env(safe-area-inset-bottom));
+  }
+
+  .page-content {
+    padding: var(--space-sm);
   }
 
   .page-header {
@@ -1043,7 +1110,7 @@ html.dark .modal-overlay {
 
   .modal-dialog {
     max-width: 100%;
-    margin: var(--space-md);
+    margin: var(--space-sm);
   }
 
   .auth-card {
@@ -1052,6 +1119,12 @@ html.dark .modal-overlay {
 
   .td-actions {
     flex-direction: column;
+  }
+
+  /* Body scroll lock when sidebar is open */
+  body.sidebar-open {
+    overflow: hidden;
+    overscroll-behavior: contain;
   }
 }
 
