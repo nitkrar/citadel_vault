@@ -14,12 +14,16 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// On 401, redirect to login
+// On 401, redirect to login — but not on public pages or auth-check calls
+const PUBLIC_PATHS_401 = ['/login', '/register', '/forgot-password', '/verify-email', '/home', '/features', '/help', '/dev-guide'];
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      if (window.location.pathname !== '/login') {
+      const path = window.location.pathname;
+      const url = error.config?.url || '';
+      const isAuthCheck = url.includes('action=me') || url.includes('action=registration-status');
+      if (!PUBLIC_PATHS_401.includes(path) && !isAuthCheck) {
         window.location.href = '/login';
       }
     }
