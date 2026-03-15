@@ -20,5 +20,7 @@ VALUES ('ticker_price_ttl', '86400'),
        ('default_vault_tab', 'account'),
        ('auth_check_interval', '300'),
        ('self_registration', 'false'),
-       ('require_email_verification', 'true')
+       ('require_email_verification', 'true'),
+       ('invite_expiry_days', '7'),
+       ('lockout_tier3_duration', '7776000')
 ON DUPLICATE KEY UPDATE `setting_value` = `setting_value`;

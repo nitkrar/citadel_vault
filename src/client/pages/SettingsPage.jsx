@@ -17,6 +17,21 @@ const AUTH_CHECK_OPTIONS = [
   { label: '30 minutes', value: '1800' },
 ];
 
+const INVITE_EXPIRY_OPTIONS = [
+  { label: '1 day',   value: '1' },
+  { label: '3 days',  value: '3' },
+  { label: '7 days',  value: '7' },
+  { label: '14 days', value: '14' },
+  { label: '30 days', value: '30' },
+];
+
+const LOCKOUT_TIER3_OPTIONS = [
+  { label: '1 day',    value: '86400' },
+  { label: '7 days',   value: '604800' },
+  { label: '30 days',  value: '2592000' },
+  { label: '90 days',  value: '7776000' },
+];
+
 const BOOLEAN_OPTIONS = [
   { label: 'Enabled',  value: 'true' },
   { label: 'Disabled', value: 'false' },
@@ -44,6 +59,8 @@ export default function SettingsPage() {
   const [authCheckInterval, setAuthCheckInterval] = useState('300');
   const [selfRegistration, setSelfRegistration] = useState('false');
   const [requireEmailVerification, setRequireEmailVerification] = useState('false');
+  const [inviteExpiryDays, setInviteExpiryDays] = useState('7');
+  const [lockoutTier3Duration, setLockoutTier3Duration] = useState('7776000');
 
   useEffect(() => {
     let cancelled = false;
@@ -57,6 +74,8 @@ export default function SettingsPage() {
           setAuthCheckInterval(data.auth_check_interval ?? '300');
           setSelfRegistration(data.self_registration ?? 'false');
           setRequireEmailVerification(data.require_email_verification ?? 'false');
+          setInviteExpiryDays(data.invite_expiry_days ?? '7');
+          setLockoutTier3Duration(data.lockout_tier3_duration ?? '7776000');
         }
       } catch (err) {
         if (!cancelled) setError('Failed to load settings.');
@@ -81,6 +100,8 @@ export default function SettingsPage() {
         auth_check_interval: authCheckInterval,
         self_registration: selfRegistration,
         require_email_verification: requireEmailVerification,
+        invite_expiry_days: inviteExpiryDays,
+        lockout_tier3_duration: lockoutTier3Duration,
       });
       setSuccess('Settings saved.');
       setTimeout(() => setSuccess(''), 3000);
@@ -110,7 +131,7 @@ export default function SettingsPage() {
       {success && <div className="alert alert-success">{success}</div>}
 
       <form onSubmit={handleSave}>
-        <Section icon={UserPlus} title="Registration" defaultOpen>
+        <Section icon={UserPlus} title="Registration" defaultOpen={false}>
           <div className="form-group">
             <label htmlFor="self-registration">Self Registration</label>
             <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
@@ -149,9 +170,28 @@ export default function SettingsPage() {
               ))}
             </select>
           </div>
+          <div className="form-group">
+            <label htmlFor="invite-expiry-days">Invite Link Expiry</label>
+            <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
+              How long invite links remain valid before they expire.
+            </p>
+            <select
+              id="invite-expiry-days"
+              className="form-control"
+              value={inviteExpiryDays}
+              onChange={(e) => setInviteExpiryDays(e.target.value)}
+              style={{ maxWidth: 240 }}
+            >
+              {INVITE_EXPIRY_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </Section>
 
-        <Section icon={KeyRound} title="Default Vault Tab" defaultOpen>
+        <Section icon={KeyRound} title="Default Vault Tab" defaultOpen={false}>
           <div className="form-group">
             <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
               The tab shown when users open the Vault page. Users can override this in their Profile.
@@ -172,7 +212,7 @@ export default function SettingsPage() {
           </div>
         </Section>
 
-        <Section icon={Clock} title="Price Cache" defaultOpen>
+        <Section icon={Clock} title="Price Cache" defaultOpen={false}>
           <div className="form-group">
             <label htmlFor="ticker-price-ttl">Price Cache Duration</label>
             <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
@@ -194,9 +234,9 @@ export default function SettingsPage() {
           </div>
         </Section>
 
-        <Section icon={ShieldCheck} title="Auth Check Interval" defaultOpen>
+        <Section icon={ShieldCheck} title="Security" defaultOpen={false}>
           <div className="form-group">
-            <label htmlFor="auth-check-interval">Database Verification Interval</label>
+            <label htmlFor="auth-check-interval">Auth Check Interval</label>
             <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
               How often to verify user status (active/role) against the database. Between checks, the JWT token is trusted.
             </p>
@@ -208,6 +248,25 @@ export default function SettingsPage() {
               style={{ maxWidth: 240 }}
             >
               {AUTH_CHECK_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="form-group">
+            <label htmlFor="lockout-tier3-duration">Permanent Lockout Duration</label>
+            <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
+              How long to lock an account after repeated failed login attempts (tier 3). Only a password reset unlocks it.
+            </p>
+            <select
+              id="lockout-tier3-duration"
+              className="form-control"
+              value={lockoutTier3Duration}
+              onChange={(e) => setLockoutTier3Duration(e.target.value)}
+              style={{ maxWidth: 240 }}
+            >
+              {LOCKOUT_TIER3_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
                   {opt.label}
                 </option>

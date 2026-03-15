@@ -8,6 +8,7 @@ require_once __DIR__ . '/../core/Response.php';
 require_once __DIR__ . '/../../config/config.php';
 require_once __DIR__ . '/../core/Auth.php';
 require_once __DIR__ . '/../core/Mailer.php';
+require_once __DIR__ . '/../core/Storage.php';
 
 Response::setCors();
 
@@ -58,7 +59,12 @@ if ($method === 'POST' && $action === 'create') {
 
     // Generate invite
     $token = bin2hex(random_bytes(32));
-    $expiresAt = date('Y-m-d H:i:s', time() + 7 * 86400); // 7 days
+    $inviteExpiryDays = 7;
+    try {
+        $setting = Storage::adapter()->getSystemSetting('invite_expiry_days');
+        if ($setting !== null) $inviteExpiryDays = (int)$setting;
+    } catch (Exception $e) {}
+    $expiresAt = date('Y-m-d H:i:s', time() + $inviteExpiryDays * 86400);
 
     $stmt = $db->prepare(
         "INSERT INTO invitations (token, email, invited_by, expires_at) VALUES (?, ?, ?, ?)"
