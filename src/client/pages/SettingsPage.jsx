@@ -1,123 +1,145 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import api from '../api/client';
-import { Settings, Save, Clock, KeyRound, ShieldCheck, UserPlus, Gauge, Database } from 'lucide-react';
+import { Settings, Save, UserPlus, ShieldCheck, KeyRound, Clock, Gauge, Database } from 'lucide-react';
 import Section from '../components/Section';
 
-const TTL_OPTIONS = [
-  { label: '1 hour',   value: '3600' },
-  { label: '6 hours',  value: '21600' },
-  { label: '12 hours', value: '43200' },
-  { label: '24 hours', value: '86400' },
-];
+const CATEGORY_META = {
+  registration:  { title: 'Registration',    icon: UserPlus },
+  security:      { title: 'Security',        icon: ShieldCheck },
+  vault:         { title: 'Vault',           icon: KeyRound },
+  pricing:       { title: 'Pricing',         icon: Clock },
+  performance:   { title: 'Performance',     icon: Gauge },
+  cache:         { title: 'Cache & Storage', icon: Database },
+  general:       { title: 'General',         icon: Settings },
+};
 
-const AUTH_CHECK_OPTIONS = [
-  { label: '1 minute',   value: '60' },
-  { label: '5 minutes',  value: '300' },
-  { label: '15 minutes', value: '900' },
-  { label: '30 minutes', value: '1800' },
-];
+const CATEGORY_ORDER = ['registration', 'security', 'vault', 'pricing', 'cache', 'performance', 'general'];
 
-const INVITE_EXPIRY_OPTIONS = [
-  { label: '1 day',   value: '1' },
-  { label: '3 days',  value: '3' },
-  { label: '7 days',  value: '7' },
-  { label: '14 days', value: '14' },
-  { label: '30 days', value: '30' },
-];
+function SettingInput({ settingKey, setting, value, onChange }) {
+  const { description, options, type } = setting;
+  const id = `setting-${settingKey}`;
 
-const LOCKOUT_TIER3_OPTIONS = [
-  { label: '1 day',    value: '86400' },
-  { label: '7 days',   value: '604800' },
-  { label: '30 days',  value: '2592000' },
-  { label: '90 days',  value: '7776000' },
-];
+  const isBool = value === 'true' || value === 'false';
 
-const BOOLEAN_OPTIONS = [
-  { label: 'Enabled',  value: 'true' },
-  { label: 'Disabled', value: 'false' },
-];
+  let input;
+  if (options) {
+    input = (
+      <select id={id} className="form-control" value={value}
+        onChange={e => onChange(settingKey, e.target.value)}
+        style={{ maxWidth: 360 }}>
+        {options.map(opt => (
+          <option key={opt} value={opt}>{opt}</option>
+        ))}
+      </select>
+    );
+  } else if (isBool) {
+    input = (
+      <select id={id} className="form-control" value={value}
+        onChange={e => onChange(settingKey, e.target.value)}
+        style={{ maxWidth: 240 }}>
+        <option value="true">Enabled</option>
+        <option value="false">Disabled</option>
+      </select>
+    );
+  } else if (value !== '' && !isNaN(value)) {
+    input = (
+      <input id={id} type="number" className="form-control" value={value}
+        onChange={e => onChange(settingKey, e.target.value)}
+        style={{ maxWidth: 240 }} />
+    );
+  } else {
+    input = (
+      <input id={id} type="text" className="form-control" value={value}
+        onChange={e => onChange(settingKey, e.target.value)}
+        style={{ maxWidth: 360 }} />
+    );
+  }
 
-const VAULT_TAB_OPTIONS = [
-  { label: 'All',        value: 'all' },
-  { label: 'Accounts',   value: 'account' },
-  { label: 'Assets',     value: 'asset' },
-  { label: 'Passwords',  value: 'password' },
-  { label: 'Licenses',   value: 'license' },
-  { label: 'Insurance',  value: 'insurance' },
-  { label: 'Custom',     value: 'custom' },
-];
+  return (
+    <div className="form-group">
+      <label htmlFor={id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {description || settingKey}
+        {type === 'gatekeeper' && (
+          <span style={{
+            fontSize: 10, padding: '1px 6px', borderRadius: 4,
+            background: '#dbeafe', color: '#2563eb', fontWeight: 600,
+          }}>
+            gatekeeper
+          </span>
+        )}
+      </label>
+      <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
+        {settingKey}
+      </p>
+      {input}
+    </div>
+  );
+}
 
 export default function SettingsPage() {
+  const [settings, setSettings] = useState(null);
+  const [changes, setChanges] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  // Local form state
-  const [tickerPriceTtl, setTickerPriceTtl] = useState('86400');
-  const [defaultVaultTab, setDefaultVaultTab] = useState('account');
-  const [authCheckInterval, setAuthCheckInterval] = useState('300');
-  const [selfRegistration, setSelfRegistration] = useState('false');
-  const [requireEmailVerification, setRequireEmailVerification] = useState('false');
-  const [inviteExpiryDays, setInviteExpiryDays] = useState('7');
-  const [lockoutTier3Duration, setLockoutTier3Duration] = useState('7776000');
-  const [cacheMode, setCacheMode] = useState('instant_unlock');
-  const [cacheTtlHours, setCacheTtlHours] = useState('0');
-  const [workerMode, setWorkerMode] = useState('count');
-  const [workerThreshold, setWorkerThreshold] = useState('50');
-  const [workerAdaptiveMs, setWorkerAdaptiveMs] = useState('100');
-
   useEffect(() => {
     let cancelled = false;
-    const load = async () => {
-      try {
-        const res = await api.get('/settings.php');
-        const data = res.data?.data || res.data || {};
-        if (!cancelled) {
-          setTickerPriceTtl(data.ticker_price_ttl ?? '86400');
-          setDefaultVaultTab(data.default_vault_tab ?? 'account');
-          setAuthCheckInterval(data.auth_check_interval ?? '300');
-          setSelfRegistration(data.self_registration ?? 'false');
-          setRequireEmailVerification(data.require_email_verification ?? 'false');
-          setInviteExpiryDays(data.invite_expiry_days ?? '7');
-          setLockoutTier3Duration(data.lockout_tier3_duration ?? '7776000');
-          setCacheMode(data.cache_mode ?? 'instant_unlock');
-          setCacheTtlHours(data.cache_ttl_hours ?? '0');
-          setWorkerMode(data.worker_mode ?? 'count');
-          setWorkerThreshold(data.worker_threshold ?? '50');
-          setWorkerAdaptiveMs(data.worker_adaptive_ms ?? '100');
-        }
-      } catch (err) {
-        if (!cancelled) setError('Failed to load settings.');
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-    load();
+    api.get('/settings.php')
+      .then(res => {
+        if (!cancelled) setSettings(res.data?.data || res.data || {});
+      })
+      .catch(() => { if (!cancelled) setError('Failed to load settings.'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, []);
 
+  const grouped = useMemo(() => {
+    if (!settings) return {};
+    const groups = {};
+    for (const [key, setting] of Object.entries(settings)) {
+      const cat = setting.category || 'general';
+      if (!groups[cat]) groups[cat] = [];
+      groups[cat].push({ key, ...setting });
+    }
+    return groups;
+  }, [settings]);
+
+  const getValue = (key) => {
+    if (key in changes) return changes[key];
+    return settings?.[key]?.value ?? '';
+  };
+
+  const handleChange = (key, value) => {
+    const original = settings?.[key]?.value;
+    setChanges(prev => {
+      const next = { ...prev };
+      if (value === original) {
+        delete next[key];
+      } else {
+        next[key] = value;
+      }
+      return next;
+    });
+  };
+
   const handleSave = async (e) => {
     e.preventDefault();
+    if (Object.keys(changes).length === 0) return;
     setError('');
     setSuccess('');
     setSaving(true);
-
     try {
-      await api.put('/settings.php', {
-        ticker_price_ttl: tickerPriceTtl,
-        default_vault_tab: defaultVaultTab,
-        auth_check_interval: authCheckInterval,
-        self_registration: selfRegistration,
-        require_email_verification: requireEmailVerification,
-        invite_expiry_days: inviteExpiryDays,
-        lockout_tier3_duration: lockoutTier3Duration,
-        cache_mode: cacheMode,
-        cache_ttl_hours: cacheTtlHours,
-        worker_mode: workerMode,
-        worker_threshold: workerThreshold,
-        worker_adaptive_ms: workerAdaptiveMs,
+      await api.put('/settings.php', changes);
+      setSettings(prev => {
+        const updated = { ...prev };
+        for (const [k, v] of Object.entries(changes)) {
+          if (updated[k]) updated[k] = { ...updated[k], value: v };
+        }
+        return updated;
       });
+      setChanges({});
       setSuccess('Settings saved.');
       setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
@@ -127,13 +149,10 @@ export default function SettingsPage() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="page-spinner">
-        <div className="spinner" />
-      </div>
-    );
-  }
+  if (loading) return <div className="page-spinner"><div className="spinner" /></div>;
+
+  const hasChanges = Object.keys(changes).length > 0;
+  const sortedCategories = CATEGORY_ORDER.filter(c => grouped[c]);
 
   return (
     <div className="page-container">
@@ -146,265 +165,26 @@ export default function SettingsPage() {
       {success && <div className="alert alert-success">{success}</div>}
 
       <form onSubmit={handleSave}>
-        <Section icon={UserPlus} title="Registration" defaultOpen={false}>
-          <div className="form-group">
-            <label htmlFor="self-registration">Self Registration</label>
-            <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
-              Allow anyone to create an account. When disabled, users can only join via invite.
-            </p>
-            <select
-              id="self-registration"
-              className="form-control"
-              value={selfRegistration}
-              onChange={(e) => setSelfRegistration(e.target.value)}
-              style={{ maxWidth: 240 }}
-            >
-              {BOOLEAN_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="form-group">
-            <label htmlFor="require-email-verification">Email Verification</label>
-            <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
-              Require new users to verify their email before they can sign in. Invited users are verified automatically.
-            </p>
-            <select
-              id="require-email-verification"
-              className="form-control"
-              value={requireEmailVerification}
-              onChange={(e) => setRequireEmailVerification(e.target.value)}
-              style={{ maxWidth: 240 }}
-            >
-              {BOOLEAN_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="form-group">
-            <label htmlFor="invite-expiry-days">Invite Link Expiry</label>
-            <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
-              How long invite links remain valid before they expire.
-            </p>
-            <select
-              id="invite-expiry-days"
-              className="form-control"
-              value={inviteExpiryDays}
-              onChange={(e) => setInviteExpiryDays(e.target.value)}
-              style={{ maxWidth: 240 }}
-            >
-              {INVITE_EXPIRY_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        </Section>
-
-        <Section icon={KeyRound} title="Default Vault Tab" defaultOpen={false}>
-          <div className="form-group">
-            <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
-              The tab shown when users open the Vault page. Users can override this in their Profile.
-            </p>
-            <select
-              id="default-vault-tab"
-              className="form-control"
-              value={defaultVaultTab}
-              onChange={(e) => setDefaultVaultTab(e.target.value)}
-              style={{ maxWidth: 240 }}
-            >
-              {VAULT_TAB_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        </Section>
-
-        <Section icon={Clock} title="Price Cache" defaultOpen={false}>
-          <div className="form-group">
-            <label htmlFor="ticker-price-ttl">Price Cache Duration</label>
-            <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
-              How long to cache fetched stock/crypto prices before refreshing from the source.
-            </p>
-            <select
-              id="ticker-price-ttl"
-              className="form-control"
-              value={tickerPriceTtl}
-              onChange={(e) => setTickerPriceTtl(e.target.value)}
-              style={{ maxWidth: 240 }}
-            >
-              {TTL_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        </Section>
-
-        <Section icon={ShieldCheck} title="Security" defaultOpen={false}>
-          <div className="form-group">
-            <label htmlFor="auth-check-interval">Auth Check Interval</label>
-            <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
-              How often to verify user status (active/role) against the database. Between checks, the JWT token is trusted.
-            </p>
-            <select
-              id="auth-check-interval"
-              className="form-control"
-              value={authCheckInterval}
-              onChange={(e) => setAuthCheckInterval(e.target.value)}
-              style={{ maxWidth: 240 }}
-            >
-              {AUTH_CHECK_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="form-group">
-            <label htmlFor="lockout-tier3-duration">Permanent Lockout Duration</label>
-            <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
-              How long to lock an account after repeated failed login attempts (tier 3). Only a password reset unlocks it.
-            </p>
-            <select
-              id="lockout-tier3-duration"
-              className="form-control"
-              value={lockoutTier3Duration}
-              onChange={(e) => setLockoutTier3Duration(e.target.value)}
-              style={{ maxWidth: 240 }}
-            >
-              {LOCKOUT_TIER3_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        </Section>
-
-        <Section icon={Database} title="Cache &amp; Storage" defaultOpen={false}>
-          <div className="form-group">
-            <label htmlFor="cache-mode">Vault Cache Mode</label>
-            <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
-              Controls whether encrypted vault entries persist in the browser after vault lock.
-            </p>
-            <select
-              id="cache-mode"
-              className="form-control"
-              value={cacheMode}
-              onChange={(e) => setCacheMode(e.target.value)}
-              style={{ maxWidth: 360 }}
-            >
-              <option value="instant_unlock">Instant unlock — keep encrypted cache, unlock without server fetch</option>
-              <option value="always_fetch">Always fetch — clear cache on lock, fetch fresh from server each time</option>
-            </select>
-          </div>
-          {cacheMode === 'instant_unlock' && (
-            <div className="form-group">
-              <label htmlFor="cache-ttl">Cache Expiry (hours)</label>
-              <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
-                Auto-clear cached entries after this many hours. Set to 0 for no expiry (clear only on logout).
-              </p>
-              <input
-                id="cache-ttl"
-                type="number"
-                className="form-control"
-                value={cacheTtlHours}
-                onChange={(e) => setCacheTtlHours(e.target.value)}
-                min={0}
-                max={720}
-                style={{ maxWidth: 240 }}
-              />
-            </div>
-          )}
-        </Section>
-
-        <Section icon={Gauge} title="Performance" defaultOpen={false}>
-          <div className="form-group">
-            <label htmlFor="worker-mode">Worker Mode</label>
-            <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
-              Controls when bulk crypto operations are offloaded to a background Web Worker thread.
-            </p>
-            <select
-              id="worker-mode"
-              className="form-control"
-              value={workerMode}
-              onChange={(e) => setWorkerMode(e.target.value)}
-              style={{ maxWidth: 300 }}
-            >
-              <option value="disabled">Disabled — always main thread</option>
-              <option value="count">Count — use worker above entry threshold</option>
-              <option value="adaptive">Adaptive — benchmark first op, stick for session</option>
-              <option value="adaptive_decay">Adaptive (decay) — rolling average, re-evaluates</option>
-            </select>
-          </div>
-          {workerMode === 'count' && (
-            <div className="form-group">
-              <label htmlFor="worker-threshold">Entry Count Threshold</label>
-              <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
-                Use worker when batch size exceeds this count.
-              </p>
-              <input
-                id="worker-threshold"
-                type="number"
-                className="form-control"
-                value={workerThreshold}
-                onChange={(e) => setWorkerThreshold(e.target.value)}
-                min={1}
-                max={10000}
-                style={{ maxWidth: 240 }}
-              />
-            </div>
-          )}
-          {(workerMode === 'adaptive' || workerMode === 'adaptive_decay') && (
-            <>
-              <div className="form-group">
-                <label htmlFor="worker-adaptive-ms">Timing Threshold (ms)</label>
-                <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
-                  Switch to worker if main thread operations exceed this duration.
-                </p>
-                <input
-                  id="worker-adaptive-ms"
-                  type="number"
-                  className="form-control"
-                  value={workerAdaptiveMs}
-                  onChange={(e) => setWorkerAdaptiveMs(e.target.value)}
-                  min={10}
-                  max={5000}
-                  style={{ maxWidth: 240 }}
+        {sortedCategories.map(cat => {
+          const meta = CATEGORY_META[cat] || { title: cat, icon: Settings };
+          return (
+            <Section key={cat} icon={meta.icon} title={meta.title} defaultOpen={false}>
+              {grouped[cat].map(item => (
+                <SettingInput
+                  key={item.key}
+                  settingKey={item.key}
+                  setting={item}
+                  value={getValue(item.key)}
+                  onChange={handleChange}
                 />
-              </div>
-              <div className="form-group">
-                <label htmlFor="worker-threshold-fallback">Fallback Count Threshold</label>
-                <p className="text-muted text-sm" style={{ marginBottom: 8 }}>
-                  Used before first timing measurement is available.
-                </p>
-                <input
-                  id="worker-threshold-fallback"
-                  type="number"
-                  className="form-control"
-                  value={workerThreshold}
-                  onChange={(e) => setWorkerThreshold(e.target.value)}
-                  min={1}
-                  max={10000}
-                  style={{ maxWidth: 240 }}
-                />
-              </div>
-            </>
-          )}
-        </Section>
+              ))}
+            </Section>
+          );
+        })}
 
         <div className="form-actions">
-          <button type="submit" className="btn btn-primary" disabled={saving}>
-            <Save size={16} /> {saving ? 'Saving...' : 'Save Settings'}
+          <button type="submit" className="btn btn-primary" disabled={saving || !hasChanges}>
+            <Save size={16} /> {saving ? 'Saving...' : hasChanges ? 'Save Changes' : 'No Changes'}
           </button>
         </div>
       </form>
