@@ -440,7 +440,7 @@ export default function RegisterPage() {
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: 'var(--text-muted)' }}>
               <input type="checkbox" checked={disableIpLogging} onChange={(e) => setDisableIpLogging(e.target.checked)} />
-              <span>Disable IP logging (changeable later in Settings)</span>
+              <span>Disable IP Hash logging (can change later)</span>
             </label>
           </div>
 
