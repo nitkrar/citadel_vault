@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback } from 'react';
 import {
   PieChart as PieChartIcon, TrendingUp, Globe, Tag, List,
   DollarSign, Clock, Camera, Lock, Landmark, AlertTriangle,
-  Trash2, ChevronDown, ChevronRight, RefreshCw,
+  Trash2, ChevronDown, ChevronRight, RefreshCw, Link2,
 } from 'lucide-react';
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis,
@@ -14,6 +14,8 @@ import usePortfolioData from '../hooks/usePortfolioData';
 import useVaultData from '../hooks/useVaultData';
 import useSort from '../hooks/useSort';
 import SortableTh from '../components/SortableTh';
+import useAppConfig from '../hooks/useAppConfig';
+import { entryStore } from '../lib/entryStore';
 import api from '../api/client';
 import { fmtCurrency, MASKED, apiData } from '../lib/checks';
 import { buildRateMap, recalculateSnapshot } from '../lib/portfolioAggregator';
@@ -49,6 +51,69 @@ export default function PortfolioPage() {
   const [priceRefreshing, setPriceRefreshing] = useState(false);
   const [priceRefreshResult, setPriceRefreshResult] = useState(null);
   const [snapshotPrompt, setSnapshotPrompt] = useState(null); // { staleCount }
+  const [balanceRefreshing, setBalanceRefreshing] = useState(false);
+  const [balanceRefreshResult, setBalanceRefreshResult] = useState(null);
+  const { config } = useAppConfig();
+  const plaidEnabled = config?.plaid_enabled === 'true';
+
+  // Find Plaid-connected entries from portfolio data
+  const plaidEntries = useMemo(() => {
+    if (!portfolio?.assets) return [];
+    return portfolio.assets.filter(a => a._plaid);
+  }, [portfolio]);
+
+  const hasPlaidEntries = plaidEntries.length > 0;
+
+  // ── Refresh bank balances ─────────────────────────────────────────
+  const handleRefreshBalances = async () => {
+    setBalanceRefreshing(true);
+    setBalanceRefreshResult(null);
+    try {
+      // Collect unique item_ids
+      const itemIds = [...new Set(plaidEntries.map(e => e._plaid.item_id))];
+      if (itemIds.length === 0) return;
+
+      const { data: resp } = await api.post('/plaid.php?action=refresh', { item_ids: itemIds });
+      const result = apiData({ data: resp });
+      const balances = result?.balances || {};
+
+      // Load all entries from store to find and update Plaid-linked entries
+      const allStored = await entryStore.getAll();
+      let updated = 0;
+
+      for (const stored of allStored) {
+        if (stored.entry_type !== 'asset') continue;
+        let decrypted;
+        try { decrypted = await decrypt(stored.data); } catch { continue; }
+        if (!decrypted?._plaid?.account_id || !decrypted?._plaid?.item_id) continue;
+
+        const itemBalances = balances[decrypted._plaid.item_id];
+        if (!itemBalances) continue;
+        const acctBalance = itemBalances[decrypted._plaid.account_id];
+        if (!acctBalance) continue;
+
+        // Update value and last_refreshed
+        const updatedData = {
+          ...decrypted,
+          value: String(acctBalance.balance),
+          _plaid: { ...decrypted._plaid, last_refreshed: new Date().toISOString() },
+        };
+        const blob = await encrypt(updatedData);
+        await api.put(`/vault.php?id=${stored.id}`, { encrypted_data: blob });
+        await entryStore.put({ ...stored, data: blob, updated_at: new Date().toISOString() });
+        updated++;
+      }
+
+      setBalanceRefreshResult(`Updated ${updated} balance${updated !== 1 ? 's' : ''}`);
+      if (updated > 0) refetch();
+      setTimeout(() => setBalanceRefreshResult(null), 5000);
+    } catch (err) {
+      setBalanceRefreshResult('Failed to refresh balances');
+      setTimeout(() => setBalanceRefreshResult(null), 5000);
+    } finally {
+      setBalanceRefreshing(false);
+    }
+  };
 
   // Format helper respecting hideAmounts
   const fmt = useCallback((value, symbol = '') => {
@@ -203,6 +268,11 @@ export default function PortfolioPage() {
               ))}
             </select>
           )}
+          {plaidEnabled && hasPlaidEntries && (
+            <button className="btn btn-secondary" onClick={handleRefreshBalances} disabled={balanceRefreshing || isEmpty}>
+              <Link2 size={16} className={balanceRefreshing ? 'spin' : ''} /> {balanceRefreshing ? 'Refreshing...' : 'Refresh Balances'}
+            </button>
+          )}
           <button className="btn btn-secondary" onClick={handleRefreshPrices} disabled={priceRefreshing || isEmpty}>
             <RefreshCw size={16} className={priceRefreshing ? 'spin' : ''} /> {priceRefreshing ? 'Refreshing...' : 'Refresh Prices'}
           </button>
@@ -235,7 +305,7 @@ export default function PortfolioPage() {
         </div>
       ) : (
         <>
-          {activeTab === 'overview' && <OverviewTab portfolio={p} fmtD={fmtD} hideAmounts={hideAmounts} priceRefreshResult={priceRefreshResult} />}
+          {activeTab === 'overview' && <OverviewTab portfolio={p} fmtD={fmtD} hideAmounts={hideAmounts} priceRefreshResult={priceRefreshResult} balanceRefreshResult={balanceRefreshResult} />}
           {activeTab === 'country' && <GroupTab groups={p.by_country} fmtD={fmtD} expanded={expandedGroups} toggle={toggleGroup} labelKey="country" />}
           {activeTab === 'account' && <GroupTab groups={p.by_account} fmtD={fmtD} expanded={expandedGroups} toggle={toggleGroup} labelKey="account" />}
           {activeTab === 'type' && <TypeTab groups={p.by_type} fmtD={fmtD} />}
@@ -252,7 +322,7 @@ export default function PortfolioPage() {
 // Overview Tab
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-function OverviewTab({ portfolio, fmtD, hideAmounts, priceRefreshResult }) {
+function OverviewTab({ portfolio, fmtD, hideAmounts, priceRefreshResult, balanceRefreshResult }) {
   const { summary, by_country, by_type } = portfolio;
 
   const countryChartData = useMemo(() =>
@@ -285,9 +355,9 @@ function OverviewTab({ portfolio, fmtD, hideAmounts, priceRefreshResult }) {
 
   return (
     <>
-      {priceRefreshResult && (
+      {(priceRefreshResult || balanceRefreshResult) && (
         <div className="text-muted" style={{ fontSize: 12, marginBottom: 8, textAlign: 'right' }}>
-          {priceRefreshResult}
+          {[priceRefreshResult, balanceRefreshResult].filter(Boolean).join(' | ')}
         </div>
       )}
       {/* Summary Cards */}
