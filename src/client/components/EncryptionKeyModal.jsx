@@ -3,7 +3,7 @@ import { KeyRound, Copy, Check, AlertTriangle, Shield, Download, Eye, EyeOff } f
 import { useEncryption } from '../contexts/EncryptionContext';
 import { useAuth } from '../contexts/AuthContext';
 import Modal from '../components/Modal';
-import { getVaultKeyMinLength, VAULT_KEY_MINIMUMS } from '../lib/defaults';
+import { getVaultKeyMinLength, getUserPreference, VAULT_KEY_MINIMUMS } from '../lib/defaults';
 
 /**
  * EncryptionKeyModal
@@ -27,19 +27,14 @@ export default function EncryptionKeyModal() {
     skipVault,
   } = useEncryption();
 
-  const { mustChangePassword, mustChangeVaultKey, clearMustChangeVaultKey, adminActionMessage } = useAuth();
+  const { mustChangePassword, mustChangeVaultKey, clearMustChangeVaultKey, adminActionMessage, preferences } = useAuth();
 
   // ------------------------------------------------------------------
   // Local state (must be declared before any early returns — Rules of Hooks)
   // ------------------------------------------------------------------
   const [mode, setMode] = useState(null); // null = auto-detect
-  const [keyType, _setKeyType] = useState(() => {
-    try { return localStorage.getItem('pv_vault_key_type') || 'alphanumeric'; } catch { return 'alphanumeric'; }
-  });
-  const setKeyType = (type) => {
-    _setKeyType(type);
-    try { localStorage.setItem('pv_vault_key_type', type); } catch { /* */ }
-  };
+  const savedKeyType = getUserPreference(preferences, 'vault_key_type');
+  const [keyType, setKeyType] = useState(savedKeyType);
   const [vaultKey, setVaultKey] = useState('');
   const [confirmKey, setConfirmKey] = useState('');
   const [recoveryKeyInput, setRecoveryKeyInput] = useState('');
@@ -470,19 +465,10 @@ export default function EncryptionKeyModal() {
           </p>
         )}
         {error && errorBox}
-        {/* Key type toggle for unlock — compact row */}
-        <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
-          {Object.entries({ numeric: 'PIN', alphanumeric: 'Password', passphrase: 'Passphrase' }).map(([type, label]) => (
-            <button key={type} type="button" onClick={() => { setKeyType(type); setVaultKey(''); }}
-              style={{ flex: 1, padding: '5px 6px', borderRadius: 6, border: `1px solid ${keyType === type ? '#2563eb' : '#d1d5db'}`, background: keyType === type ? '#eff6ff' : 'transparent', color: keyType === type ? '#2563eb' : '#9ca3af', fontWeight: 500, fontSize: 12, cursor: 'pointer' }}>
-              {label}
-            </button>
-          ))}
-        </div>
         {eyeToggleRow}
         <div style={{ marginBottom: 20 }}>
           <label style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}>Vault Key</label>
-          <input {...inputProps} placeholder={keyType === 'numeric' ? 'Enter PIN' : 'Enter vault key'} value={vaultKey} onChange={(e) => setVaultKey(e.target.value)} autoFocus required style={inputStyle} />
+          <input {...inputProps} placeholder={keyType === 'numeric' ? 'Enter PIN' : keyType === 'passphrase' ? 'Enter passphrase' : 'Enter vault key'} value={vaultKey} onChange={(e) => setVaultKey(e.target.value)} autoFocus required style={inputStyle} />
         </div>
         <button type="submit" disabled={submitting} style={btnPrimary(submitting)}>
           {submitting ? 'Unlocking...' : forceUnlockForChange ? 'Continue' : 'Unlock Vault'}

@@ -13,7 +13,7 @@ import Section from '../components/Section';
 
 export default function SecurityPage() {
   const { isUnlocked, changeVaultKey, viewRecoveryKey, lock } = useEncryption();
-  const { user, preferences } = useAuth();
+  const { user, preferences, refreshPreferences } = useAuth();
 
   // ── Vault Key Change ─────────────────────────────────────────────
   const [showChangeKey, setShowChangeKey] = useState(false);
@@ -34,6 +34,7 @@ export default function SecurityPage() {
     try {
       await api.put('/preferences.php', { vault_key_type: type });
       setNewKeyType(type);
+      refreshPreferences();
     } catch {}
     setSavingKeyType(false);
   };
