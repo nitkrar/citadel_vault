@@ -835,7 +835,7 @@ export default function VaultPage() {
                 setTickerVerified(false);
                 setTickerResult(null);
               }}
-              placeholder={field.key === 'coin' ? 'BTC-USD' : 'AAPL'}
+              placeholder={field.key === 'coin' ? 'e.g. BTC-USD, ETH-USD' : countryExchanges.length > 0 && countryExchanges[0].suffix ? `e.g. SYMBOL.${countryExchanges[0].suffix}` : 'e.g. AAPL, MSFT, TSLA'}
               style={{ flex: 1 }}
             />
             <button
@@ -848,13 +848,18 @@ export default function VaultPage() {
               {tickerVerifying ? <><RefreshCw size={13} className="spin" /> Verifying...</> : 'Verify'}
             </button>
           </div>
-          {countryExchanges.length > 0 && (
-            <div className="text-muted" style={{ fontSize: 11, marginTop: 4 }}>
-              Exchanges: {countryExchanges.map(ex =>
-                ex.suffix ? `.${ex.suffix} (${ex.name})` : ex.name
-              ).join(', ')}
-            </div>
-          )}
+          <div className="text-muted" style={{ fontSize: 11, marginTop: 4 }}>
+            {field.key === 'coin'
+              ? 'Use Yahoo Finance ticker format: BTC-USD, ETH-USD, SOL-USD'
+              : countryExchanges.length > 0
+                ? <>Add suffix for this market: {countryExchanges.map(ex =>
+                    ex.suffix ? <strong key={ex.name}>.{ex.suffix}</strong> : <span key={ex.name}>{ex.name} (no suffix)</span>
+                  ).reduce((prev, curr, i) => i === 0 ? [curr] : [...prev, ', ', curr], [])}
+                  {' — '}e.g. {countryExchanges[0].suffix ? `SYMBOL.${countryExchanges[0].suffix}` : 'SYMBOL'}
+                </>
+                : 'Use Yahoo Finance ticker. US stocks: AAPL, META. Other markets add suffix: HDFCBANK.NS (India), BARC.L (UK)'
+            }
+          </div>
           {tickerResult && (
             <div style={{
               marginTop: 6, padding: '6px 10px', borderRadius: 6, fontSize: 12,
