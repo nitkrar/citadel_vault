@@ -3,8 +3,7 @@
  * Citadel Vault — Portfolio Snapshots API
  *
  * Store and retrieve encrypted portfolio snapshots.
- * Supports split model (v3): header meta + per-entry encrypted blobs.
- * Backward-compatible: old v2 snapshots (single blob, no entries) still returned.
+ * Uses split model (v3): header meta + per-entry encrypted blobs.
  */
 require_once __DIR__ . '/../core/Response.php';
 require_once __DIR__ . '/../../config/config.php';
@@ -28,16 +27,12 @@ if ($method === 'GET') {
     $snapshots = $storage->getSnapshotsWithEntries($userId, $from, $to);
 
     $result = array_map(function ($s) {
-        $item = [
+        return [
             'snapshot_date' => $s['snapshot_date'],
             'snapshot_time' => $s['snapshot_time'] ?? null,
             'data'          => $s['encrypted_data'],
+            'entries'       => $s['entries'] ?? [],
         ];
-        // Include entries if present (split model snapshots)
-        if (!empty($s['entries'])) {
-            $item['entries'] = $s['entries'];
-        }
-        return $item;
     }, $snapshots);
 
     Response::success($result);
@@ -54,36 +49,24 @@ if ($method === 'POST') {
         Response::error('Valid snapshot_date (YYYY-MM-DD) is required.', 400);
     }
 
-    // Split model: encrypted_meta + entries array
-    if (isset($body['encrypted_meta']) && isset($body['entries'])) {
-        $encryptedMeta = $body['encrypted_meta'];
-        $entries = $body['entries'];
+    $encryptedMeta = $body['encrypted_meta'] ?? '';
+    $entries = $body['entries'] ?? [];
 
-        if (empty($encryptedMeta)) {
-            Response::error('Missing encrypted_meta.', 400);
-        }
-        if (!is_array($entries) || empty($entries)) {
-            Response::error('entries must be a non-empty array.', 400);
-        }
-
-        // Validate each entry has encrypted_data
-        foreach ($entries as $entry) {
-            if (empty($entry['encrypted_data'])) {
-                Response::error('Each entry must have encrypted_data.', 400);
-            }
-        }
-
-        $storage->createSnapshotWithEntries($userId, $date, $encryptedMeta, $entries);
-        Response::success(['message' => 'Snapshot saved.'], 201);
+    if (empty($encryptedMeta)) {
+        Response::error('Missing encrypted_meta.', 400);
+    }
+    if (!is_array($entries) || empty($entries)) {
+        Response::error('entries must be a non-empty array.', 400);
     }
 
-    // Legacy: single encrypted_data blob
-    $encryptedData = $body['encrypted_data'] ?? '';
-    if (empty($encryptedData)) {
-        Response::error('Missing encrypted_data or encrypted_meta+entries.', 400);
+    // Validate each entry has encrypted_data
+    foreach ($entries as $entry) {
+        if (empty($entry['encrypted_data'])) {
+            Response::error('Each entry must have encrypted_data.', 400);
+        }
     }
 
-    $storage->createSnapshot($userId, $date, $encryptedData);
+    $storage->createSnapshotWithEntries($userId, $date, $encryptedMeta, $entries);
     Response::success(['message' => 'Snapshot saved.'], 201);
 }
 
