@@ -161,12 +161,12 @@ export default function PortfolioPage() {
             )}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {/* Currency selector */}
           {currencies && currencies.length > 0 && (
             <select
               className="form-control"
-              style={{ width: 'auto', minWidth: 100, padding: '4px 30px 4px 8px', fontSize: 13 }}
+              style={{ width: 'auto', minWidth: 90, padding: '4px 30px 4px 8px', fontSize: 13 }}
               value={displayCurrency}
               onChange={(e) => setDisplayCurrency(e.target.value)}
             >
