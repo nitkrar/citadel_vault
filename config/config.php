@@ -77,6 +77,17 @@ define('WEBAUTHN_ORIGIN', env('WEBAUTHN_ORIGIN', 'http://localhost:8080'));
 define('EXCHANGE_RATE_API_KEY', env('EXCHANGE_RATE_API_KEY', ''));
 define('ALPHA_VANTAGE_API_KEY', env('ALPHA_VANTAGE_API_KEY', 'demo'));
 
+// Plaid
+define('PLAID_CLIENT_ID', env('PLAID_CLIENT_ID', ''));
+define('PLAID_SECRET', env('PLAID_SECRET', ''));
+define('PLAID_ENV', env('PLAID_ENV', 'sandbox'));
+define('PLAID_ENCRYPTION_KEY', env('PLAID_ENCRYPTION_KEY', ''));
+define('PLAID_BASE_URL', match(PLAID_ENV) {
+    'production'  => 'https://production.plaid.com',
+    'development' => 'https://development.plaid.com',
+    default       => 'https://sandbox.plaid.com',
+});
+
 // Application
 define('APP_URL', env('APP_URL', WEBAUTHN_ORIGIN)); // Base URL for links (emails, invites)
 define('BASE_CURRENCY', env('BASE_CURRENCY', 'GBP'));
