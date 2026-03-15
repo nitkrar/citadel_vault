@@ -446,6 +446,98 @@ if ($resource === 'historical-rates') {
 }
 
 // ============================================================================
+// EXCHANGES — Stock exchange reference data
+// ============================================================================
+if ($resource === 'exchanges') {
+    if ($method === 'GET') {
+        $stmt = $db->query(
+            'SELECT e.*, c.name AS country_name
+             FROM exchanges e
+             LEFT JOIN countries c ON c.code = e.country_code
+             ORDER BY e.country_code, e.display_order, e.name'
+        );
+        Response::success($stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    // Admin-only writes
+    if (!$isSiteAdmin) {
+        Response::error('Admin access required.', 403);
+    }
+
+    if ($method === 'POST') {
+        $body = Response::getBody();
+        $countryCode = Response::sanitize($body['country_code'] ?? '');
+        $name = Response::sanitize($body['name'] ?? '');
+        $suffix = Response::sanitize($body['suffix'] ?? '');
+        $displayOrder = (int)($body['display_order'] ?? 0);
+
+        if (!$countryCode || !$name) {
+            Response::error('country_code and name are required.', 400);
+        }
+
+        $stmt = $db->prepare(
+            'INSERT INTO exchanges (country_code, name, suffix, display_order)
+             VALUES (?, ?, ?, ?)'
+        );
+        $stmt->execute([$countryCode, $name, $suffix, $displayOrder]);
+        $newId = (int)$db->lastInsertId();
+
+        $stmt = $db->prepare('SELECT * FROM exchanges WHERE id = ?');
+        $stmt->execute([$newId]);
+        Response::success($stmt->fetch(PDO::FETCH_ASSOC), 201);
+    }
+
+    if ($method === 'PUT') {
+        if (!$id) Response::error('Exchange ID required.', 400);
+
+        $body = Response::getBody();
+        $allowed = ['country_code', 'name', 'suffix', 'display_order'];
+        $updates = [];
+        $params = [];
+
+        foreach ($allowed as $field) {
+            if (array_key_exists($field, $body)) {
+                $updates[] = "$field = ?";
+                $params[] = $field === 'display_order' ? (int)$body[$field] : Response::sanitize($body[$field]);
+            }
+        }
+
+        if (empty($updates)) {
+            Response::error('No fields to update.', 400);
+        }
+
+        $params[] = $id;
+        $stmt = $db->prepare('UPDATE exchanges SET ' . implode(', ', $updates) . ' WHERE id = ?');
+        $stmt->execute($params);
+
+        if ($stmt->rowCount() === 0) {
+            $check = $db->prepare('SELECT id FROM exchanges WHERE id = ?');
+            $check->execute([$id]);
+            if (!$check->fetch()) Response::error('Exchange not found.', 404);
+        }
+
+        $stmt = $db->prepare('SELECT * FROM exchanges WHERE id = ?');
+        $stmt->execute([$id]);
+        Response::success($stmt->fetch(PDO::FETCH_ASSOC));
+    }
+
+    if ($method === 'DELETE') {
+        if (!$id) Response::error('Exchange ID required.', 400);
+
+        $stmt = $db->prepare('DELETE FROM exchanges WHERE id = ?');
+        $stmt->execute([$id]);
+
+        if ($stmt->rowCount() === 0) {
+            Response::error('Exchange not found.', 404);
+        }
+
+        Response::success(['deleted' => true]);
+    }
+
+    Response::error('Method not allowed.', 405);
+}
+
+// ============================================================================
 // CONFIG — Expose server configuration to client
 // ============================================================================
 if ($resource === 'config') {
