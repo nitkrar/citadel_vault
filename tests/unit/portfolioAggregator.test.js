@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   extractValue, buildRateMap, convertCurrency, buildSymbolMap,
-  recalculateSnapshot, aggregatePortfolio,
+  recalculateSnapshot, aggregatePortfolio, extractGainLoss,
 } from '../../src/client/lib/portfolioAggregator.js';
 
 // ── Test data ───────────────────────────────────────────────────────────
@@ -292,5 +292,140 @@ describe('aggregatePortfolio', () => {
 
     // Same assets, different display → different totals
     expect(inGBP.summary.net_worth).not.toBeCloseTo(inUSD.summary.net_worth, 0);
+  });
+});
+
+// ── extractGainLoss ─────────────────────────────────────────────────────
+
+const STOCK_FIELDS = [
+  { key: 'title', label: 'Title', type: 'text' },
+  { key: 'shares', label: 'Shares', type: 'number', portfolio_role: 'quantity' },
+  { key: 'price_per_share', label: 'Price', type: 'number', portfolio_role: 'price' },
+  { key: 'cost_price', label: 'Cost Price', type: 'number' },
+];
+
+describe('extractGainLoss', () => {
+  it('returns gain when current price > cost price', () => {
+    const data = { shares: '10', price_per_share: '150', cost_price: '100' };
+    const result = extractGainLoss(data, STOCK_FIELDS);
+    expect(result).not.toBeNull();
+    expect(result.gainLoss).toBe(500); // (150-100) * 10
+    expect(result.gainLossPercent).toBeCloseTo(50, 1);
+  });
+
+  it('returns loss when current price < cost price', () => {
+    const data = { shares: '5', price_per_share: '80', cost_price: '100' };
+    const result = extractGainLoss(data, STOCK_FIELDS);
+    expect(result.gainLoss).toBe(-100); // (80-100) * 5
+    expect(result.gainLossPercent).toBeCloseTo(-20, 1);
+  });
+
+  it('returns null when cost_price is missing', () => {
+    const data = { shares: '10', price_per_share: '150' };
+    expect(extractGainLoss(data, STOCK_FIELDS)).toBeNull();
+  });
+
+  it('returns null when cost_price is zero', () => {
+    const data = { shares: '10', price_per_share: '150', cost_price: '0' };
+    expect(extractGainLoss(data, STOCK_FIELDS)).toBeNull();
+  });
+
+  it('returns null when current price is missing', () => {
+    const data = { shares: '10', cost_price: '100' };
+    expect(extractGainLoss(data, STOCK_FIELDS)).toBeNull();
+  });
+
+  it('returns null for null/undefined inputs', () => {
+    expect(extractGainLoss(null, STOCK_FIELDS)).toBeNull();
+    expect(extractGainLoss({}, null)).toBeNull();
+  });
+
+  it('handles zero gain (breakeven)', () => {
+    const data = { shares: '10', price_per_share: '100', cost_price: '100' };
+    const result = extractGainLoss(data, STOCK_FIELDS);
+    expect(result.gainLoss).toBe(0);
+    expect(result.gainLossPercent).toBe(0);
+  });
+
+  it('handles fractional shares (crypto)', () => {
+    const cryptoFields = [
+      { key: 'quantity', label: 'Quantity', type: 'number', portfolio_role: 'quantity' },
+      { key: 'price_per_unit', label: 'Price', type: 'number', portfolio_role: 'price' },
+      { key: 'cost_price', label: 'Cost Price', type: 'number' },
+    ];
+    const data = { quantity: '0.5', price_per_unit: '60000', cost_price: '40000' };
+    const result = extractGainLoss(data, cryptoFields);
+    expect(result.gainLoss).toBe(10000); // (60000-40000) * 0.5
+    expect(result.gainLossPercent).toBeCloseTo(50, 1);
+  });
+});
+
+// ── aggregatePortfolio with gain/loss ────────────────────────────────────
+
+describe('aggregatePortfolio gain/loss integration', () => {
+  it('includes gainLoss on assets with cost_price', () => {
+    const entries = [{
+      id: 1,
+      entry_type: 'asset',
+      decrypted: {
+        title: 'Apple Stock',
+        shares: '10',
+        price_per_share: '200',
+        cost_price: '150',
+        currency: 'USD',
+      },
+      template: {
+        name: 'Stock', icon: 'trending-up', key: 'asset', subtype: 'stock',
+        is_liability: false,
+        fields: STOCK_FIELDS,
+      },
+    }];
+
+    const result = aggregatePortfolio(entries, CURRENCIES, 'GBP', 'USD');
+    const asset = result.assets[0];
+    expect(asset.gainLoss).toBe(500); // (200-150) * 10
+    expect(asset.gainLossPercent).toBeCloseTo(33.33, 0);
+  });
+
+  it('includes total_gain_loss in summary', () => {
+    const entries = [{
+      id: 1,
+      entry_type: 'asset',
+      decrypted: {
+        title: 'Stock A',
+        shares: '10',
+        price_per_share: '200',
+        cost_price: '150',
+        currency: 'USD',
+      },
+      template: {
+        name: 'Stock', icon: 'trending-up', key: 'asset', subtype: 'stock',
+        is_liability: false, fields: STOCK_FIELDS,
+      },
+    }];
+
+    const result = aggregatePortfolio(entries, CURRENCIES, 'GBP', 'USD');
+    expect(result.summary.total_gain_loss).toBeDefined();
+    expect(typeof result.summary.total_gain_loss).toBe('number');
+  });
+
+  it('does not include gainLoss when cost_price is absent', () => {
+    const entries = [{
+      id: 1,
+      entry_type: 'asset',
+      decrypted: {
+        title: 'Apple Stock',
+        shares: '10',
+        price_per_share: '200',
+        currency: 'USD',
+      },
+      template: {
+        name: 'Stock', icon: 'trending-up', key: 'asset', subtype: 'stock',
+        is_liability: false, fields: STOCK_FIELDS,
+      },
+    }];
+
+    const result = aggregatePortfolio(entries, CURRENCIES, 'GBP', 'USD');
+    expect(result.assets[0].gainLoss).toBeUndefined();
   });
 });

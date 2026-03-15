@@ -46,6 +46,39 @@ export function extractValue(decryptedData, templateFields) {
 }
 
 /**
+ * Extract gain/loss data from a decrypted entry.
+ * Only returns values when both cost_price and current price are populated.
+ *
+ * @returns {{ costPrice, currentPrice, quantity, gainLoss, gainLossPercent } | null}
+ */
+export function extractGainLoss(decryptedData, templateFields) {
+  if (!decryptedData || !templateFields) return null;
+
+  const costPrice = parseFloat(decryptedData.cost_price);
+  if (isNaN(costPrice) || costPrice === 0) return null;
+
+  let currentPrice = null;
+  let quantity = null;
+
+  for (const field of templateFields) {
+    if (field.portfolio_role === 'price') {
+      currentPrice = parseFloat(decryptedData[field.key]);
+    }
+    if (field.portfolio_role === 'quantity') {
+      quantity = parseFloat(decryptedData[field.key]);
+    }
+  }
+
+  if (currentPrice === null || isNaN(currentPrice)) return null;
+  if (quantity === null || isNaN(quantity)) quantity = 1;
+
+  const gainLoss = (currentPrice - costPrice) * quantity;
+  const gainLossPercent = costPrice !== 0 ? ((currentPrice - costPrice) / costPrice) * 100 : 0;
+
+  return { costPrice, currentPrice, quantity, gainLoss, gainLossPercent };
+}
+
+/**
  * Build a lookup map of currency code → exchange_rate_to_base.
  */
 export function buildRateMap(currencies) {
@@ -156,6 +189,7 @@ export function aggregatePortfolio(entries, currencies, baseCurrency, displayCur
 
   let totalAssets = 0;
   let totalLiabilities = 0;
+  let totalGainLoss = 0;
   let assetCount = 0;
 
   const assets = [];
@@ -226,6 +260,16 @@ export function aggregatePortfolio(entries, currencies, baseCurrency, displayCur
       template_name: template?.name || entryType,
     };
 
+    // Add gain/loss if cost_price is available
+    const gainLossData = extractGainLoss(d, templateFields);
+    if (gainLossData) {
+      assetItem.gainLoss = gainLossData.gainLoss;
+      assetItem.gainLossPercent = gainLossData.gainLossPercent;
+      assetItem.costPrice = gainLossData.costPrice;
+      const glBase = convertCurrency(gainLossData.gainLoss, currency, baseCurrency, rateMap);
+      totalGainLoss += glBase;
+    }
+
     assets.push(assetItem);
     assetCount++;
 
@@ -294,6 +338,7 @@ export function aggregatePortfolio(entries, currencies, baseCurrency, displayCur
       total_liabilities: totalLiabilitiesDisplay,
       net_worth: totalAssetsDisplay - totalLiabilitiesDisplay,
       asset_count: assetCount,
+      total_gain_loss: convertCurrency(totalGainLoss, baseCurrency, targetCurrency, rateMap),
     },
     assets,
     by_country: byCountry,
