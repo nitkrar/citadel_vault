@@ -33,6 +33,8 @@ import {
   Keyboard,
   ExternalLink,
   Settings,
+  Menu,
+  X,
 } from 'lucide-react';
 
 // --- Hide Amounts Context ---
@@ -56,6 +58,8 @@ export default function Layout() {
     return document.documentElement.classList.contains('dark');
   });
 
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
   const [pendingShareCount, setPendingShareCount] = useState(0);
   const [showPasskeyBanner, setShowPasskeyBanner] = useState(false);
   const [passkeyBannerLoading, setPasskeyBannerLoading] = useState(false);
@@ -73,6 +77,12 @@ export default function Layout() {
       document.documentElement.classList.remove('dark');
     }
   }, [darkMode]);
+
+  // Body scroll lock when mobile sidebar is open
+  useEffect(() => {
+    document.body.classList.toggle('sidebar-open', sidebarOpen);
+    return () => document.body.classList.remove('sidebar-open');
+  }, [sidebarOpen]);
 
   // Load pending share count
   useEffect(() => {
@@ -149,6 +159,12 @@ export default function Layout() {
   const { isDesktop, settings: shortcutSettings } = useKeyboardShortcuts(shortcutCallbacks);
 
   const location = useLocation();
+
+  // Close mobile sidebar on navigation
+  useEffect(() => {
+    setSidebarOpen(false);
+  }, [location.pathname]);
+
   const appName = import.meta.env.VITE_APP_NAME || 'Personal Vault';
   // Pages that don't need the vault locked banner
   const hideVaultBanner = ['/profile', '/admin', '/settings'].includes(location.pathname);
@@ -157,8 +173,33 @@ export default function Layout() {
   return (
     <HideAmountsContext.Provider value={{ hideAmounts, toggleHideAmounts }}>
       <div className="app-layout">
+        {/* Mobile header — visible ≤768px only */}
+        <header className="mobile-header">
+          <button className="icon-btn" onClick={() => setSidebarOpen(prev => !prev)} aria-label="Toggle menu">
+            {sidebarOpen ? <X size={22} /> : <Menu size={22} />}
+          </button>
+          <span className="mobile-header-title">
+            <Shield size={20} />
+            {appName}
+          </span>
+          <div className="mobile-header-actions">
+            <button className="icon-btn" onClick={toggleDarkMode} title={darkMode ? 'Light mode' : 'Dark mode'}>
+              {darkMode ? <Sun size={18} /> : <Moon size={18} />}
+            </button>
+            <button className="icon-btn" onClick={toggleHideAmounts} title={hideAmounts ? 'Show amounts' : 'Hide amounts'}>
+              {hideAmounts ? <EyeOff size={18} /> : <Eye size={18} />}
+            </button>
+          </div>
+        </header>
+
+        {/* Backdrop — visible when mobile sidebar is open */}
+        <div
+          className={`sidebar-backdrop${sidebarOpen ? ' visible' : ''}`}
+          onClick={() => setSidebarOpen(false)}
+        />
+
         {/* Sidebar */}
-        <aside className="sidebar">
+        <aside className={`sidebar${sidebarOpen ? ' open' : ''}`}>
           <div className="sidebar-header">
             <div className="sidebar-logo">
               <Shield size={28} />
