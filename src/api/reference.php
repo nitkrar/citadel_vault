@@ -225,11 +225,14 @@ if ($resource === 'asset-types') {
 if ($resource === 'countries') {
 
     if ($method === 'GET') {
+        $all = isset($_GET['all']) && $_GET['all'];
+        $where = $all ? '' : 'WHERE IFNULL(c.is_active, 1) = 1';
         $stmt = $db->query(
-            "SELECT c.id, c.name, c.code, c.flag_emoji, c.display_order, c.default_currency_id,
+            "SELECT c.id, c.name, c.code, c.flag_emoji, c.display_order, c.is_active, c.default_currency_id,
                     cu.code AS default_currency_code, cu.symbol AS default_currency_symbol
              FROM countries c
              LEFT JOIN currencies cu ON c.default_currency_id = cu.id
+             $where
              ORDER BY c.display_order ASC, c.name ASC"
         );
         Response::success($stmt->fetchAll());
@@ -273,6 +276,7 @@ if ($resource === 'countries') {
         if (isset($body['name'])) { $fields[] = 'name = ?'; $params[] = Response::sanitize($body['name']); }
         if (isset($body['code'])) { $fields[] = 'code = ?'; $params[] = Response::sanitize($body['code']); }
         if (isset($body['flag_emoji'])) { $fields[] = 'flag_emoji = ?'; $params[] = Response::sanitize($body['flag_emoji']); }
+        if (array_key_exists('is_active', $body)) { $fields[] = 'is_active = ?'; $params[] = (int)(bool)$body['is_active']; }
         if (array_key_exists('default_currency_id', $body)) {
             $fields[] = 'default_currency_id = ?';
             $params[] = $body['default_currency_id'] !== null ? (int)$body['default_currency_id'] : null;

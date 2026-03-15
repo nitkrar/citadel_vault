@@ -231,6 +231,7 @@ CREATE TABLE `countries` (
     `code`                  VARCHAR(10) NOT NULL,
     `flag_emoji`            VARCHAR(10) DEFAULT NULL,
     `display_order`         INT NOT NULL DEFAULT 999,
+    `is_active`             TINYINT(1) NOT NULL DEFAULT 1,
     `default_currency_id`   INT UNSIGNED DEFAULT NULL,
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_countries_code` (`code`),
