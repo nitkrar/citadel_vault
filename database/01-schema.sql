@@ -98,6 +98,10 @@ CREATE TABLE `user_preferences` (
 CREATE TABLE `system_settings` (
     `setting_key`   VARCHAR(100)  NOT NULL,
     `setting_value` TEXT          NOT NULL,
+    `type`          VARCHAR(20)   NOT NULL DEFAULT 'config',
+    `category`      VARCHAR(50)   NOT NULL DEFAULT 'general',
+    `description`   VARCHAR(255)      NULL,
+    `options`       JSON              NULL,
     `created_by`    INT UNSIGNED      NULL,
     `updated_by`    INT UNSIGNED      NULL,
     `created_at`    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
