@@ -1,12 +1,20 @@
 import { useState, Fragment } from 'react';
-import { User, Check, AlertTriangle, Edit2, Keyboard, ChevronDown, ChevronRight, Send, Copy, UserPlus, DollarSign } from 'lucide-react';
+import { User, Check, AlertTriangle, Edit2, Keyboard, ChevronDown, ChevronRight, Send, Copy, UserPlus, DollarSign, RefreshCw } from 'lucide-react';
 import api from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 import useKeyboardShortcuts from '../hooks/useKeyboardShortcuts';
 import useCurrencies from '../hooks/useCurrencies';
+import { getUserPreference } from '../lib/defaults';
+
+const SYNC_INTERVAL_OPTIONS = [
+  { label: 'Every 15 minutes', value: '900' },
+  { label: 'Every 30 minutes', value: '1800' },
+  { label: 'Every 1 hour', value: '3600' },
+  { label: 'Off', value: '0' },
+];
 
 export default function ProfilePage() {
-  const { user, refreshUser } = useAuth();
+  const { user, refreshUser, preferences, refreshPreferences } = useAuth();
   const { isDesktop, settings: shortcutSettings, toggleShortcut, SHORTCUT_DEFS } = useKeyboardShortcuts();
 
   // ── Display Currency ────────────────────────────────────────────
@@ -27,6 +35,24 @@ export default function ProfilePage() {
     } catch {}
     setSavingCurrency(false);
   };
+  // ── Sync Interval ─────────────────────────────────────────────
+  const [syncIntervalValue, setSyncIntervalValue] = useState(getUserPreference(preferences || {}, 'sync_interval'));
+  const [savingSyncInterval, setSavingSyncInterval] = useState(false);
+  const [syncIntervalSuccess, setSyncIntervalSuccess] = useState('');
+
+  const handleSyncIntervalChange = async (e) => {
+    const val = e.target.value;
+    setSyncIntervalValue(val);
+    setSyncIntervalSuccess('');
+    setSavingSyncInterval(true);
+    try {
+      await api.put('/preferences.php', { sync_interval: val });
+      setSyncIntervalSuccess('Sync interval updated.');
+      if (refreshPreferences) refreshPreferences();
+    } catch {}
+    setSavingSyncInterval(false);
+  };
+
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   // ── Profile edit ─────────────────────────────────────────────────
@@ -208,6 +234,28 @@ export default function ProfilePage() {
           <option value="">Base currency (default)</option>
           {(currencyList || []).filter(c => c.is_active === 1 || c.is_active === '1' || c.is_active === true).map(c => (
             <option key={c.code} value={c.code}>{c.symbol} {c.code} — {c.name}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Sync Interval */}
+      <div className="card mb-4" style={{ padding: 20 }}>
+        <h3 className="flex items-center gap-2 mb-3"><RefreshCw size={18} /> Sync Interval</h3>
+        <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 12 }}>
+          How often to check for changes from other devices. Set to "Off" to disable automatic sync.
+        </p>
+
+        {syncIntervalSuccess && <div className="alert alert-success mb-3"><Check size={16} /><span>{syncIntervalSuccess}</span></div>}
+
+        <select
+          className="form-control"
+          style={{ maxWidth: 300 }}
+          value={syncIntervalValue}
+          onChange={handleSyncIntervalChange}
+          disabled={savingSyncInterval}
+        >
+          {SYNC_INTERVAL_OPTIONS.map(opt => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
           ))}
         </select>
       </div>

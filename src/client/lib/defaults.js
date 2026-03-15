@@ -4,6 +4,7 @@ export const PREFERENCE_DEFAULTS = {
     auto_lock_timeout: '3600',
     audit_ip_mode: 'hashed',
     vault_persist_session: 'lock_on_refresh',
+    sync_interval: '3600',
 };
 
 export const VAULT_KEY_MINIMUMS = {

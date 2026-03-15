@@ -1,7 +1,9 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import api from '../api/client';
 import { useEncryption } from './EncryptionContext';
+import { useAuth } from './AuthContext';
 import { invalidateReferenceCache } from '../hooks/useReferenceData';
+import { getUserPreference } from '../lib/defaults';
 
 const SyncContext = createContext();
 
@@ -13,9 +15,10 @@ const REFERENCE_CATEGORIES = ['currencies', 'countries', 'templates'];
 
 export function SyncProvider({ children }) {
   const { isUnlocked } = useEncryption();
+  const { preferences } = useAuth();
   const [hasVaultUpdates, setHasVaultUpdates] = useState(false);
   const serverTimeRef = useRef(null);
-  const pollIntervalRef = useRef(900); // default 15 min
+  const serverPollIntervalRef = useRef(900); // server-returned fallback
 
   const checkSync = useCallback(async () => {
     try {
@@ -25,7 +28,7 @@ export function SyncProvider({ children }) {
 
       serverTimeRef.current = result.server_time;
       if (result.poll_interval) {
-        pollIntervalRef.current = result.poll_interval;
+        serverPollIntervalRef.current = result.poll_interval;
       }
 
       if (!result.changes) return;
@@ -62,6 +65,10 @@ export function SyncProvider({ children }) {
     window.dispatchEvent(new CustomEvent('vault-sync-refresh'));
   }, []);
 
+  // Determine poll interval: user preference > server value > default
+  const prefInterval = getUserPreference(preferences || {}, 'sync_interval');
+  const syncInterval = parseInt(prefInterval, 10);
+
   useEffect(() => {
     if (!isUnlocked) {
       serverTimeRef.current = null;
@@ -71,9 +78,13 @@ export function SyncProvider({ children }) {
     // Initial baseline check
     checkSync();
 
-    const id = setInterval(checkSync, pollIntervalRef.current * 1000);
+    // syncInterval of 0 means "Off" — no polling
+    if (syncInterval === 0) return;
+
+    const intervalMs = (syncInterval || serverPollIntervalRef.current) * 1000;
+    const id = setInterval(checkSync, intervalMs);
     return () => clearInterval(id);
-  }, [isUnlocked, checkSync]);
+  }, [isUnlocked, checkSync, syncInterval]);
 
   return (
     <SyncContext.Provider value={{ hasVaultUpdates, dismissSync, applySync }}>
