@@ -111,8 +111,23 @@ export default function AdminPage() {
   const { sorted: sortedRegularUsers, sortKey: regSortKey, sortDir: regSortDir, onSort: onRegSort } = useSort(filteredRegularUsers, 'created_at', 'desc');
   const { sorted: sortedAccountTypes, sortKey: atSortKey, sortDir: atSortDir, onSort: onAtSort } = useSort(accountTypes, 'name', 'asc');
   const { sorted: sortedAssetTypes, sortKey: astSortKey, sortDir: astSortDir, onSort: onAstSort } = useSort(assetTypes, 'name', 'asc');
-  const { sorted: sortedCountries, sortKey: countrySortKey, sortDir: countrySortDir, onSort: onCountrySort } = useSort(countries, 'display_order', 'asc');
-  const { sorted: sortedCurrencies, sortKey: currSortKey, sortDir: currSortDir, onSort: onCurrSort } = useSort(currencies, 'display_order', 'asc');
+  // Pre-sort countries & currencies: active first, then display_order, then name
+  const presortedCountries = useMemo(() => [...countries].sort((a, b) => {
+    const aa = Number(b.is_active) - Number(a.is_active);
+    if (aa !== 0) return aa;
+    const od = (a.display_order || 999) - (b.display_order || 999);
+    if (od !== 0) return od;
+    return (a.name || '').localeCompare(b.name || '');
+  }), [countries]);
+  const presortedCurrencies = useMemo(() => [...currencies].sort((a, b) => {
+    const aa = Number(b.is_active) - Number(a.is_active);
+    if (aa !== 0) return aa;
+    const od = (a.display_order || 999) - (b.display_order || 999);
+    if (od !== 0) return od;
+    return (a.name || '').localeCompare(b.name || '');
+  }), [currencies]);
+  const { sorted: sortedCountries, sortKey: countrySortKey, sortDir: countrySortDir, onSort: onCountrySort } = useSort(presortedCountries, '', 'asc');
+  const { sorted: sortedCurrencies, sortKey: currSortKey, sortDir: currSortDir, onSort: onCurrSort } = useSort(presortedCurrencies, '', 'asc');
 
   // ===== LOAD FUNCTIONS =====
   const loadUsers = useCallback(async () => {
