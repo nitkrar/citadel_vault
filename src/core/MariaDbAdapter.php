@@ -588,6 +588,26 @@ class MariaDbAdapter implements StorageAdapter {
         return $settings;
     }
 
+    public function getSystemSettingsEnriched(): array {
+        $stmt = $this->db->query(
+            'SELECT setting_key, setting_value, type, category, description, options
+             FROM system_settings
+             ORDER BY category, type DESC, setting_key'
+        );
+        $rows = $stmt->fetchAll();
+        $settings = [];
+        foreach ($rows as $row) {
+            $settings[$row['setting_key']] = [
+                'value'       => $row['setting_value'],
+                'type'        => $row['type'],
+                'category'    => $row['category'],
+                'description' => $row['description'],
+                'options'     => $row['options'] ? json_decode($row['options'], true) : null,
+            ];
+        }
+        return $settings;
+    }
+
     public function setSystemSetting(string $key, string $value, ?int $userId = null): bool {
         $stmt = $this->db->prepare(
             'INSERT INTO system_settings (setting_key, setting_value, created_by, updated_by)
