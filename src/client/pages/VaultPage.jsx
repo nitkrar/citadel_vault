@@ -14,10 +14,11 @@ import useTemplates from '../hooks/useTemplates';
 import useAppConfig from '../hooks/useAppConfig';
 import useExchanges from '../hooks/useExchanges';
 import ImportModal from '../components/ImportModal';
+import { usePlaidLink } from '../components/PlaidLink';
 import {
   Plus, Edit2, Trash2, Search, Eye, EyeOff, Copy, Check, Lock,
   KeyRound, AlertTriangle, Undo2, X, ChevronDown, Upload,
-  Landmark, Briefcase, FileText, Shield, Layers, RefreshCw,
+  Landmark, Briefcase, FileText, Shield, Layers, RefreshCw, Link2,
 } from 'lucide-react';
 
 const TYPE_META = {
@@ -146,6 +147,148 @@ export default function VaultPage() {
   // Inline editing of linked asset values
   const [inlineEditAsset, setInlineEditAsset] = useState(null); // { id, field, value }
   const [inlineEditSaving, setInlineEditSaving] = useState(false);
+
+  // Plaid state
+  const [plaidMsg, setPlaidMsg] = useState('');
+  const [plaidLinkEntryId, setPlaidLinkEntryId] = useState(null); // entry id for "Link to Plaid" flow
+  const [plaidAccountPicker, setPlaidAccountPicker] = useState(null); // { accounts, itemId, metadata, entryId }
+  const plaidEnabled = config?.plaid_enabled === 'true';
+
+  // ── Plaid Connect Bank success handler ─────────────────────────────
+  const handlePlaidConnectSuccess = useCallback(async ({ itemId, accounts, metadata }) => {
+    const institutionName = metadata?.institution?.name || 'Bank';
+    let created = 0;
+    for (const acct of accounts) {
+      try {
+        const plaidMeta = {
+          item_id: itemId,
+          account_id: acct.account_id,
+          institution_name: institutionName,
+          account_name: acct.name,
+          account_type: acct.type,
+          account_subtype: acct.subtype,
+          last_refreshed: new Date().toISOString(),
+        };
+
+        // Create Account entry
+        const acctTpl = templates.find(t => t.template_key === 'account' && !t.owner_id && !t.country_code && !t.subtype);
+        const acctForm = {
+          title: `${acct.name} (${institutionName})`,
+          institution: institutionName,
+          currency: acct.currency,
+          _plaid: plaidMeta,
+        };
+        const acctBlob = await encrypt(acctForm);
+        const { data: acctResp } = await api.post('/vault.php', {
+          entry_type: 'account',
+          template_id: acctTpl?.id || null,
+          encrypted_data: acctBlob,
+        });
+        const acctId = apiData({ data: acctResp })?.id;
+        const acctEntry = {
+          id: acctId, entry_type: 'account', template_id: acctTpl?.id || null,
+          data: acctBlob, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+        };
+        await entryStore.put(acctEntry);
+        setDecryptedCache(prev => ({ ...prev, [acctId]: acctForm }));
+        setEntries(prev => [acctEntry, ...prev]);
+
+        // Create linked Cash asset
+        const cashTpl = templates.find(t => t.template_key === 'asset' && t.subtype === 'cash' && !t.owner_id);
+        const cashForm = {
+          title: `${acct.name} — Cash`,
+          linked_account_id: String(acctId),
+          value: String(acct.balance || 0),
+          currency: acct.currency,
+          _plaid: plaidMeta,
+        };
+        const cashBlob = await encrypt(cashForm);
+        const { data: cashResp } = await api.post('/vault.php', {
+          entry_type: 'asset',
+          template_id: cashTpl?.id || null,
+          encrypted_data: cashBlob,
+        });
+        const cashId = apiData({ data: cashResp })?.id;
+        const cashEntry = {
+          id: cashId, entry_type: 'asset', template_id: cashTpl?.id || null,
+          data: cashBlob, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+        };
+        await entryStore.put(cashEntry);
+        setDecryptedCache(prev => ({ ...prev, [cashId]: cashForm }));
+        setEntries(prev => [cashEntry, ...prev]);
+        created += 2;
+      } catch {
+        // continue with next account
+      }
+    }
+    setPlaidMsg(`Created ${created} entries from ${institutionName}`);
+    setTimeout(() => setPlaidMsg(''), 5000);
+  }, [encrypt, templates]);
+
+  // ── Plaid Link Existing Entry handler ───────────────────────────────
+  const handlePlaidLinkExisting = useCallback(async ({ itemId, accounts, metadata }) => {
+    if (!plaidLinkEntryId) return;
+    setPlaidAccountPicker({ accounts, itemId, metadata, entryId: plaidLinkEntryId });
+    setPlaidLinkEntryId(null);
+  }, [plaidLinkEntryId]);
+
+  const confirmPlaidLink = useCallback(async (account) => {
+    if (!plaidAccountPicker) return;
+    const { itemId, metadata, entryId } = plaidAccountPicker;
+    const entry = entries.find(e => e.id === entryId);
+    const d = decryptedCache[entryId];
+    if (!entry || !d) return;
+
+    const plaidMeta = {
+      item_id: itemId,
+      account_id: account.account_id,
+      institution_name: metadata?.institution?.name || '',
+      account_name: account.name,
+      account_type: account.type,
+      account_subtype: account.subtype,
+      last_refreshed: new Date().toISOString(),
+    };
+
+    const updated = { ...d, _plaid: plaidMeta };
+    try {
+      const blob = await encrypt(updated);
+      await api.put(`/vault.php?id=${entryId}`, { encrypted_data: blob });
+      const updatedEntry = { ...entry, data: blob, updated_at: new Date().toISOString() };
+      await entryStore.put(updatedEntry);
+      setDecryptedCache(prev => ({ ...prev, [entryId]: updated }));
+      setEntries(prev => prev.map(e => e.id === entryId ? updatedEntry : e));
+
+      // Also update linked Cash asset balance if one exists
+      const linkedAssets = entries.filter(e => {
+        const ad = decryptedCache[e.id];
+        return e.entry_type === 'asset' && ad && String(ad.linked_account_id) === String(entryId);
+      });
+      for (const asset of linkedAssets) {
+        const ad = decryptedCache[asset.id];
+        if (ad) {
+          const updatedAsset = { ...ad, value: String(account.balance || 0), _plaid: plaidMeta };
+          const assetBlob = await encrypt(updatedAsset);
+          await api.put(`/vault.php?id=${asset.id}`, { encrypted_data: assetBlob });
+          const updatedAssetEntry = { ...asset, data: assetBlob, updated_at: new Date().toISOString() };
+          await entryStore.put(updatedAssetEntry);
+          setDecryptedCache(prev => ({ ...prev, [asset.id]: updatedAsset }));
+          setEntries(prev => prev.map(e => e.id === asset.id ? updatedAssetEntry : e));
+        }
+      }
+
+      setPlaidMsg('Linked to Plaid successfully');
+      setTimeout(() => setPlaidMsg(''), 5000);
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to link to Plaid');
+    }
+    setPlaidAccountPicker(null);
+  }, [plaidAccountPicker, entries, decryptedCache, encrypt]);
+
+  // Plaid hooks — one for connect, one for link existing
+  const { open: openPlaidConnect, loading: plaidConnectLoading, error: plaidConnectError } =
+    usePlaidLink({ onSuccess: handlePlaidConnectSuccess });
+  const { open: openPlaidLinkExisting, loading: plaidLinkLoading, error: plaidLinkError } =
+    usePlaidLink({ onSuccess: handlePlaidLinkExisting });
 
   // ── Formatted options for SearchableSelect ─────────────────────────
   const countryOptions = useMemo(() =>
@@ -953,6 +1096,11 @@ export default function VaultPage() {
         <div className="flex items-center gap-2 flex-wrap">
           <button className="btn btn-ghost btn-sm" onClick={loadDeleted}><Undo2 size={14} /> Recently Deleted</button>
           <button className="btn btn-secondary btn-sm" onClick={() => setShowImport(true)}><Upload size={14} /> Import</button>
+          {plaidEnabled && (
+            <button className="btn btn-secondary" onClick={openPlaidConnect} disabled={plaidConnectLoading}>
+              <Landmark size={14} /> {plaidConnectLoading ? 'Connecting...' : 'Connect Bank'}
+            </button>
+          )}
           <button className="btn btn-primary" onClick={() => openAdd(activeType !== 'all' ? activeType : 'password')}><Plus size={16} /> New Entry</button>
         </div>
       </div>
@@ -983,6 +1131,10 @@ export default function VaultPage() {
           <input className="form-control" style={{ paddingLeft: 36 }} placeholder="Search across all fields..." value={search} onChange={e => setSearch(e.target.value)} />
         </div>
       </div>
+
+      {/* Plaid messages */}
+      {plaidMsg && <div className="alert alert-success mb-3"><Check size={16} /><span>{plaidMsg}</span></div>}
+      {(plaidConnectError || plaidLinkError) && <div className="alert alert-danger mb-3"><AlertTriangle size={16} /><span>{plaidConnectError || plaidLinkError}</span></div>}
 
       {/* Content */}
       {error ? (
@@ -1344,6 +1496,40 @@ export default function VaultPage() {
             </div>
           );
         })()}
+        {/* Plaid connection status for account entries */}
+        {viewEntry && viewEntry.entry_type === 'account' && (() => {
+          const d = decryptedCache[viewEntry.id];
+          if (!d) return null;
+          if (d._plaid) {
+            return (
+              <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'var(--color-success-bg, #dcfce7)', borderRadius: 6 }}>
+                  <Link2 size={14} style={{ color: 'var(--color-success, #16a34a)' }} />
+                  <span style={{ fontSize: 13, color: 'var(--color-success, #16a34a)', fontWeight: 500 }}>Connected to Plaid</span>
+                  {d._plaid.last_refreshed && (
+                    <span className="text-muted" style={{ fontSize: 11, marginLeft: 'auto' }}>
+                      Last refreshed: {new Date(d._plaid.last_refreshed).toLocaleString()}
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          }
+          if (plaidEnabled) {
+            return (
+              <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+                <button
+                  className="btn btn-outline btn-sm"
+                  onClick={() => { setPlaidLinkEntryId(viewEntry.id); openPlaidLinkExisting(); }}
+                  disabled={plaidLinkLoading}
+                >
+                  <Link2 size={14} /> {plaidLinkLoading ? 'Connecting...' : 'Link to Plaid'}
+                </button>
+              </div>
+            );
+          }
+          return null;
+        })()}
         {viewEntry && (
           <div className="flex gap-2 mt-4">
             <button className="btn btn-secondary" onClick={() => { openEdit(viewEntry); setViewEntry(null); }}><Edit2 size={14} /> Edit</button>
@@ -1449,6 +1635,38 @@ export default function VaultPage() {
             </div>
           );
         })()}
+      </Modal>
+
+      {/* Plaid Account Picker Modal */}
+      <Modal isOpen={!!plaidAccountPicker} onClose={() => setPlaidAccountPicker(null)} title="Select Account to Link">
+        {plaidAccountPicker && (
+          <div>
+            <p className="text-muted" style={{ fontSize: 13, marginBottom: 12 }}>
+              Choose which bank account to link to this entry:
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {plaidAccountPicker.accounts.map(acct => (
+                <button
+                  key={acct.account_id}
+                  className="btn btn-outline"
+                  style={{ textAlign: 'left', padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                  onClick={() => confirmPlaidLink(acct)}
+                >
+                  <div>
+                    <div className="font-medium">{acct.name}</div>
+                    <div className="text-muted" style={{ fontSize: 12 }}>{acct.type} / {acct.subtype}</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div className="font-medium">{acct.currency} {Number(acct.balance).toLocaleString()}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button className="btn btn-secondary" onClick={() => setPlaidAccountPicker(null)}>Cancel</button>
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* Import Modal */}
