@@ -362,6 +362,7 @@ if ($resource === 'currencies') {
         $params = [];
 
         if (isset($body['name'])) { $fields[] = 'name = ?'; $params[] = Response::sanitize($body['name']); }
+        if (isset($body['code'])) { $fields[] = 'code = ?'; $params[] = Response::sanitize($body['code']); }
         if (isset($body['symbol'])) { $fields[] = 'symbol = ?'; $params[] = Response::sanitize($body['symbol']); }
         if (isset($body['exchange_rate_to_base'])) { $fields[] = 'exchange_rate_to_base = ?'; $params[] = (float)$body['exchange_rate_to_base']; }
         if (array_key_exists('is_active', $body)) { $fields[] = 'is_active = ?'; $params[] = (int)(bool)$body['is_active']; }
