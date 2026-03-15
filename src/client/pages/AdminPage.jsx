@@ -77,6 +77,10 @@ export default function AdminPage() {
   const [currencySearch, setCurrencySearch] = useState('');
   const [togglingCurrency, setTogglingCurrency] = useState(null);
 
+  // ===== INLINE EDIT STATE =====
+  const [inlineEdit, setInlineEdit] = useState(null); // { resource, id, field, value }
+  const [inlineEditSaving, setInlineEditSaving] = useState(false);
+
   // ===== DERIVED USER LISTS =====
   const adminUsers = useMemo(() => users.filter(u => u.role === 'admin' || u.role === 'ghost'), [users]);
   const regularUsers = useMemo(() => users.filter(u => u.role === 'user'), [users]);
@@ -147,7 +151,7 @@ export default function AdminPage() {
       case 'users': loadUsers(); break;
       case 'accountTypes': loadAccountTypes(); break;
       case 'assetTypes': loadAssetTypes(); break;
-      case 'countries': loadCountries(); break;
+      case 'countries': loadCountries(); loadCurrencies(); break;
       case 'currencies': loadCurrencies(); break;
     }
   }, [activeTab, loadUsers, loadAccountTypes, loadAssetTypes, loadCountries, loadCurrencies]);
@@ -424,6 +428,81 @@ export default function AdminPage() {
       alert(err.response?.data?.error || 'Failed to toggle currency.');
     }
     setTogglingCurrency(null);
+  };
+
+  // ===== INLINE EDIT SAVE =====
+  const saveInlineEdit = async () => {
+    if (!inlineEdit) return;
+    const { resource, id, field, value } = inlineEdit;
+    setInlineEditSaving(true);
+    try {
+      await api.put(`/reference.php?resource=${resource}&id=${id}`, { [field]: value });
+      invalidateReferenceCache(resource);
+      if (resource === 'countries') await loadCountries();
+      else if (resource === 'currencies') await loadCurrencies();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to save.');
+    }
+    setInlineEditSaving(false);
+    setInlineEdit(null);
+  };
+
+  const EditableCell = ({ resource, id, field, value, className, type }) => {
+    const isEditing = inlineEdit?.resource === resource && inlineEdit?.id === id && inlineEdit?.field === field;
+    if (isEditing) {
+      if (type === 'currency-select') {
+        const handleSelectChange = async (e) => {
+          const newVal = e.target.value ? Number(e.target.value) : null;
+          setInlineEdit(prev => ({ ...prev, value: newVal }));
+          // Save immediately on selection
+          setInlineEditSaving(true);
+          try {
+            await api.put(`/reference.php?resource=${resource}&id=${id}`, { default_currency_id: newVal });
+            invalidateReferenceCache(resource);
+            await loadCountries();
+          } catch (err) {
+            alert(err.response?.data?.error || 'Failed to save.');
+          }
+          setInlineEditSaving(false);
+          setInlineEdit(null);
+        };
+        return (
+          <select
+            autoFocus
+            className="form-control form-control-sm"
+            value={inlineEdit.value ?? ''}
+            onChange={handleSelectChange}
+            onBlur={() => setInlineEdit(null)}
+            onKeyDown={e => { if (e.key === 'Escape') setInlineEdit(null); }}
+            disabled={inlineEditSaving}
+          >
+            <option value="">-- None --</option>
+            {currencies.map(cur => (
+              <option key={cur.id} value={cur.id}>{cur.code} ({cur.symbol})</option>
+            ))}
+          </select>
+        );
+      }
+      return (
+        <input
+          autoFocus
+          className="form-control form-control-sm"
+          value={inlineEdit.value}
+          onChange={e => setInlineEdit(prev => ({ ...prev, value: e.target.value }))}
+          onBlur={saveInlineEdit}
+          onKeyDown={e => { if (e.key === 'Enter') saveInlineEdit(); if (e.key === 'Escape') setInlineEdit(null); }}
+          disabled={inlineEditSaving}
+        />
+      );
+    }
+    const displayValue = type === 'currency-select'
+      ? (value ? (() => { const cur = currencies.find(c => c.id == value); return cur ? `${cur.code} (${cur.symbol})` : '--'; })() : '--')
+      : (value || '--');
+    return (
+      <span className={className} style={{ cursor: 'pointer' }} onClick={() => setInlineEdit({ resource, id, field, value: value ?? '' })}>
+        {displayValue}
+      </span>
+    );
   };
 
   // ===== RENDER HELPERS =====
@@ -795,10 +874,18 @@ export default function AdminPage() {
                 {sortedCountries.map(c => (
                     <tr key={c.id}>
                       <td className="td-muted">{c.id}</td>
-                      <td style={{ fontSize: 18 }}>{c.flag_emoji || '--'}</td>
-                      <td className="font-medium">{c.name}</td>
-                      <td className="td-muted font-mono">{c.code || '--'}</td>
-                      <td className="td-muted">{c.default_currency_code ? `${c.default_currency_code} (${c.default_currency_symbol})` : '--'}</td>
+                      <td style={{ fontSize: 18 }}>
+                        <EditableCell resource="countries" id={c.id} field="flag_emoji" value={c.flag_emoji} />
+                      </td>
+                      <td>
+                        <EditableCell resource="countries" id={c.id} field="name" value={c.name} className="font-medium" />
+                      </td>
+                      <td>
+                        <EditableCell resource="countries" id={c.id} field="code" value={c.code} className="td-muted font-mono" />
+                      </td>
+                      <td>
+                        <EditableCell resource="countries" id={c.id} field="default_currency_id" value={c.default_currency_id} type="currency-select" className="td-muted" />
+                      </td>
                     </tr>
                 ))}
                 {countries.length === 0 && (
@@ -868,9 +955,15 @@ export default function AdminPage() {
                           {Number(c.is_active) ? <Check size={16} /> : <X size={16} />}
                         </button>
                       </td>
-                      <td className="font-medium font-mono">{c.code}</td>
-                      <td>{c.name}</td>
-                      <td>{c.symbol}</td>
+                      <td>
+                        <EditableCell resource="currencies" id={c.id} field="code" value={c.code} className="font-medium font-mono" />
+                      </td>
+                      <td>
+                        <EditableCell resource="currencies" id={c.id} field="name" value={c.name} />
+                      </td>
+                      <td>
+                        <EditableCell resource="currencies" id={c.id} field="symbol" value={c.symbol} />
+                      </td>
                       <td style={{ textAlign: 'right' }} className="font-mono">
                         {c.exchange_rate_to_base != null && Number(c.exchange_rate_to_base) !== 0
                           ? Number(c.exchange_rate_to_base).toFixed(6)
