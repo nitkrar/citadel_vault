@@ -21,7 +21,10 @@ export default defineConfig(({ mode }) => {
           theme_color: '#1a1a2e',
           background_color: '#1a1a2e',
           display: 'standalone',
+          orientation: 'any',
           start_url: '/',
+          scope: '/',
+          categories: ['finance', 'security', 'utilities'],
           icons: [
             { src: '/favicon-192.svg', sizes: '192x192', type: 'image/svg+xml' },
             { src: '/favicon-512.svg', sizes: '512x512', type: 'image/svg+xml' },
