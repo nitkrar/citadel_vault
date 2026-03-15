@@ -175,7 +175,7 @@ export default function SecurityPage() {
   }, []);
 
   const { data: auditLog, loading: auditLoading } = useVaultData(fetchAudit, []);
-  const autoLockMode = getLocalPref('auto_lock_mode');
+  const autoLockMode = getLocalPref('auto_lock_mode') === 'manual' ? 'session' : getLocalPref('auto_lock_mode');
   const autoLockTimeout = getLocalPref('auto_lock_timeout');
   const [savingAutoLock, setSavingAutoLock] = useState(false);
 
@@ -222,7 +222,6 @@ export default function SecurityPage() {
             {[
               { value: 'timed', label: 'Timed' },
               { value: 'session', label: 'Session' },
-              { value: 'manual', label: 'Manual' },
             ].map(opt => (
               <button key={opt.value}
                 className={`btn btn-sm ${autoLockMode === opt.value ? 'btn-primary' : 'btn-ghost'}`}
@@ -235,7 +234,6 @@ export default function SecurityPage() {
           <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
             {autoLockMode === 'timed' && 'Vault locks automatically after a period of inactivity. Best balance of security and convenience.'}
             {autoLockMode === 'session' && 'Vault stays unlocked while you use it, but locks when you close the tab or browser. No inactivity timer.'}
-            {autoLockMode === 'manual' && 'Vault never locks on its own. You must click "Lock Vault" yourself. Least secure — use only on trusted devices.'}
           </p>
           {autoLockMode === 'timed' && (
             <div className="flex items-center gap-2" style={{ marginTop: 8 }}>
@@ -288,10 +286,6 @@ export default function SecurityPage() {
               && 'Your vault locks when you refresh the page or close the tab. No inactivity timer, but refreshes require re-entry.'}
             {autoLockMode === 'session' && getLocalPref('vault_persist_session') === 'persist_in_tab'
               && 'Your vault stays unlocked for the entire browser tab session. Only closing the tab or clicking "Lock Vault" locks it.'}
-            {autoLockMode === 'manual' && getLocalPref('vault_persist_session') === 'lock_on_refresh'
-              && 'No auto-lock timer, but refreshing the page still locks the vault. You must re-enter your key after each refresh.'}
-            {autoLockMode === 'manual' && getLocalPref('vault_persist_session') === 'persist_in_tab'
-              && 'Your vault stays unlocked until you manually click "Lock Vault" or close the tab. Maximum convenience, least secure.'}
           </p>
         </div>
 
