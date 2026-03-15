@@ -1,16 +1,27 @@
 import { useState, Fragment } from 'react';
-import { User, Check, AlertTriangle, Edit2, Keyboard, ChevronDown, ChevronRight, Send, Copy, UserPlus, DollarSign, RefreshCw } from 'lucide-react';
+import { User, Check, AlertTriangle, Edit2, Keyboard, ChevronDown, ChevronRight, Send, Copy, UserPlus, DollarSign, RefreshCw, KeyRound } from 'lucide-react';
 import api from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 import useKeyboardShortcuts from '../hooks/useKeyboardShortcuts';
 import useCurrencies from '../hooks/useCurrencies';
 import { getUserPreference } from '../lib/defaults';
+import useAppConfig from '../hooks/useAppConfig';
 
 const SYNC_INTERVAL_OPTIONS = [
   { label: 'Every 15 minutes', value: '900' },
   { label: 'Every 30 minutes', value: '1800' },
   { label: 'Every 1 hour', value: '3600' },
   { label: 'Off', value: '0' },
+];
+
+const VAULT_TAB_OPTIONS = [
+  { label: 'All',        value: 'all' },
+  { label: 'Accounts',   value: 'account' },
+  { label: 'Assets',     value: 'asset' },
+  { label: 'Passwords',  value: 'password' },
+  { label: 'Licenses',   value: 'license' },
+  { label: 'Insurance',  value: 'insurance' },
+  { label: 'Custom',     value: 'custom' },
 ];
 
 export default function ProfilePage() {
@@ -51,6 +62,29 @@ export default function ProfilePage() {
       if (refreshPreferences) refreshPreferences();
     } catch {}
     setSavingSyncInterval(false);
+  };
+
+  // ── Default Vault Tab ─────────────────────────────────────────
+  const { config } = useAppConfig();
+  const siteDefaultTab = config.default_vault_tab || 'account';
+  const [defaultVaultTab, setDefaultVaultTab] = useState(
+    getUserPreference(preferences || {}, 'default_vault_tab') || ''
+  );
+  const [savingVaultTab, setSavingVaultTab] = useState(false);
+  const [vaultTabSuccess, setVaultTabSuccess] = useState('');
+
+  const handleVaultTabChange = async (e) => {
+    const val = e.target.value;
+    setDefaultVaultTab(val);
+    setVaultTabSuccess('');
+    setSavingVaultTab(true);
+    try {
+      await api.put('/preferences.php', { default_vault_tab: val });
+      setVaultTabSuccess('Default vault tab updated.');
+      if (refreshPreferences) refreshPreferences();
+      setTimeout(() => setVaultTabSuccess(''), 3000);
+    } catch {}
+    setSavingVaultTab(false);
   };
 
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -255,6 +289,29 @@ export default function ProfilePage() {
           disabled={savingSyncInterval}
         >
           {SYNC_INTERVAL_OPTIONS.map(opt => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Default Vault Tab */}
+      <div className="card mb-4" style={{ padding: 20 }}>
+        <h3 className="flex items-center gap-2 mb-3"><KeyRound size={18} /> Default Vault Tab</h3>
+        <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 12 }}>
+          Which tab to show when you open the Vault page. Navigating from the dashboard overrides this.
+        </p>
+
+        {vaultTabSuccess && <div className="alert alert-success mb-3"><Check size={16} /><span>{vaultTabSuccess}</span></div>}
+
+        <select
+          className="form-control"
+          style={{ maxWidth: 300 }}
+          value={defaultVaultTab}
+          onChange={handleVaultTabChange}
+          disabled={savingVaultTab}
+        >
+          <option value="">Site default ({VAULT_TAB_OPTIONS.find(o => o.value === siteDefaultTab)?.label || siteDefaultTab})</option>
+          {VAULT_TAB_OPTIONS.map(opt => (
             <option key={opt.value} value={opt.value}>{opt.label}</option>
           ))}
         </select>

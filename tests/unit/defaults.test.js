@@ -23,6 +23,14 @@ describe('getUserPreference', () => {
     expect(getUserPreference({}, 'nonexistent_key')).toBeUndefined();
   });
 
+  it('returns undefined for default_vault_tab when not set (falls through to site default)', () => {
+    expect(getUserPreference({}, 'default_vault_tab')).toBeUndefined();
+  });
+
+  it('returns user value for default_vault_tab when set', () => {
+    expect(getUserPreference({ default_vault_tab: 'asset' }, 'default_vault_tab')).toBe('asset');
+  });
+
   it('respects explicit falsy user values', () => {
     expect(getUserPreference({ sync_interval: '0' }, 'sync_interval')).toBe('0');
   });

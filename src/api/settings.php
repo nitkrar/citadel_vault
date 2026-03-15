@@ -21,7 +21,7 @@ $method = $_SERVER['REQUEST_METHOD'];
 $storage = Storage::adapter();
 
 // Allowlist of valid setting keys
-$allowedKeys = ['ticker_price_ttl'];
+$allowedKeys = ['ticker_price_ttl', 'default_vault_tab'];
 
 // ---------------------------------------------------------------------------
 // GET — All system settings as key-value object

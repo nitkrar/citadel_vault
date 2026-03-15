@@ -103,7 +103,7 @@ export default function DashboardPage() {
               const Icon = meta.icon;
               const count = entryCounts[type] || 0;
               return (
-                <Link key={type} to="/vault" className="card" style={{ textDecoration: 'none', padding: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+                <Link key={type} to={`/vault?type=${type}`} className="card" style={{ textDecoration: 'none', padding: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
                   <div style={{ background: meta.color + '15', borderRadius: 8, padding: 10 }}>
                     <Icon size={20} style={{ color: meta.color }} />
                   </div>
