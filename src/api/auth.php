@@ -119,7 +119,12 @@ if ($method === 'POST' && $action === 'login') {
                 // Tier 3: 9+ attempts → full lock + force password change
                 elseif ($attempts >= LOCKOUT_TIER3_ATTEMPTS && $attempts % 3 === 0) {
                     // Lock far into the future — only password change unlocks
-                    $lockUntil = date('Y-m-d H:i:s', time() + 86400 * 365);
+                    $tier3Duration = 86400 * 90;
+                    try {
+                        $setting = Storage::adapter()->getSystemSetting('lockout_tier3_duration');
+                        if ($setting !== null) $tier3Duration = (int)$setting;
+                    } catch (Exception $e) {}
+                    $lockUntil = date('Y-m-d H:i:s', time() + $tier3Duration);
                     $db->prepare("UPDATE users SET locked_until = ?, must_reset_password = 1 WHERE id = ?")->execute([$lockUntil, $user['id']]);
                     try { $db->prepare("INSERT INTO audit_log (user_id, action, resource_type) VALUES (?, 'account_locked_permanent', 'users')")->execute([$user['id']]); } catch (Exception $e) {}
                     if (defined('SMTP_ENABLED') && SMTP_ENABLED && $failRow['email']) {
