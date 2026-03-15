@@ -47,6 +47,7 @@ export default function PortfolioPage() {
   const [snapshotSaving, setSnapshotSaving] = useState(false);
   const [priceRefreshing, setPriceRefreshing] = useState(false);
   const [priceRefreshResult, setPriceRefreshResult] = useState(null);
+  const [snapshotPrompt, setSnapshotPrompt] = useState(null); // { staleCount }
 
   // Format helper respecting hideAmounts
   const fmt = useCallback((value, symbol = '') => {
@@ -84,18 +85,17 @@ export default function PortfolioPage() {
   };
 
   // ── Save snapshot (split model v3) ──────────────────────────────
-  const handleSaveSnapshot = async () => {
+  const doSaveSnapshot = async () => {
     if (!portfolio) return;
     setSnapshotSaving(true);
+    setSnapshotPrompt(null);
     try {
-      // Encrypt metadata header
       const meta = {
         base_currency: baseCurrency,
         date: new Date().toISOString(),
       };
       const encryptedMeta = await encrypt(meta);
 
-      // Encrypt each asset entry individually
       const entries = [];
       for (const asset of portfolio.assets) {
         const entryBlob = {
@@ -125,6 +125,18 @@ export default function PortfolioPage() {
     } finally {
       setSnapshotSaving(false);
     }
+  };
+
+  const handleSaveSnapshot = () => {
+    if (!portfolio) return;
+    try {
+      const cached = JSON.parse(sessionStorage.getItem('pv_ticker_prices') || '{}');
+      if (Object.keys(cached).length > 0) {
+        setSnapshotPrompt({ staleCount: Object.keys(cached).length });
+        return;
+      }
+    } catch { /* ignore */ }
+    doSaveSnapshot();
   };
 
   // ── Vault locked state ─────────────────────────────────────────
@@ -843,6 +855,30 @@ function HistoryTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrency, b
           </table>
         </div>
       </div>
+      {/* Snapshot stale price prompt */}
+      {snapshotPrompt && (
+        <div className="modal-overlay" onClick={() => setSnapshotPrompt(null)}>
+          <div className="modal-dialog" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">Fetched Prices Not Applied</h3>
+              <button className="modal-close-btn" onClick={() => setSnapshotPrompt(null)}>&times;</button>
+            </div>
+            <div className="modal-body">
+              <div className="alert alert-warning" style={{ marginBottom: 16 }}>
+                <AlertTriangle size={16} style={{ flexShrink: 0 }} />
+                <span>You have {snapshotPrompt.staleCount} fetched price{snapshotPrompt.staleCount !== 1 ? 's' : ''} that haven't been applied to your entries yet.</span>
+              </div>
+              <p className="text-muted" style={{ fontSize: 13 }}>Snapshot will use the prices currently stored in your entries, not the recently fetched prices.</p>
+            </div>
+            <div className="modal-footer" style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+              <button className="btn btn-outline" onClick={() => setSnapshotPrompt(null)}>Cancel</button>
+              <button className="btn btn-primary" onClick={doSaveSnapshot} disabled={snapshotSaving}>
+                {snapshotSaving ? 'Saving...' : 'Snapshot as-is'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
