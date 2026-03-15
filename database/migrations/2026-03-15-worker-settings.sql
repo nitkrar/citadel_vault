@@ -5,5 +5,11 @@ INSERT INTO `system_settings` (`setting_key`, `setting_value`) VALUES
     ('worker_adaptive_ms', '100')
 ON DUPLICATE KEY UPDATE `setting_key` = `setting_key`;
 
+-- Cache policy settings
+INSERT INTO `system_settings` (`setting_key`, `setting_value`) VALUES
+    ('cache_mode', 'instant_unlock'),
+    ('cache_ttl_hours', '0')
+ON DUPLICATE KEY UPDATE `setting_key` = `setting_key`;
+
 -- Clean up old keys if they exist (replaced by worker_mode)
 DELETE FROM `system_settings` WHERE `setting_key` = 'worker_enabled';
