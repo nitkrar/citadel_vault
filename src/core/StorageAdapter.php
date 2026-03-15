@@ -189,6 +189,12 @@ interface StorageAdapter {
     function getSystemSettings(): array;
 
     /**
+     * Get all system settings with metadata (type, category, description, options).
+     * @return array Associative array of setting_key => { value, type, category, description, options }
+     */
+    function getSystemSettingsEnriched(): array;
+
+    /**
      * Set a system setting (upsert).
      * @param string   $key    Setting key
      * @param string   $value  Setting value
