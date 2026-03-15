@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import api from '../api/client';
-import { Settings, Save, UserPlus, ShieldCheck, KeyRound, Clock, Gauge, Database } from 'lucide-react';
+import { Settings, Save, UserPlus, ShieldCheck, KeyRound, Clock, Gauge, Database, Plug } from 'lucide-react';
 import Section from '../components/Section';
 
 const CATEGORY_META = {
@@ -8,12 +8,13 @@ const CATEGORY_META = {
   security:      { title: 'Security',        icon: ShieldCheck },
   vault:         { title: 'Vault',           icon: KeyRound },
   pricing:       { title: 'Pricing',         icon: Clock },
+  integrations:  { title: 'Integrations',    icon: Plug },
   performance:   { title: 'Performance',     icon: Gauge },
   cache:         { title: 'Cache & Storage', icon: Database },
   general:       { title: 'General',         icon: Settings },
 };
 
-const CATEGORY_ORDER = ['registration', 'security', 'vault', 'pricing', 'cache', 'performance', 'general'];
+const CATEGORY_ORDER = ['registration', 'security', 'vault', 'pricing', 'integrations', 'cache', 'performance', 'general'];
 
 function SettingInput({ settingKey, setting, value, onChange }) {
   const { description, options, type } = setting;
@@ -152,7 +153,10 @@ export default function SettingsPage() {
   if (loading) return <div className="page-spinner"><div className="spinner" /></div>;
 
   const hasChanges = Object.keys(changes).length > 0;
-  const sortedCategories = CATEGORY_ORDER.filter(c => grouped[c]);
+  // Show known categories in order, then any unknown categories at the end
+  const knownCategories = CATEGORY_ORDER.filter(c => grouped[c]);
+  const unknownCategories = Object.keys(grouped).filter(c => !CATEGORY_ORDER.includes(c));
+  const sortedCategories = [...knownCategories, ...unknownCategories];
 
   return (
     <div className="page-container">
@@ -182,7 +186,7 @@ export default function SettingsPage() {
           );
         })}
 
-        <div className="form-actions">
+        <div className="form-actions" style={{ paddingBottom: 'var(--space-xl, 32px)' }}>
           <button type="submit" className="btn btn-primary" disabled={saving || !hasChanges}>
             <Save size={16} /> {saving ? 'Saving...' : hasChanges ? 'Save Changes' : 'No Changes'}
           </button>
