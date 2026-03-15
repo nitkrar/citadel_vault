@@ -12,7 +12,7 @@ import useTemplates from '../hooks/useTemplates';
 import ImportModal from '../components/ImportModal';
 import {
   Plus, Edit2, Trash2, Search, Eye, EyeOff, Copy, Check, Lock,
-  KeyRound, RefreshCw, AlertTriangle, Undo2, X, ChevronDown, Upload,
+  KeyRound, AlertTriangle, Undo2, X, ChevronDown, Upload,
   Landmark, Briefcase, FileText, Shield, Layers,
 } from 'lucide-react';
 
@@ -75,12 +75,6 @@ function InlineNumberField({ label, value, currency, isEditing, editValue, savin
   );
 }
 
-function generatePassword(len = 20) {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+-=';
-  const arr = new Uint32Array(len);
-  crypto.getRandomValues(arr);
-  return Array.from(arr, (v) => chars[v % chars.length]).join('');
-}
 
 export default function VaultPage() {
   const { isUnlocked, encrypt, decrypt } = useEncryption();
@@ -112,6 +106,9 @@ export default function VaultPage() {
   const [formTemplateId, setFormTemplateId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
+
+  // Secret field visibility toggles
+  const [visibleSecrets, setVisibleSecrets] = useState({});
 
   // Post-save prompt for accounts (link/create assets)
   const [postSaveAccount, setPostSaveAccount] = useState(null); // entry object after save
@@ -655,16 +652,15 @@ export default function VaultPage() {
     }
 
     if (field.type === 'secret') {
+      const isVisible = visibleSecrets[field.key];
       return (
         <div className="flex gap-1">
-          <input className="form-control" type="text" value={form[field.key] || ''}
+          <input className="form-control" type={isVisible ? 'text' : 'password'} value={form[field.key] || ''}
             onChange={e => setForm(f => ({ ...f, [field.key]: e.target.value }))} style={{ flex: 1 }} />
-          {field.key === 'password' && (
-            <button type="button" className="btn btn-secondary btn-icon"
-              onClick={() => setForm(f => ({ ...f, [field.key]: generatePassword() }))} title="Generate">
-              <RefreshCw size={16} />
-            </button>
-          )}
+          <button type="button" className="btn btn-secondary btn-icon"
+            onClick={() => setVisibleSecrets(v => ({ ...v, [field.key]: !v[field.key] }))} title={isVisible ? 'Hide' : 'Show'}>
+            {isVisible ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
         </div>
       );
     }
@@ -859,7 +855,7 @@ export default function VaultPage() {
       )}
 
       {/* Add Modal */}
-      <Modal isOpen={showAdd} onClose={() => { setShowAdd(false); setInlineCashBalance(''); }} title={`Add ${TYPE_META[formType]?.label?.replace(/s$/, '') || 'Entry'}`}>
+      <Modal isOpen={showAdd} onClose={() => { setShowAdd(false); setInlineCashBalance(''); setVisibleSecrets({}); }} title={`Add ${TYPE_META[formType]?.label?.replace(/s$/, '') || 'Entry'}`}>
         <form onSubmit={handleCreate}>
           {formError && <div className="alert alert-danger mb-3">{formError}</div>}
           {renderTypeAndTemplateSelectors()}
@@ -893,7 +889,7 @@ export default function VaultPage() {
       </Modal>
 
       {/* Edit Modal */}
-      <Modal isOpen={!!editEntry} onClose={() => setEditEntry(null)} title="Edit Entry">
+      <Modal isOpen={!!editEntry} onClose={() => { setEditEntry(null); setVisibleSecrets({}); }} title="Edit Entry">
         <form onSubmit={handleUpdate}>
           {formError && <div className="alert alert-danger mb-3">{formError}</div>}
           {editEntry?.entry_type === 'account' && (
