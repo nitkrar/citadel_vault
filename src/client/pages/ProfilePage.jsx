@@ -1,5 +1,5 @@
-import { useState, Fragment } from 'react';
-import { User, Check, AlertTriangle, Edit2, Keyboard, Send, Copy, UserPlus, DollarSign, RefreshCw, KeyRound } from 'lucide-react';
+import { useState, useEffect, Fragment } from 'react';
+import { User, Check, AlertTriangle, Edit2, Keyboard, Send, Copy, UserPlus, DollarSign, RefreshCw, KeyRound, Clock } from 'lucide-react';
 import Section from '../components/Section';
 import api from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -129,6 +129,19 @@ export default function ProfilePage() {
   const [inviteSending, setInviteSending] = useState(false);
   const [inviteResult, setInviteResult] = useState(null); // { type, text, url? }
   const [copied, setCopied] = useState(false);
+  const [inviteHistory, setInviteHistory] = useState([]);
+  const [inviteHistoryLoading, setInviteHistoryLoading] = useState(false);
+
+  const loadInviteHistory = async () => {
+    setInviteHistoryLoading(true);
+    try {
+      const res = await api.get('/invitations.php?action=list');
+      setInviteHistory(res.data?.data || res.data || []);
+    } catch { /* silent */ }
+    setInviteHistoryLoading(false);
+  };
+
+  useEffect(() => { loadInviteHistory(); }, []);
 
   const handleSendInvite = async (e) => {
     e.preventDefault();
@@ -147,6 +160,7 @@ export default function ProfilePage() {
         reused: data.reused,
       });
       if (!data.reused) setInviteEmail('');
+      loadInviteHistory();
     } catch (err) {
       setInviteResult({ type: 'error', text: err.response?.data?.error || 'Failed to create invite.' });
     } finally {
@@ -244,6 +258,44 @@ export default function ProfilePage() {
             <Send size={14} /> {inviteSending ? 'Sending...' : 'Send Invite'}
           </button>
         </form>
+
+        {/* Invite History */}
+        {inviteHistoryLoading ? (
+          <div style={{ marginTop: 16 }}><div className="spinner" /></div>
+        ) : inviteHistory.length > 0 && (
+          <div style={{ marginTop: 20 }}>
+            <h4 style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Clock size={14} /> Invite History
+            </h4>
+            <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}>
+              <table style={{ width: '100%', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: 'var(--color-bg-secondary, #f8fafc)', position: 'sticky', top: 0 }}>
+                    <th style={{ padding: '6px 10px', textAlign: 'left' }}>Email</th>
+                    <th style={{ padding: '6px 10px', textAlign: 'left' }}>Status</th>
+                    <th style={{ padding: '6px 10px', textAlign: 'left' }}>Sent</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {inviteHistory.map(inv => (
+                    <tr key={inv.id} style={{ borderTop: '1px solid var(--color-border)' }}>
+                      <td style={{ padding: '6px 10px' }}>{inv.email}</td>
+                      <td style={{ padding: '6px 10px' }}>
+                        <span className={`badge ${inv.status === 'used' ? 'badge-success' : inv.status === 'expired' ? 'badge-danger' : 'badge-warning'}`}
+                          style={{ fontSize: 11 }}>
+                          {inv.status === 'used' ? 'Accepted' : inv.status === 'expired' ? 'Expired' : 'Pending'}
+                        </span>
+                      </td>
+                      <td style={{ padding: '6px 10px', color: 'var(--color-text-muted)' }}>
+                        {new Date(inv.created_at).toLocaleDateString()}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </Section>
 
       {/* Display Currency */}
