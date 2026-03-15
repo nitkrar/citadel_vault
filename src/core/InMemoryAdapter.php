@@ -285,6 +285,14 @@ class InMemoryAdapter implements StorageAdapter {
     }
 
     public function createSnapshot(int $userId, string $date, string $encryptedData): int {
+        // One snapshot per user per day — remove existing
+        foreach ($this->snapshots as $sid => $s) {
+            if ($s['user_id'] === $userId && $s['snapshot_date'] === $date) {
+                $this->snapshotEntries = array_filter($this->snapshotEntries, fn($e) => $e['snapshot_id'] !== $sid);
+                unset($this->snapshots[$sid]);
+            }
+        }
+
         $id = ++$this->snapshotSeq;
         $now = date('Y-m-d H:i:s');
         $this->snapshots[$id] = [
@@ -301,6 +309,14 @@ class InMemoryAdapter implements StorageAdapter {
     private int $snapshotEntrySeq = 0;
 
     public function createSnapshotWithEntries(int $userId, string $date, string $encryptedMeta, array $entries): int {
+        // One snapshot per user per day — remove existing
+        foreach ($this->snapshots as $sid => $s) {
+            if ($s['user_id'] === $userId && $s['snapshot_date'] === $date) {
+                $this->snapshotEntries = array_filter($this->snapshotEntries, fn($e) => $e['snapshot_id'] !== $sid);
+                unset($this->snapshots[$sid]);
+            }
+        }
+
         $id = ++$this->snapshotSeq;
         $now = date('Y-m-d H:i:s');
         $this->snapshots[$id] = [
@@ -453,6 +469,25 @@ class InMemoryAdapter implements StorageAdapter {
             }
         }
         $this->templates[$templateId]['updated_at'] = date('Y-m-d H:i:s');
+        return true;
+    }
+
+    // =========================================================================
+    // System Settings (global KV store)
+    // =========================================================================
+
+    private array $systemSettings = [];
+
+    public function getSystemSetting(string $key): ?string {
+        return $this->systemSettings[$key] ?? null;
+    }
+
+    public function getSystemSettings(): array {
+        return $this->systemSettings;
+    }
+
+    public function setSystemSetting(string $key, string $value, ?int $userId = null): bool {
+        $this->systemSettings[$key] = $value;
         return true;
     }
 

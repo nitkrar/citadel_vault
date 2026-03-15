@@ -175,6 +175,14 @@ INSERT INTO `entry_templates` (`template_key`, `owner_id`, `name`, `icon`, `coun
     JSON_OBJECT('key', 'currency',           'label', 'Currency',         'type', 'text',         'required', false),
     JSON_OBJECT('key', 'notes',              'label', 'Notes',            'type', 'textarea',     'required', false)
 )),
+('asset', NULL, 'Cash', 'wallet', NULL, 'cash', JSON_ARRAY(
+    JSON_OBJECT('key', 'title',              'label', 'Description',       'type', 'text',         'required', true),
+    JSON_OBJECT('key', 'linked_account_id',  'label', 'Linked Account',   'type', 'account_link', 'required', false),
+    JSON_OBJECT('key', 'currency',           'label', 'Currency',          'type', 'text',         'required', false),
+    JSON_OBJECT('key', 'value',              'label', 'Amount',            'type', 'number',       'required', false, 'portfolio_role', 'value'),
+    JSON_OBJECT('key', 'location',           'label', 'Location / Holder', 'type', 'text',         'required', false),
+    JSON_OBJECT('key', 'notes',              'label', 'Notes',             'type', 'textarea',     'required', false)
+)),
 ('asset', NULL, 'Cash Equivalent', 'banknote', NULL, 'cash_equivalent', JSON_ARRAY(
     JSON_OBJECT('key', 'title',              'label', 'Name',            'type', 'text',         'required', true),
     JSON_OBJECT('key', 'linked_account_id',  'label', 'Linked Account',  'type', 'account_link', 'required', false),

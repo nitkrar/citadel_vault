@@ -20,6 +20,7 @@ DROP TABLE IF EXISTS `audit_log`;
 DROP TABLE IF EXISTS `shared_items`;
 DROP TABLE IF EXISTS `vault_entries`;
 DROP TABLE IF EXISTS `entry_templates`;
+DROP TABLE IF EXISTS `system_settings`;
 DROP TABLE IF EXISTS `user_preferences`;
 DROP TABLE IF EXISTS `user_vault_keys`;
 DROP TABLE IF EXISTS `webauthn_challenges`;
@@ -89,6 +90,19 @@ CREATE TABLE `user_preferences` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_user_pref` (`user_id`, `setting_key`),
     CONSTRAINT `fk_prefs_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================================================
+-- 3b. SYSTEM SETTINGS (global KV store, admin-only write)
+-- =============================================================================
+CREATE TABLE `system_settings` (
+    `setting_key`   VARCHAR(100)  NOT NULL,
+    `setting_value` TEXT          NOT NULL,
+    `created_by`    INT UNSIGNED      NULL,
+    `updated_by`    INT UNSIGNED      NULL,
+    `created_at`    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`setting_key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================================================
@@ -170,7 +184,7 @@ CREATE TABLE `portfolio_snapshots` (
     `snapshot_time`     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `encrypted_data`    MEDIUMTEXT NOT NULL,
     PRIMARY KEY (`id`),
-    KEY `idx_snapshots_user_date` (`user_id`, `snapshot_date`),
+    UNIQUE KEY `uk_snapshots_user_date` (`user_id`, `snapshot_date`),
     CONSTRAINT `fk_snapshots_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

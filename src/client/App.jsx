@@ -21,6 +21,7 @@ import SecurityPage from './pages/SecurityPage';
 import ProfilePage from './pages/ProfilePage';
 import TemplatesPage from './pages/TemplatesPage';
 import AdminPage from './pages/AdminPage';
+import SettingsPage from './pages/SettingsPage';
 import HomePage from './pages/HomePage';
 import HelpPage from './pages/HelpPage';
 import DevGuidePage from './pages/DevGuidePage';
@@ -173,6 +174,7 @@ function AppRoutes() {
           <Route path="security" element={<SecurityPage />} />
           <Route path="profile" element={<ProfilePage />} />
           <Route path="admin" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
+          <Route path="settings" element={<ProtectedRoute adminOnly><SettingsPage /></ProtectedRoute>} />
         </Route>
 
         {/* Catch-all */}

@@ -336,6 +336,12 @@ class MariaDbAdapter implements StorageAdapter {
     }
 
     public function createSnapshot(int $userId, string $date, string $encryptedData): int {
+        // One snapshot per user per day — delete existing then insert
+        $stmt = $this->db->prepare(
+            'DELETE FROM portfolio_snapshots WHERE user_id = ? AND snapshot_date = ?'
+        );
+        $stmt->execute([$userId, $date]);
+
         $stmt = $this->db->prepare(
             'INSERT INTO portfolio_snapshots (user_id, snapshot_date, encrypted_data)
              VALUES (?, ?, ?)'
@@ -347,6 +353,12 @@ class MariaDbAdapter implements StorageAdapter {
     public function createSnapshotWithEntries(int $userId, string $date, string $encryptedMeta, array $entries): int {
         $this->db->beginTransaction();
         try {
+            // One snapshot per user per day — delete existing (entries cascade)
+            $stmt = $this->db->prepare(
+                'DELETE FROM portfolio_snapshots WHERE user_id = ? AND snapshot_date = ?'
+            );
+            $stmt->execute([$userId, $date]);
+
             // Insert header row
             $stmt = $this->db->prepare(
                 'INSERT INTO portfolio_snapshots (user_id, snapshot_date, encrypted_data)
@@ -550,6 +562,40 @@ class MariaDbAdapter implements StorageAdapter {
         $stmt = $this->db->prepare($sql);
         $stmt->execute($params);
         return $stmt->rowCount() > 0;
+    }
+
+    // =========================================================================
+    // System Settings (global KV store)
+    // =========================================================================
+
+    public function getSystemSetting(string $key): ?string {
+        $stmt = $this->db->prepare(
+            'SELECT setting_value FROM system_settings WHERE setting_key = ?'
+        );
+        $stmt->execute([$key]);
+        $row = $stmt->fetch();
+        return $row ? $row['setting_value'] : null;
+    }
+
+    public function getSystemSettings(): array {
+        $stmt = $this->db->query('SELECT setting_key, setting_value FROM system_settings');
+        $rows = $stmt->fetchAll();
+
+        $settings = [];
+        foreach ($rows as $row) {
+            $settings[$row['setting_key']] = $row['setting_value'];
+        }
+        return $settings;
+    }
+
+    public function setSystemSetting(string $key, string $value, ?int $userId = null): bool {
+        $stmt = $this->db->prepare(
+            'INSERT INTO system_settings (setting_key, setting_value, created_by, updated_by)
+             VALUES (?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_by = VALUES(updated_by)'
+        );
+        $stmt->execute([$key, $value, $userId, $userId]);
+        return true;
     }
 
     // =========================================================================
