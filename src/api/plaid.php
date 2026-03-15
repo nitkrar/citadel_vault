@@ -52,7 +52,7 @@ function plaidRequest(string $endpoint, array $body): array {
     $response = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $error = curl_error($ch);
-    curl_close($ch);
+    // curl_close() removed — deprecated since PHP 8.0, no-op since 8.5
 
     if ($response === false) {
         throw new RuntimeException("Plaid API error: $error");
