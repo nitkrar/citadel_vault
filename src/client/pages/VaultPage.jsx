@@ -12,11 +12,12 @@ import useCountries from '../hooks/useCountries';
 import useCurrencies from '../hooks/useCurrencies';
 import useTemplates from '../hooks/useTemplates';
 import useAppConfig from '../hooks/useAppConfig';
+import useExchanges from '../hooks/useExchanges';
 import ImportModal from '../components/ImportModal';
 import {
   Plus, Edit2, Trash2, Search, Eye, EyeOff, Copy, Check, Lock,
   KeyRound, AlertTriangle, Undo2, X, ChevronDown, Upload,
-  Landmark, Briefcase, FileText, Shield, Layers,
+  Landmark, Briefcase, FileText, Shield, Layers, RefreshCw,
 } from 'lucide-react';
 
 const TYPE_META = {
@@ -92,6 +93,12 @@ export default function VaultPage() {
   const { currencies } = useCurrencies();
   const { templates } = useTemplates();
   const { config } = useAppConfig();
+  const { exchanges } = useExchanges();
+
+  // Ticker verification state
+  const [tickerVerified, setTickerVerified] = useState(false);
+  const [tickerResult, setTickerResult] = useState(null);
+  const [tickerVerifying, setTickerVerifying] = useState(false);
 
   // Filters
   const [searchParams] = useSearchParams();
@@ -278,6 +285,35 @@ export default function VaultPage() {
       if (!form.country) { setFormError('Country is required.'); return; }
     }
 
+    // Auto-verify ticker if stock/crypto and not yet verified
+    const subtype = getCurrentSubtype();
+    const tickerField = subtype === 'crypto' ? 'coin' : 'ticker';
+    if ((subtype === 'stock' || subtype === 'crypto') && form[tickerField]?.trim() && !tickerVerified) {
+      setTickerVerifying(true);
+      try {
+        const { data: resp } = await api.post('/prices.php', { tickers: [form[tickerField].trim()] });
+        const result = apiData({ data: resp });
+        const priceData = result?.prices?.[form[tickerField].trim()];
+        const errorMsg = result?.errors?.[form[tickerField].trim()];
+        if (!priceData) {
+          setTickerResult({ success: false, error: errorMsg || 'Ticker not found' });
+          setTickerVerifying(false);
+          setFormError('Ticker verification failed. Please check the ticker symbol.');
+          return;
+        }
+        setTickerResult({ success: true, ...priceData });
+        setTickerVerified(true);
+        const priceKey = subtype === 'crypto' ? 'price_per_unit' : 'price_per_share';
+        setForm(f => ({ ...f, [priceKey]: String(priceData.price), currency: priceData.currency }));
+      } catch {
+        setTickerVerifying(false);
+        setFormError('Ticker verification failed. Try again or remove the ticker.');
+        return;
+      } finally {
+        setTickerVerifying(false);
+      }
+    }
+
     setSaving(true);
     try {
       const blob = await encrypt(form);
@@ -322,6 +358,35 @@ export default function VaultPage() {
     if (formRequiresCurrency()) {
       if (!form.currency) { setFormError('Currency is required.'); return; }
       if (!form.country) { setFormError('Country is required.'); return; }
+    }
+
+    // Auto-verify ticker if stock/crypto and not yet verified
+    const subtype = getCurrentSubtype();
+    const tickerField = subtype === 'crypto' ? 'coin' : 'ticker';
+    if ((subtype === 'stock' || subtype === 'crypto') && form[tickerField]?.trim() && !tickerVerified) {
+      setTickerVerifying(true);
+      try {
+        const { data: resp } = await api.post('/prices.php', { tickers: [form[tickerField].trim()] });
+        const result = apiData({ data: resp });
+        const priceData = result?.prices?.[form[tickerField].trim()];
+        const errorMsg = result?.errors?.[form[tickerField].trim()];
+        if (!priceData) {
+          setTickerResult({ success: false, error: errorMsg || 'Ticker not found' });
+          setTickerVerifying(false);
+          setFormError('Ticker verification failed. Please check the ticker symbol.');
+          return;
+        }
+        setTickerResult({ success: true, ...priceData });
+        setTickerVerified(true);
+        const priceKey = subtype === 'crypto' ? 'price_per_unit' : 'price_per_share';
+        setForm(f => ({ ...f, [priceKey]: String(priceData.price), currency: priceData.currency }));
+      } catch {
+        setTickerVerifying(false);
+        setFormError('Ticker verification failed. Try again or remove the ticker.');
+        return;
+      } finally {
+        setTickerVerifying(false);
+      }
     }
 
     setSaving(true);
@@ -533,6 +598,8 @@ export default function VaultPage() {
   // ── Handle template selection (with country pre-population) ────────
   const handleTemplateChange = (templateId) => {
     setFormTemplateId(templateId);
+    setTickerVerified(false);
+    setTickerResult(null);
     const newForm = { title: form.title || '' };
     if (templateId) {
       const tpl = templates.find(t => t.id === templateId);
@@ -630,6 +697,47 @@ export default function VaultPage() {
     ));
   };
 
+  // ── Ticker verification ──────────────────────────────────────────
+  const verifyTicker = async (tickerValue) => {
+    if (!tickerValue?.trim()) return;
+    setTickerVerifying(true);
+    setTickerResult(null);
+    try {
+      const { data: resp } = await api.post('/prices.php', { tickers: [tickerValue.trim()] });
+      const result = apiData({ data: resp });
+      const priceData = result?.prices?.[tickerValue.trim()];
+      const errorMsg = result?.errors?.[tickerValue.trim()];
+      if (priceData) {
+        setTickerResult({ success: true, ...priceData });
+        setTickerVerified(true);
+        // Auto-fill price and currency in form
+        const currentTpl = formTemplateId ? templates.find(t => t.id === formTemplateId) : null;
+        const subtype = currentTpl?.subtype;
+        const priceKey = subtype === 'crypto' ? 'price_per_unit' : 'price_per_share';
+        setForm(f => ({
+          ...f,
+          [priceKey]: String(priceData.price),
+          currency: priceData.currency,
+        }));
+      } else {
+        setTickerResult({ success: false, error: errorMsg || 'Ticker not found' });
+      }
+    } catch (err) {
+      setTickerResult({ success: false, error: err.response?.data?.error || 'Verification failed' });
+    } finally {
+      setTickerVerifying(false);
+    }
+  };
+
+  // Get current template subtype for ticker-related logic
+  const getCurrentSubtype = () => {
+    if (formTemplateId) {
+      const tpl = templates.find(t => t.id === formTemplateId);
+      return tpl?.subtype || null;
+    }
+    return null;
+  };
+
   // ── Render individual field input ──────────────────────────────────
   const renderFieldInput = (field) => {
     // Country selector
@@ -710,6 +818,61 @@ export default function VaultPage() {
       );
     }
 
+    // Ticker/coin field with verify button and exchange hints
+    if (field.key === 'ticker' || field.key === 'coin') {
+      const countryExchanges = form.country
+        ? exchanges.filter(ex => ex.country_code === form.country)
+        : [];
+      return (
+        <div>
+          <div className="flex gap-1">
+            <input
+              className="form-control"
+              type="text"
+              value={form[field.key] || ''}
+              onChange={e => {
+                setForm(f => ({ ...f, [field.key]: e.target.value }));
+                setTickerVerified(false);
+                setTickerResult(null);
+              }}
+              placeholder={field.key === 'coin' ? 'BTC-USD' : 'AAPL'}
+              style={{ flex: 1 }}
+            />
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={tickerVerifying || !form[field.key]?.trim()}
+              onClick={() => verifyTicker(form[field.key])}
+              style={{ whiteSpace: 'nowrap' }}
+            >
+              {tickerVerifying ? <><RefreshCw size={13} className="spin" /> Verifying...</> : 'Verify'}
+            </button>
+          </div>
+          {countryExchanges.length > 0 && (
+            <div className="text-muted" style={{ fontSize: 11, marginTop: 4 }}>
+              Exchanges: {countryExchanges.map(ex =>
+                ex.suffix ? `.${ex.suffix} (${ex.name})` : ex.name
+              ).join(', ')}
+            </div>
+          )}
+          {tickerResult && (
+            <div style={{
+              marginTop: 6, padding: '6px 10px', borderRadius: 6, fontSize: 12,
+              background: tickerResult.success ? 'var(--color-success-bg, #dcfce7)' : 'var(--color-danger-bg, #fee2e2)',
+              color: tickerResult.success ? 'var(--color-success, #16a34a)' : 'var(--color-danger, #dc2626)',
+              border: `1px solid ${tickerResult.success ? 'var(--color-success, #16a34a)' : 'var(--color-danger, #dc2626)'}`,
+              opacity: 0.9,
+            }}>
+              {tickerResult.success
+                ? <><Check size={12} style={{ verticalAlign: -2, marginRight: 4 }} />{tickerResult.name} — {tickerResult.currency} {tickerResult.price} ({tickerResult.exchange})</>
+                : tickerResult.error
+              }
+            </div>
+          )}
+        </div>
+      );
+    }
+
     return (
       <input className="form-control" type="text" value={form[field.key] || ''}
         onChange={e => setForm(f => ({ ...f, [field.key]: e.target.value }))} />
@@ -737,6 +900,8 @@ export default function VaultPage() {
           const tpl = templates.find(t => t.template_key === type && !t.owner_id && !t.country_code && !t.subtype);
           setFormTemplateId(tpl?.id || null);
           setForm({ title: form.title || '' });
+          setTickerVerified(false);
+          setTickerResult(null);
         }}>
           {VALID_ENTRY_TYPES.map(t => <option key={t} value={t}>{TYPE_META[t]?.label || t}</option>)}
         </select>
