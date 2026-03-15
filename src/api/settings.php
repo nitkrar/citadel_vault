@@ -21,7 +21,7 @@ $method = $_SERVER['REQUEST_METHOD'];
 $storage = Storage::adapter();
 
 // Allowlist of valid setting keys
-$allowedKeys = ['ticker_price_ttl', 'default_vault_tab', 'auth_check_interval', 'self_registration', 'require_email_verification', 'invite_expiry_days', 'lockout_tier3_duration'];
+$allowedKeys = ['ticker_price_ttl', 'default_vault_tab', 'auth_check_interval', 'self_registration', 'require_email_verification', 'invite_expiry_days', 'lockout_tier3_duration', 'worker_enabled', 'worker_threshold'];
 
 // ---------------------------------------------------------------------------
 // GET — All system settings as key-value object
