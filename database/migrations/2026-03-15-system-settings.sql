@@ -17,5 +17,8 @@ CREATE TABLE IF NOT EXISTS `system_settings` (
 -- Seed default settings
 INSERT INTO `system_settings` (`setting_key`, `setting_value`)
 VALUES ('ticker_price_ttl', '86400'),
-       ('default_vault_tab', 'account')
+       ('default_vault_tab', 'account'),
+       ('auth_check_interval', '300'),
+       ('self_registration', 'false'),
+       ('require_email_verification', 'true')
 ON DUPLICATE KEY UPDATE `setting_value` = `setting_value`;

@@ -17,13 +17,24 @@ $method = $_SERVER['REQUEST_METHOD'];
 $action = $_GET['action'] ?? '';
 $db = Database::getConnection();
 
+// Load registration settings from system_settings, falling back to .env constants
+$selfRegistration = SELF_REGISTRATION;
+$requireEmailVerification = REQUIRE_EMAIL_VERIFICATION;
+try {
+    $storage = Storage::adapter();
+    $sr = $storage->getSystemSetting('self_registration');
+    $ev = $storage->getSystemSetting('require_email_verification');
+    if ($sr !== null) $selfRegistration = filter_var($sr, FILTER_VALIDATE_BOOLEAN);
+    if ($ev !== null) $requireEmailVerification = filter_var($ev, FILTER_VALIDATE_BOOLEAN);
+} catch (Exception $e) {}
+
 // ---------------------------------------------------------------------------
 // GET ?action=registration-status — Public: check if self-registration is open
 // ---------------------------------------------------------------------------
 if ($method === 'GET' && $action === 'registration-status') {
     Response::success([
-        'self_registration' => SELF_REGISTRATION,
-        'require_email_verification' => REQUIRE_EMAIL_VERIFICATION,
+        'self_registration' => $selfRegistration,
+        'require_email_verification' => $requireEmailVerification,
     ]);
 }
 
@@ -137,7 +148,7 @@ if ($method === 'POST' && $action === 'login') {
     }
 
     // Check email verification (DB migration resilience)
-    if (REQUIRE_EMAIL_VERIFICATION) {
+    if ($requireEmailVerification) {
         try {
             $stmt3 = $db->prepare("SELECT email_verified FROM users WHERE id = ?");
             $stmt3->execute([$user['id']]);
@@ -238,7 +249,7 @@ if ($method === 'POST' && $action === 'register') {
         if (strtolower(trim($email)) !== strtolower(trim($inviteRow['email']))) {
             Response::error('Email does not match the invite. You must register with: ' . $inviteRow['email'], 403);
         }
-    } elseif (!SELF_REGISTRATION) {
+    } elseif (!$selfRegistration) {
         Response::error('Self-registration is currently disabled. Access is by invitation only.', 403);
     }
 
@@ -269,10 +280,10 @@ if ($method === 'POST' && $action === 'register') {
     $hash = Auth::hashPassword($password);
 
     // Invited users are automatically email-verified (they clicked an invite link)
-    // Self-registered users need verification if REQUIRE_EMAIL_VERIFICATION is on
+    // Self-registered users need verification if require_email_verification is on
     $emailVerified = 1;
     $emailVerifyToken = null;
-    if (REQUIRE_EMAIL_VERIFICATION && !$inviteRow) {
+    if ($requireEmailVerification && !$inviteRow) {
         $emailVerified = 0;
         $emailVerifyToken = bin2hex(random_bytes(32));
     }
@@ -291,7 +302,7 @@ if ($method === 'POST' && $action === 'register') {
     }
 
     // If email verification is required and not coming from an invite, send verification email
-    if (REQUIRE_EMAIL_VERIFICATION && !$inviteRow) {
+    if ($requireEmailVerification && !$inviteRow) {
         $verifyUrl = (defined('APP_URL') ? APP_URL : WEBAUTHN_ORIGIN) . "/verify-email?token=" . $emailVerificationToken;
         $emailResult = ['success' => false];
         if (defined('SMTP_ENABLED') && SMTP_ENABLED) {
