@@ -23,6 +23,34 @@ class Auth {
     }
 
     /**
+     * Set the JWT as an httpOnly cookie (immune to XSS).
+     */
+    public static function setAuthCookie(string $token): void {
+        $secure = getenv('APP_ENV') !== 'development';
+        setcookie('pv_auth', $token, [
+            'expires'  => time() + JWT_EXPIRY,
+            'path'     => '/',
+            'httponly'  => true,
+            'secure'   => $secure,
+            'samesite' => 'Strict',
+        ]);
+    }
+
+    /**
+     * Clear the auth cookie.
+     */
+    public static function clearAuthCookie(): void {
+        $secure = getenv('APP_ENV') !== 'development';
+        setcookie('pv_auth', '', [
+            'expires'  => time() - 3600,
+            'path'     => '/',
+            'httponly'  => true,
+            'secure'   => $secure,
+            'samesite' => 'Strict',
+        ]);
+    }
+
+    /**
      * Validate a JWT token. Returns decoded payload or null.
      */
     public static function validateToken(string $token): ?array {
@@ -134,6 +162,12 @@ class Auth {
         if ($headers && preg_match('/Bearer\s(\S+)/', $headers, $matches)) {
             return $matches[1];
         }
+
+        // Fallback: httpOnly cookie (primary auth method for browser clients)
+        if (isset($_COOKIE['pv_auth'])) {
+            return $_COOKIE['pv_auth'];
+        }
+
         return null;
     }
 

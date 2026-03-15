@@ -6,20 +6,14 @@ const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
-  const [token, setToken] = useState(() => localStorage.getItem('pv_token'));
   const [loading, setLoading] = useState(true);
   const [mustChangePassword, setMustChangePassword] = useState(false);
   const [mustChangeVaultKey, setMustChangeVaultKey] = useState(false);
   const [adminActionMessage, setAdminActionMessage] = useState(null);
   const [preferences, setPreferences] = useState({});
 
-  // On mount, if we have a stored token, validate it and fetch user info
+  // On mount, check if we have a valid auth cookie by calling /me
   useEffect(() => {
-    if (!token) {
-      setLoading(false);
-      return;
-    }
-
     Promise.all([
       api.get('/auth.php?action=me'),
       api.get('/preferences.php'),
@@ -33,28 +27,17 @@ export function AuthProvider({ children }) {
         setPreferences(prefsRes.data?.data || prefsRes.data || {});
       })
       .catch(() => {
-        // Token is invalid or expired — clean up
-        localStorage.removeItem('pv_token');
-        setToken(null);
+        // No valid cookie or expired — user is not logged in
         setUser(null);
-        setMustChangePassword(false);
-        setMustChangeVaultKey(false);
-        setAdminActionMessage(null);
-        setPreferences({});
       })
       .finally(() => {
         setLoading(false);
       });
-  }, [token]);
+  }, []);
 
   const login = async (username, password) => {
-    // Clear any stale vault session from previous login
-    // No server-side data tokens in client-side encryption mode
-
     const res = await api.post('/auth.php?action=login', { username, password });
-    const { token: newToken, user: newUser } = res.data.data;
-    localStorage.setItem('pv_token', newToken);
-    setToken(newToken);
+    const { user: newUser } = res.data.data;
     setUser(newUser);
     setMustChangePassword(!!newUser?.must_change_password);
     setMustChangeVaultKey(!!newUser?.must_change_vault_key);
@@ -63,9 +46,7 @@ export function AuthProvider({ children }) {
   };
 
   const loginWithToken = (data) => {
-    const { token: newToken, user: newUser } = data;
-    localStorage.setItem('pv_token', newToken);
-    setToken(newToken);
+    const { user: newUser } = data;
     setUser(newUser);
     setMustChangePassword(!!newUser?.must_change_password);
     setMustChangeVaultKey(!!newUser?.must_change_vault_key);
@@ -73,7 +54,6 @@ export function AuthProvider({ children }) {
   };
 
   const loginWithPasskey = async () => {
-    // No server-side data tokens in client-side encryption mode
     const result = await authenticateWithPasskey(api);
     loginWithToken(result);
     return result;
@@ -85,27 +65,23 @@ export function AuthProvider({ children }) {
       email,
       password,
     });
-    const { token: newToken, user: newUser } = res.data.data;
-    localStorage.setItem('pv_token', newToken);
-    setToken(newToken);
+    const { user: newUser } = res.data.data;
     setUser(newUser);
     return res.data.data;
   };
 
   const logout = () => {
-    localStorage.removeItem('pv_token');
-    // No server-side data tokens in client-side encryption mode
-    // Clear all form drafts
+    // Clear form drafts from localStorage
     Object.keys(localStorage).forEach(key => {
       if (key.startsWith('pv_draft_')) localStorage.removeItem(key);
     });
-    // Clear HttpOnly cookie via server
-    api.post('/encryption.php?action=lock').catch(() => {});
-    setToken(null);
+    // Clear auth cookie via server
+    api.post('/auth.php?action=logout').catch(() => {});
     setUser(null);
     setMustChangePassword(false);
     setMustChangeVaultKey(false);
     setAdminActionMessage(null);
+    setPreferences({});
   };
 
   const clearMustChangePassword = () => {
@@ -137,13 +113,13 @@ export function AuthProvider({ children }) {
 
   const value = {
     user,
-    token,
     loading,
     login,
     loginWithToken,
     loginWithPasskey,
     logout,
     register,
+    isAuthenticated: !!user,
     isSiteAdmin: user?.role === 'admin',
     isAdmin: user?.role === 'admin',
     mustChangePassword,

@@ -55,11 +55,7 @@ export default function ForgotPasswordPage() {
 
       const data = res.data?.data || res.data;
 
-      // Store auth tokens
-      if (data.token) {
-        localStorage.setItem('pv_token', data.token);
-      }
-      // Show new recovery key
+      // Auth cookie set server-side — show new recovery key
       setNewRecoveryKey(data.recovery_key);
     } catch (err) {
       setError(
