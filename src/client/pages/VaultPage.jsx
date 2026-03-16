@@ -1209,6 +1209,7 @@ export default function VaultPage() {
                         <td><span className="text-muted" style={{ fontSize: 13 }}>{entry.updated_at ? new Date(entry.updated_at).toLocaleDateString() : '--'}</span></td>
                         <td>
                           <div className="td-actions">
+                            <button className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); openEdit(entry); }} title="Edit"><Edit2 size={14} /></button>
                             {decryptedCache[entry.id]?._plaid && (
                               <button className="btn btn-ghost btn-sm" title="Refresh balance" onClick={async e => {
                                 e.stopPropagation();
@@ -1219,9 +1220,7 @@ export default function VaultPage() {
                                 } catch { /* silent */ }
                               }}><RefreshCw size={14} /></button>
                             )}
-                            <button className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); setViewEntry(entry); }}><Eye size={14} /></button>
-                            <button className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); openEdit(entry); }}><Edit2 size={14} /></button>
-                            <button className="btn btn-ghost btn-sm text-danger" onClick={e => { e.stopPropagation(); handleDelete(entry); }}><Trash2 size={14} /></button>
+                            <button className="btn btn-ghost btn-sm text-danger" onClick={e => { e.stopPropagation(); handleDelete(entry); }} title="Delete"><Trash2 size={14} /></button>
                           </div>
                         </td>
                       </tr>
