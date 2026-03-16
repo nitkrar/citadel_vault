@@ -33,6 +33,7 @@ export default function usePlaidRefresh() {
       let updated = 0;
 
       for (const entry of entries) {
+        if (entry.entry_type !== 'asset') continue;
         const d = decryptedCache[entry.id];
         if (!d?._plaid?.account_id || !d?._plaid?.item_id) continue;
 
@@ -41,7 +42,6 @@ export default function usePlaidRefresh() {
 
         const acctBal = itemBal[d._plaid.account_id];
         if (acctBal) {
-          // Asset entry with balance
           const newData = {
             ...d,
             value: String(acctBal.balance),
