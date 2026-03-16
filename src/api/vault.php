@@ -65,8 +65,9 @@ if ($method === 'GET' && $action === 'deleted') {
         return [
             'id'             => (int)$row['id'],
             'entry_type'     => $row['entry_type'],
+            'template_id'    => $row['template_id'] ? (int)$row['template_id'] : null,
             'template'       => $template,
-            'data'           => $row['encrypted_data'],
+            'encrypted_data' => $row['encrypted_data'],
             'deleted_at'     => $row['deleted_at'],
             'created_at'     => $row['created_at'],
             'updated_at'     => $row['updated_at'],
@@ -86,12 +87,13 @@ if ($method === 'GET' && $id) {
     }
 
     Response::success([
-        'id'         => (int)$entry['id'],
-        'entry_type' => $entry['entry_type'],
-        'template'   => $entry['template'] ?? null,
-        'data'       => $entry['encrypted_data'],
-        'created_at' => $entry['created_at'],
-        'updated_at' => $entry['updated_at'],
+        'id'             => (int)$entry['id'],
+        'entry_type'     => $entry['entry_type'],
+        'template_id'    => $entry['template_id'] ? (int)$entry['template_id'] : null,
+        'template'       => $entry['template'] ?? null,
+        'encrypted_data' => $entry['encrypted_data'],
+        'created_at'     => $entry['created_at'],
+        'updated_at'     => $entry['updated_at'],
     ]);
 }
 
@@ -107,12 +109,13 @@ if ($method === 'GET') {
     $entries = $storage->getEntries($userId, $typeFilter);
     $result = array_map(function ($entry) {
         return [
-            'id'         => (int)$entry['id'],
-            'entry_type' => $entry['entry_type'],
-            'template'   => $entry['template'] ?? null,
-            'data'       => $entry['encrypted_data'],
-            'created_at' => $entry['created_at'],
-            'updated_at' => $entry['updated_at'],
+            'id'             => (int)$entry['id'],
+            'entry_type'     => $entry['entry_type'],
+            'template_id'    => $entry['template_id'] ? (int)$entry['template_id'] : null,
+            'template'       => $entry['template'] ?? null,
+            'encrypted_data' => $entry['encrypted_data'],
+            'created_at'     => $entry['created_at'],
+            'updated_at'     => $entry['updated_at'],
         ];
     }, $entries);
 
