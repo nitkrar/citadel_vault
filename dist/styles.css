@@ -310,7 +310,6 @@ img {
   flex: 1;
   overflow-y: auto;
   padding: var(--space-lg);
-  padding-bottom: calc(var(--space-xl) + 24px);
   background: var(--color-bg);
 }
 
@@ -1153,7 +1152,7 @@ html.dark .modal-overlay {
     width: 100%;
     padding: var(--space-sm);
     padding-top: calc(52px + env(safe-area-inset-top) + var(--space-sm));
-    padding-bottom: calc(var(--space-xl) + 24px + env(safe-area-inset-bottom));
+    padding-bottom: calc(var(--space-md) + env(safe-area-inset-bottom));
     padding-left: calc(var(--space-sm) + env(safe-area-inset-left));
     padding-right: calc(var(--space-sm) + env(safe-area-inset-right));
   }
