@@ -15,6 +15,7 @@ import useAppConfig from '../hooks/useAppConfig';
 import useExchanges from '../hooks/useExchanges';
 import ImportModal from '../components/ImportModal';
 import { usePlaidLink } from '../components/PlaidLink';
+import usePlaidRefresh from '../hooks/usePlaidRefresh';
 import {
   Plus, Edit2, Trash2, Search, Eye, EyeOff, Copy, Check, Lock,
   KeyRound, AlertTriangle, Undo2, X, ChevronDown, Upload,
@@ -152,7 +153,7 @@ export default function VaultPage() {
   const [plaidMsg, setPlaidMsg] = useState('');
   const [plaidLinkEntryId, setPlaidLinkEntryId] = useState(null); // entry id for "Link to Plaid" flow
   const [plaidAccountPicker, setPlaidAccountPicker] = useState(null); // { accounts, itemId, metadata, entryId }
-  const [plaidRefreshing, setPlaidRefreshing] = useState(false);
+  const { refreshBalances: plaidRefreshBalances, refreshing: plaidRefreshing } = usePlaidRefresh();
   const plaidEnabled = config?.plaid_enabled === 'true';
 
   // ── Plaid Connect Bank success handler ─────────────────────────────
@@ -1097,11 +1098,31 @@ export default function VaultPage() {
         <div className="flex items-center gap-2 flex-wrap">
           <button className="btn btn-ghost btn-sm" onClick={loadDeleted}><Undo2 size={14} /> Recently Deleted</button>
           <button className="btn btn-secondary btn-sm" onClick={() => setShowImport(true)}><Upload size={14} /> Import</button>
-          {plaidEnabled && (
-            <button className="btn btn-secondary" onClick={openPlaidConnect} disabled={plaidConnectLoading}>
-              <Landmark size={14} /> {plaidConnectLoading ? 'Connecting...' : 'Connect Bank'}
-            </button>
-          )}
+          {plaidEnabled && (() => {
+            const plaidItemIds = [...new Set(
+              entries.map(e => decryptedCache[e.id]?._plaid?.item_id).filter(Boolean)
+            )];
+            return (
+              <>
+                {plaidItemIds.length > 0 && (
+                  <button className="btn btn-secondary btn-sm" disabled={plaidRefreshing}
+                    onClick={async () => {
+                      try {
+                        const { updated } = await plaidRefreshBalances(plaidItemIds, entries, decryptedCache,
+                          (id, data) => setDecryptedCache(prev => ({ ...prev, [id]: data })));
+                        setPlaidMsg(`Refreshed ${updated} balance${updated !== 1 ? 's' : ''}`);
+                        setTimeout(() => setPlaidMsg(''), 3000);
+                      } catch { setPlaidMsg('Refresh failed'); setTimeout(() => setPlaidMsg(''), 5000); }
+                    }}>
+                    <RefreshCw size={14} className={plaidRefreshing ? 'spin' : ''} /> {plaidRefreshing ? 'Refreshing...' : 'Refresh Balances'}
+                  </button>
+                )}
+                <button className="btn btn-secondary" onClick={openPlaidConnect} disabled={plaidConnectLoading}>
+                  <Landmark size={14} /> {plaidConnectLoading ? 'Connecting...' : 'Connect Bank'}
+                </button>
+              </>
+            );
+          })()}
           <button className="btn btn-primary" onClick={() => openAdd(activeType !== 'all' ? activeType : 'password')}><Plus size={16} /> New Entry</button>
         </div>
       </div>
@@ -1188,6 +1209,16 @@ export default function VaultPage() {
                         <td><span className="text-muted" style={{ fontSize: 13 }}>{entry.updated_at ? new Date(entry.updated_at).toLocaleDateString() : '--'}</span></td>
                         <td>
                           <div className="td-actions">
+                            {decryptedCache[entry.id]?._plaid && (
+                              <button className="btn btn-ghost btn-sm" title="Refresh balance" onClick={async e => {
+                                e.stopPropagation();
+                                const d = decryptedCache[entry.id];
+                                try {
+                                  await plaidRefreshBalances([d._plaid.item_id], entries, decryptedCache,
+                                    (id, data) => setDecryptedCache(prev => ({ ...prev, [id]: data })));
+                                } catch { /* silent */ }
+                              }}><RefreshCw size={14} /></button>
+                            )}
                             <button className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); setViewEntry(entry); }}><Eye size={14} /></button>
                             <button className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); openEdit(entry); }}><Edit2 size={14} /></button>
                             <button className="btn btn-ghost btn-sm text-danger" onClick={e => { e.stopPropagation(); handleDelete(entry); }}><Trash2 size={14} /></button>
@@ -1518,41 +1549,15 @@ export default function VaultPage() {
                       style={{ fontSize: 11, padding: '2px 8px' }}
                       disabled={plaidRefreshing}
                       onClick={async () => {
-                        setPlaidRefreshing(true);
                         try {
-                          const { data: resp } = await api.post('/plaid.php?action=refresh', { item_ids: [d._plaid.item_id] });
-                          const result = apiData({ data: resp });
-                          const itemBalances = result?.balances?.[d._plaid.item_id];
-                          if (!itemBalances) { setPlaidRefreshing(false); return; }
-                          // Update linked cash assets with new balances
-                          const linked = entries.filter(e => {
-                            const ad = decryptedCache[e.id];
-                            return e.entry_type === 'asset' && ad && String(ad.linked_account_id) === String(viewEntry.id);
-                          });
-                          for (const asset of linked) {
-                            const ad = decryptedCache[asset.id];
-                            if (ad?._plaid?.account_id && itemBalances[ad._plaid.account_id]) {
-                              const newBal = itemBalances[ad._plaid.account_id].balance;
-                              const updated = { ...ad, value: String(newBal), _plaid: { ...ad._plaid, last_refreshed: new Date().toISOString() } };
-                              const blob = await encrypt(updated);
-                              await api.put(`/vault.php?id=${asset.id}`, { encrypted_data: blob });
-                              await entryStore.put({ ...asset, data: blob, updated_at: new Date().toISOString() });
-                              setDecryptedCache(prev => ({ ...prev, [asset.id]: updated }));
-                            }
-                          }
-                          // Update account entry's _plaid.last_refreshed
-                          const updatedAcct = { ...d, _plaid: { ...d._plaid, last_refreshed: new Date().toISOString() } };
-                          const acctBlob = await encrypt(updatedAcct);
-                          await api.put(`/vault.php?id=${viewEntry.id}`, { encrypted_data: acctBlob });
-                          await entryStore.put({ ...viewEntry, data: acctBlob, updated_at: new Date().toISOString() });
-                          setDecryptedCache(prev => ({ ...prev, [viewEntry.id]: updatedAcct }));
+                          await plaidRefreshBalances([d._plaid.item_id], entries, decryptedCache,
+                            (id, data) => setDecryptedCache(prev => ({ ...prev, [id]: data })));
                           setPlaidMsg('Balance refreshed');
                           setTimeout(() => setPlaidMsg(''), 3000);
-                        } catch (err) {
-                          setPlaidMsg(err.response?.data?.error || 'Refresh failed');
+                        } catch {
+                          setPlaidMsg('Refresh failed');
                           setTimeout(() => setPlaidMsg(''), 5000);
                         }
-                        setPlaidRefreshing(false);
                       }}
                     >
                       <RefreshCw size={12} className={plaidRefreshing ? 'spin' : ''} /> {plaidRefreshing ? 'Refreshing...' : 'Refresh'}

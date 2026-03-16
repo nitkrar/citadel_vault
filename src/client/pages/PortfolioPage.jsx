@@ -20,6 +20,7 @@ import api from '../api/client';
 import { fmtCurrency, MASKED, apiData } from '../lib/checks';
 import { buildRateMap, recalculateSnapshot } from '../lib/portfolioAggregator';
 import * as workerDispatcher from '../lib/workerDispatcher';
+import usePlaidRefresh from '../hooks/usePlaidRefresh';
 
 const CHART_COLORS = [
   '#3b82f6', '#22c55e', '#f59e0b', '#ef4444',
@@ -51,7 +52,7 @@ export default function PortfolioPage() {
   const [priceRefreshing, setPriceRefreshing] = useState(false);
   const [priceRefreshResult, setPriceRefreshResult] = useState(null);
   const [snapshotPrompt, setSnapshotPrompt] = useState(null); // { staleCount }
-  const [balanceRefreshing, setBalanceRefreshing] = useState(false);
+  // balanceRefreshing managed by usePlaidRefresh hook
   const [balanceRefreshResult, setBalanceRefreshResult] = useState(null);
   const { config } = useAppConfig();
   const plaidEnabled = config?.plaid_enabled === 'true';
@@ -64,54 +65,28 @@ export default function PortfolioPage() {
 
   const hasPlaidEntries = plaidEntries.length > 0;
 
-  // ── Refresh bank balances ─────────────────────────────────────────
+  // ── Refresh bank balances (shared hook) ──────────────────────────
+  const { refreshBalances: plaidRefreshBalances, refreshing: balanceRefreshingHook } = usePlaidRefresh();
+
   const handleRefreshBalances = async () => {
-    setBalanceRefreshing(true);
     setBalanceRefreshResult(null);
     try {
-      // Collect unique item_ids
       const itemIds = [...new Set(plaidEntries.map(e => e._plaid.item_id))];
       if (itemIds.length === 0) return;
 
-      const { data: resp } = await api.post('/plaid.php?action=refresh', { item_ids: itemIds });
-      const result = apiData({ data: resp });
-      const balances = result?.balances || {};
-
-      // Load all entries from store to find and update Plaid-linked entries
       const allStored = await entryStore.getAll();
-      let updated = 0;
-
-      for (const stored of allStored) {
-        if (stored.entry_type !== 'asset') continue;
-        let decrypted;
-        try { decrypted = await decrypt(stored.data); } catch { continue; }
-        if (!decrypted?._plaid?.account_id || !decrypted?._plaid?.item_id) continue;
-
-        const itemBalances = balances[decrypted._plaid.item_id];
-        if (!itemBalances) continue;
-        const acctBalance = itemBalances[decrypted._plaid.account_id];
-        if (!acctBalance) continue;
-
-        // Update value and last_refreshed
-        const updatedData = {
-          ...decrypted,
-          value: String(acctBalance.balance),
-          _plaid: { ...decrypted._plaid, last_refreshed: new Date().toISOString() },
-        };
-        const blob = await encrypt(updatedData);
-        await api.put(`/vault.php?id=${stored.id}`, { encrypted_data: blob });
-        await entryStore.put({ ...stored, data: blob, updated_at: new Date().toISOString() });
-        updated++;
+      const cache = {};
+      for (const s of allStored) {
+        try { cache[s.id] = await decrypt(s.data); } catch { /* skip */ }
       }
 
+      const { updated } = await plaidRefreshBalances(itemIds, allStored, cache);
       setBalanceRefreshResult(`Updated ${updated} balance${updated !== 1 ? 's' : ''}`);
       if (updated > 0) refetch();
       setTimeout(() => setBalanceRefreshResult(null), 5000);
-    } catch (err) {
+    } catch {
       setBalanceRefreshResult('Failed to refresh balances');
       setTimeout(() => setBalanceRefreshResult(null), 5000);
-    } finally {
-      setBalanceRefreshing(false);
     }
   };
 
@@ -269,8 +244,8 @@ export default function PortfolioPage() {
             </select>
           )}
           {plaidEnabled && hasPlaidEntries && (
-            <button className="btn btn-secondary" onClick={handleRefreshBalances} disabled={balanceRefreshing || isEmpty}>
-              <Link2 size={16} className={balanceRefreshing ? 'spin' : ''} /> {balanceRefreshing ? 'Refreshing...' : 'Refresh Balances'}
+            <button className="btn btn-secondary" onClick={handleRefreshBalances} disabled={balanceRefreshingHook || isEmpty}>
+              <Link2 size={16} className={balanceRefreshingHook ? 'spin' : ''} /> {balanceRefreshingHook ? 'Refreshing...' : 'Refresh Balances'}
             </button>
           )}
           <button className="btn btn-secondary" onClick={handleRefreshPrices} disabled={priceRefreshing || isEmpty}>
