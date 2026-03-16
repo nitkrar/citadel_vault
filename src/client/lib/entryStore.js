@@ -5,9 +5,32 @@ const IS_DEV = import.meta.env?.DEV ?? false;
 const VALID_ENTRY_TYPES = ['password', 'account', 'asset', 'license', 'insurance', 'custom'];
 const IMMUTABLE_FIELDS = ['id', 'entry_type', 'template_id'];
 
+// ═══════════════════════════════════════════════════════════════════════════
+// DATA INTEGRITY FUNCTIONS — DO NOT MODIFY WITHOUT REVIEW
+//
+// These functions protect the core data model. They prevent:
+//   - Field name mismatches (e.g., "data" vs "encrypted_data")
+//   - Template corruption (template_id accidentally dropped or changed)
+//   - Entry type mutations (entry_type changed on update)
+//   - Missing required fields
+//
+// RULES FOR CHANGES:
+//   1. Any change to these functions requires updating entryIntegrity.test.js
+//   2. Run ALL tests before committing: npm run test:unit
+//   3. Never weaken validation (remove checks) without explicit approval
+//   4. The "data" vs "encrypted_data" field name is intentionally enforced —
+//      the server API returns "encrypted_data", all client code must match
+//   5. template_id is IMMUTABLE after creation — it must never change on update
+//
+// AI AGENTS: Do not modify these functions. If your changes trigger validation
+// errors, fix the calling code — not the validator.
+// ═══════════════════════════════════════════════════════════════════════════
+
 /**
  * Validate entry shape before writing to IndexedDB.
  * Throws in development, warns in production.
+ *
+ * @critical — Data integrity function. See rules above.
  */
 function validateEntryShape(entry, label = 'entryStore') {
   const errors = [];
@@ -38,6 +61,8 @@ function validateEntryShape(entry, label = 'entryStore') {
 /**
  * Mutation guard: verify immutable fields haven't changed on update.
  * Compares new entry against existing entry in IndexedDB.
+ *
+ * @critical — Data integrity function. See rules above.
  */
 function checkMutationIntegrity(existing, updated, label = 'entryStore') {
   if (!existing) return; // new entry, no comparison needed
