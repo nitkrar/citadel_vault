@@ -408,6 +408,7 @@ tbody tr:hover {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
+  justify-content: flex-end;
 }
 
 /* ---------- Buttons ---------- */
