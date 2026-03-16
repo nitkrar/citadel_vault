@@ -1,5 +1,63 @@
 const DB_NAME = 'citadel_vault';
 const DB_VERSION = 1;
+const IS_DEV = import.meta.env?.DEV ?? false;
+
+const VALID_ENTRY_TYPES = ['password', 'account', 'asset', 'license', 'insurance', 'custom'];
+const IMMUTABLE_FIELDS = ['id', 'entry_type', 'template_id'];
+
+/**
+ * Validate entry shape before writing to IndexedDB.
+ * Throws in development, warns in production.
+ */
+function validateEntryShape(entry, label = 'entryStore') {
+  const errors = [];
+
+  if (typeof entry.id !== 'number' || !entry.id) {
+    errors.push('id must be a non-zero number');
+  }
+  if (!VALID_ENTRY_TYPES.includes(entry.entry_type)) {
+    errors.push(`entry_type "${entry.entry_type}" is invalid`);
+  }
+  if (entry.template_id !== null && entry.template_id !== undefined && typeof entry.template_id !== 'number') {
+    errors.push(`template_id must be number or null, got ${typeof entry.template_id}`);
+  }
+  if (typeof entry.encrypted_data !== 'string' || !entry.encrypted_data) {
+    errors.push('encrypted_data must be a non-empty string');
+  }
+  if ('data' in entry && !('encrypted_data' in entry)) {
+    errors.push('entry has "data" field instead of "encrypted_data" — field name mismatch');
+  }
+
+  if (errors.length > 0) {
+    const msg = `[${label}] Entry validation failed (id=${entry.id}): ${errors.join('; ')}`;
+    if (IS_DEV) throw new Error(msg);
+    console.warn(msg);
+  }
+}
+
+/**
+ * Mutation guard: verify immutable fields haven't changed on update.
+ * Compares new entry against existing entry in IndexedDB.
+ */
+function checkMutationIntegrity(existing, updated, label = 'entryStore') {
+  if (!existing) return; // new entry, no comparison needed
+
+  const violations = [];
+  for (const field of IMMUTABLE_FIELDS) {
+    const oldVal = existing[field];
+    const newVal = updated[field];
+    // Allow null → number (first time template_id is set) but not number → null/different
+    if (oldVal !== null && oldVal !== undefined && newVal !== oldVal) {
+      violations.push(`${field} changed from ${oldVal} to ${newVal}`);
+    }
+  }
+
+  if (violations.length > 0) {
+    const msg = `[${label}] Mutation integrity violation (id=${updated.id}): ${violations.join('; ')}`;
+    if (IS_DEV) throw new Error(msg);
+    console.warn(msg);
+  }
+}
 
 const STORES = {
     entries: { keyPath: 'id', indexes: [{ name: 'entry_type', keyPath: 'entry_type' }] },
@@ -79,12 +137,19 @@ class EntryStore {
     }
 
     async put(entry) {
+        validateEntryShape(entry, 'entryStore.put');
         const db = await this._open();
+        // Mutation guard: check immutable fields if entry already exists
+        const existing = await this.getById(entry.id).catch(() => null);
+        checkMutationIntegrity(existing, entry, 'entryStore.put');
         return this._putInStore(db, 'entries', entry);
     }
 
     async putAll(entries) {
         const db = await this._open();
+        for (const entry of entries) {
+            validateEntryShape(entry, 'entryStore.putAll');
+        }
         return this._putAllInStore(db, 'entries', entries);
     }
 

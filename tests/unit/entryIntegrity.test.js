@@ -4,6 +4,8 @@
  * Verifies that entry update operations preserve template structure.
  * Catches regressions where refresh/update functions accidentally
  * drop template_id, rename fields, or corrupt entry shape.
+ *
+ * Also tests the entryStore validation functions exported for testing.
  */
 import { describe, it, expect } from 'vitest';
 
