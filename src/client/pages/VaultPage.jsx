@@ -152,6 +152,7 @@ export default function VaultPage() {
   const [plaidMsg, setPlaidMsg] = useState('');
   const [plaidLinkEntryId, setPlaidLinkEntryId] = useState(null); // entry id for "Link to Plaid" flow
   const [plaidAccountPicker, setPlaidAccountPicker] = useState(null); // { accounts, itemId, metadata, entryId }
+  const [plaidRefreshing, setPlaidRefreshing] = useState(false);
   const plaidEnabled = config?.plaid_enabled === 'true';
 
   // ── Plaid Connect Bank success handler ─────────────────────────────
@@ -1503,14 +1504,60 @@ export default function VaultPage() {
           if (d._plaid) {
             return (
               <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'var(--color-success-bg, #dcfce7)', borderRadius: 6 }}>
-                  <Link2 size={14} style={{ color: 'var(--color-success, #16a34a)' }} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'var(--color-success-bg, #dcfce7)', borderRadius: 6, flexWrap: 'wrap' }}>
+                  <Link2 size={14} style={{ color: 'var(--color-success, #16a34a)', flexShrink: 0 }} />
                   <span style={{ fontSize: 13, color: 'var(--color-success, #16a34a)', fontWeight: 500 }}>Connected to Plaid</span>
-                  {d._plaid.last_refreshed && (
-                    <span className="text-muted" style={{ fontSize: 11, marginLeft: 'auto' }}>
-                      Last refreshed: {new Date(d._plaid.last_refreshed).toLocaleString()}
-                    </span>
-                  )}
+                  <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {d._plaid.last_refreshed && (
+                      <span className="text-muted" style={{ fontSize: 11 }}>
+                        {new Date(d._plaid.last_refreshed).toLocaleString()}
+                      </span>
+                    )}
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      style={{ fontSize: 11, padding: '2px 8px' }}
+                      disabled={plaidRefreshing}
+                      onClick={async () => {
+                        setPlaidRefreshing(true);
+                        try {
+                          const { data: resp } = await api.post('/plaid.php?action=refresh', { item_ids: [d._plaid.item_id] });
+                          const result = apiData({ data: resp });
+                          const itemBalances = result?.balances?.[d._plaid.item_id];
+                          if (!itemBalances) { setPlaidRefreshing(false); return; }
+                          // Update linked cash assets with new balances
+                          const linked = entries.filter(e => {
+                            const ad = decryptedCache[e.id];
+                            return e.entry_type === 'asset' && ad && String(ad.linked_account_id) === String(viewEntry.id);
+                          });
+                          for (const asset of linked) {
+                            const ad = decryptedCache[asset.id];
+                            if (ad?._plaid?.account_id && itemBalances[ad._plaid.account_id]) {
+                              const newBal = itemBalances[ad._plaid.account_id].balance;
+                              const updated = { ...ad, value: String(newBal), _plaid: { ...ad._plaid, last_refreshed: new Date().toISOString() } };
+                              const blob = await encrypt(updated);
+                              await api.put(`/vault.php?id=${asset.id}`, { encrypted_data: blob });
+                              await entryStore.put({ ...asset, data: blob, updated_at: new Date().toISOString() });
+                              setDecryptedCache(prev => ({ ...prev, [asset.id]: updated }));
+                            }
+                          }
+                          // Update account entry's _plaid.last_refreshed
+                          const updatedAcct = { ...d, _plaid: { ...d._plaid, last_refreshed: new Date().toISOString() } };
+                          const acctBlob = await encrypt(updatedAcct);
+                          await api.put(`/vault.php?id=${viewEntry.id}`, { encrypted_data: acctBlob });
+                          await entryStore.put({ ...viewEntry, data: acctBlob, updated_at: new Date().toISOString() });
+                          setDecryptedCache(prev => ({ ...prev, [viewEntry.id]: updatedAcct }));
+                          setPlaidMsg('Balance refreshed');
+                          setTimeout(() => setPlaidMsg(''), 3000);
+                        } catch (err) {
+                          setPlaidMsg(err.response?.data?.error || 'Refresh failed');
+                          setTimeout(() => setPlaidMsg(''), 5000);
+                        }
+                        setPlaidRefreshing(false);
+                      }}
+                    >
+                      <RefreshCw size={12} className={plaidRefreshing ? 'spin' : ''} /> {plaidRefreshing ? 'Refreshing...' : 'Refresh'}
+                    </button>
+                  </div>
                 </div>
               </div>
             );
