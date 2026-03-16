@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import api from '../api/client';
-import { Settings, Save, UserPlus, ShieldCheck, KeyRound, Clock, Gauge, Database, Plug } from 'lucide-react';
+import { Settings, Save, UserPlus, ShieldCheck, KeyRound, Clock, Zap, Database, Plug } from 'lucide-react';
 import Section from '../components/Section';
 
 const CATEGORY_META = {
@@ -9,7 +9,7 @@ const CATEGORY_META = {
   vault:         { title: 'Vault',           icon: KeyRound },
   pricing:       { title: 'Pricing',         icon: Clock },
   integrations:  { title: 'Integrations',    icon: Plug },
-  performance:   { title: 'Performance',     icon: Gauge },
+  performance:   { title: 'Performance',     icon: Zap },
   cache:         { title: 'Cache & Storage', icon: Database },
   general:       { title: 'General',         icon: Settings },
 };
@@ -192,7 +192,6 @@ export default function SettingsPage() {
           </button>
         </div>
       </form>
-      <div style={{ height: 60 }} />
     </div>
   );
 }
