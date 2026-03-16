@@ -552,7 +552,7 @@ export default function VaultPage() {
         template_id: formTemplateId,
         updated_at: new Date().toISOString(),
       };
-      await entryStore.put(updated);
+      await entryStore.put(updated, { allowTemplateChange: true });
       setDecryptedCache(prev => ({ ...prev, [editEntry.id]: savedForm }));
       setEntries(prev => prev.map(e => e.id === editEntry.id ? updated : e));
       setEditEntry(null);

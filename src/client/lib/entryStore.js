@@ -64,11 +64,14 @@ function validateEntryShape(entry, label = 'entryStore') {
  *
  * @critical — Data integrity function. See rules above.
  */
-function checkMutationIntegrity(existing, updated, label = 'entryStore') {
+function checkMutationIntegrity(existing, updated, label = 'entryStore', { allowTemplateChange = false } = {}) {
   if (!existing) return; // new entry, no comparison needed
 
   const violations = [];
   for (const field of IMMUTABLE_FIELDS) {
+    // Skip template_id check if user deliberately changed it (edit modal)
+    if (field === 'template_id' && allowTemplateChange) continue;
+
     const oldVal = existing[field];
     const newVal = updated[field];
     // Allow null → number (first time template_id is set) but not number → null/different
@@ -161,12 +164,12 @@ class EntryStore {
         });
     }
 
-    async put(entry) {
+    async put(entry, { allowTemplateChange = false } = {}) {
         validateEntryShape(entry, 'entryStore.put');
         const db = await this._open();
         // Mutation guard: check immutable fields if entry already exists
         const existing = await this.getById(entry.id).catch(() => null);
-        checkMutationIntegrity(existing, entry, 'entryStore.put');
+        checkMutationIntegrity(existing, entry, 'entryStore.put', { allowTemplateChange });
         return this._putInStore(db, 'entries', entry);
     }
 
