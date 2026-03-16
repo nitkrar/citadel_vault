@@ -1201,6 +1201,11 @@ export default function VaultPage() {
                     const fields = getTemplateFields(entry);
                     const detailField = fields.find(f => f.key !== 'title' && f.key !== 'notes' && f.key !== 'linked_account_id' && f.type !== 'textarea' && f.type !== 'secret' && f.type !== 'account_link' && d?.[f.key]);
                     const detail = detailField ? d[detailField.key] : '';
+                    const tpl = templates.find(t => t.id === entry.template_id);
+                    const subtype = tpl?.subtype;
+                    const hasPlaid = !!d?._plaid;
+                    const hasTicker = (subtype === 'stock' && d?.ticker) || (subtype === 'crypto' && d?.coin);
+                    const canRefresh = hasPlaid || hasTicker;
                     return (
                       <tr key={entry.id} style={{ cursor: 'pointer' }} onClick={() => { setViewEntry(entry); }}>
                         <td><Icon size={16} style={{ color: meta.color }} /></td>
@@ -1209,13 +1214,27 @@ export default function VaultPage() {
                         <td><span className="text-muted" style={{ fontSize: 13 }}>{entry.updated_at ? new Date(entry.updated_at).toLocaleDateString() : '--'}</span></td>
                         <td>
                           <div className="td-actions">
-                            {decryptedCache[entry.id]?._plaid && (
-                              <button className="btn btn-ghost btn-sm" title="Refresh balance" onClick={async e => {
+                            {canRefresh && (
+                              <button className="btn btn-ghost btn-sm" title={hasPlaid ? 'Refresh balance' : 'Refresh price'} onClick={async e => {
                                 e.stopPropagation();
-                                const d = decryptedCache[entry.id];
                                 try {
-                                  await plaidRefreshBalances([d._plaid.item_id], entries, decryptedCache,
-                                    (id, data) => setDecryptedCache(prev => ({ ...prev, [id]: data })));
+                                  if (hasPlaid) {
+                                    await plaidRefreshBalances([d._plaid.item_id], entries, decryptedCache,
+                                      (id, data) => setDecryptedCache(prev => ({ ...prev, [id]: data })));
+                                  } else if (hasTicker) {
+                                    const ticker = subtype === 'crypto' ? d.coin : d.ticker;
+                                    const { data: resp } = await api.post('/prices.php', { tickers: [ticker] });
+                                    const result = apiData({ data: resp });
+                                    const priceData = result?.prices?.[ticker];
+                                    if (priceData) {
+                                      const priceKey = subtype === 'crypto' ? 'price_per_unit' : 'price_per_share';
+                                      const updated = { ...d, [priceKey]: String(priceData.price), currency: priceData.currency };
+                                      const blob = await encrypt(updated);
+                                      await api.put(`/vault.php?id=${entry.id}`, { encrypted_data: blob });
+                                      await entryStore.put({ ...entry, data: blob, updated_at: new Date().toISOString() });
+                                      setDecryptedCache(prev => ({ ...prev, [entry.id]: updated }));
+                                    }
+                                  }
                                 } catch { /* silent */ }
                               }}><RefreshCw size={14} /></button>
                             )}
