@@ -341,3 +341,30 @@ describe('checkMutationIntegrity — violations throw in dev', () => {
     expect(() => checkMutationIntegrity(VALID_ENTRY, updated)).toThrow('template_id changed');
   });
 });
+
+describe('checkMutationIntegrity — allowTemplateChange flag', () => {
+  it('allows template_id change when allowTemplateChange is true (user edit)', () => {
+    const updated = { ...VALID_ENTRY, template_id: 99 };
+    expect(() => checkMutationIntegrity(VALID_ENTRY, updated, 'test', { allowTemplateChange: true })).not.toThrow();
+  });
+
+  it('allows template_id null when allowTemplateChange is true', () => {
+    const updated = { ...VALID_ENTRY, template_id: null };
+    expect(() => checkMutationIntegrity(VALID_ENTRY, updated, 'test', { allowTemplateChange: true })).not.toThrow();
+  });
+
+  it('still rejects entry_type change even with allowTemplateChange', () => {
+    const updated = { ...VALID_ENTRY, entry_type: 'password' };
+    expect(() => checkMutationIntegrity(VALID_ENTRY, updated, 'test', { allowTemplateChange: true })).toThrow('entry_type changed');
+  });
+
+  it('still rejects id change even with allowTemplateChange', () => {
+    const updated = { ...VALID_ENTRY, id: 999 };
+    expect(() => checkMutationIntegrity(VALID_ENTRY, updated, 'test', { allowTemplateChange: true })).toThrow('id changed');
+  });
+
+  it('rejects template_id change when allowTemplateChange is false (default)', () => {
+    const updated = { ...VALID_ENTRY, template_id: 99 };
+    expect(() => checkMutationIntegrity(VALID_ENTRY, updated)).toThrow('template_id changed');
+  });
+});
