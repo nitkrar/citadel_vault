@@ -77,7 +77,7 @@ export default function PortfolioPage() {
       const allStored = await entryStore.getAll();
       const cache = {};
       for (const s of allStored) {
-        try { cache[s.id] = await decrypt(s.encrypted_data || s.data); } catch { /* skip */ }
+        try { cache[s.id] = await decrypt(s.encrypted_data); } catch { /* skip */ }
       }
 
       const { updated } = await plaidRefreshBalances(itemIds, allStored, cache);

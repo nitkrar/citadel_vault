@@ -49,7 +49,7 @@ export default function usePlaidRefresh() {
           };
           const blob = await encrypt(newData);
           await api.put(`/vault.php?id=${entry.id}`, { encrypted_data: blob });
-          await entryStore.put({ ...entry, data: blob, updated_at: new Date().toISOString() });
+          await entryStore.put({ ...entry, encrypted_data: blob, updated_at: new Date().toISOString() });
           onEntryUpdated?.(entry.id, newData);
           updated++;
         }
@@ -64,7 +64,7 @@ export default function usePlaidRefresh() {
         const newData = { ...d, _plaid: { ...d._plaid, last_refreshed: new Date().toISOString() } };
         const blob = await encrypt(newData);
         await api.put(`/vault.php?id=${entry.id}`, { encrypted_data: blob });
-        await entryStore.put({ ...entry, data: blob, updated_at: new Date().toISOString() });
+        await entryStore.put({ ...entry, encrypted_data: blob, updated_at: new Date().toISOString() });
         onEntryUpdated?.(entry.id, newData);
       }
 

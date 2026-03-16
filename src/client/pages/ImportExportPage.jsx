@@ -37,7 +37,7 @@ export default function ImportExportPage() {
       const decrypted = [];
       for (const entry of filtered) {
         try {
-          const d = await decrypt(entry.data);
+          const d = await decrypt(entry.encrypted_data);
           if (d) decrypted.push({ type: entry.entry_type, ...d });
         } catch { /* skip */ }
       }
