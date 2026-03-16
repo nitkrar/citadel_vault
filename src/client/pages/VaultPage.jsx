@@ -352,7 +352,7 @@ export default function VaultPage() {
       const cache = {};
       for (const entry of raw) {
         try {
-          cache[entry.id] = await decrypt(entry.data);
+          cache[entry.id] = await decrypt(entry.encrypted_data || entry.data);
         } catch {
           cache[entry.id] = null;
         }
@@ -373,10 +373,9 @@ export default function VaultPage() {
     const { data: resp } = await api.get('/vault.php');
     const raw = apiData({ data: resp }) || [];
     await entryStore.putAll(raw);
-    // Re-decrypt
     const cache = {};
     for (const entry of raw) {
-      try { cache[entry.id] = await decrypt(entry.data); } catch { cache[entry.id] = null; }
+      try { cache[entry.id] = await decrypt(entry.encrypted_data || entry.data); } catch { cache[entry.id] = null; }
     }
     setEntries(raw);
     setDecryptedCache(cache);
@@ -588,7 +587,7 @@ export default function VaultPage() {
       const decrypted = [];
       for (const entry of raw) {
         try {
-          const d = await decrypt(entry.data);
+          const d = await decrypt(entry.encrypted_data || entry.data);
           decrypted.push({ ...entry, _decrypted: d });
         } catch {
           decrypted.push({ ...entry, _decrypted: null });
@@ -1201,7 +1200,7 @@ export default function VaultPage() {
                     const fields = getTemplateFields(entry);
                     const detailField = fields.find(f => f.key !== 'title' && f.key !== 'notes' && f.key !== 'linked_account_id' && f.type !== 'textarea' && f.type !== 'secret' && f.type !== 'account_link' && d?.[f.key]);
                     const detail = detailField ? d[detailField.key] : '';
-                    const tpl = templates.find(t => t.id === entry.template_id);
+                    const tpl = templates.find(t => t.id === entry.template_id) || entry.template;
                     const subtype = tpl?.subtype;
                     const hasPlaid = !!d?._plaid;
                     const hasTicker = (subtype === 'stock' && d?.ticker) || (subtype === 'crypto' && d?.coin);

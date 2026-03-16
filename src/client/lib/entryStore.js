@@ -12,13 +12,8 @@ class EntryStore {
     constructor() {
         this._db = null;
         this._opening = null;
-
-        // Clear on tab close
-        if (typeof window !== 'undefined') {
-            window.addEventListener('beforeunload', () => {
-                this.clear().catch(() => {});
-            });
-        }
+        // Cache policy (cachePolicy.js) handles IndexedDB lifecycle.
+        // No beforeunload clear — entries persist per cache_mode setting.
     }
 
     _open() {
