@@ -182,11 +182,9 @@ export default function SecurityPage() {
 
   const handleAutoLockChange = async (key, value) => {
     setLocalPrefs(prev => ({ ...prev, [key]: value }));
-    // Switching to lock_on_refresh: clear cached vault key so next refresh locks
+    // Switching to lock_on_refresh: clear cached session DEK so next refresh locks
     if (key === 'vault_persist_session' && value === 'lock_on_refresh') {
-      sessionStorage.removeItem('pv_session_salt');
-      sessionStorage.removeItem('pv_session_edek');
-      sessionStorage.removeItem('pv_session_vk');
+      sessionStorage.removeItem('pv_session_dek');
     }
     // Mark that user has customized lock settings (hides default hint on lock screen)
     try { localStorage.setItem('pv_lock_customized', '1'); } catch {}
@@ -270,8 +268,8 @@ export default function SecurityPage() {
           </div>
           <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
             {getLocalPref('vault_persist_session') === 'persist_in_tab'
-              ? 'Vault key is cached in this tab\'s session storage. Survives page refreshes but cleared when the tab closes.'
-              : 'Vault key is held in memory only. Refreshing or navigating away requires re-entering your vault key.'}
+              ? 'The encryption key (not your vault key) is cached in this tab\'s session storage. Survives refreshes, cleared on tab close. Your vault key is never stored.'
+              : 'Encryption key is held in memory only. Refreshing or navigating away requires re-entering your vault key.'}
           </p>
         </div>
 

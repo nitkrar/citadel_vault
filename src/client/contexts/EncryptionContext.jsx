@@ -82,26 +82,26 @@ export function EncryptionProvider({ children, user }) {
   // ------------------------------------------------------------------
   // Session persistence helpers
   // ------------------------------------------------------------------
-  const saveSession = useCallback((keyMaterial, vaultKey) => {
-    // Store just enough to re-derive DEK on refresh (vault key is NOT stored)
-    // We store the wrapped DEK + salt so we can re-derive without the vault key
-    // Actually: we store the vault key temporarily in sessionStorage (tab-scoped)
-    // This is the tradeoff: convenience vs XSS risk (sessionStorage is tab-scoped)
+  const saveSession = useCallback(async () => {
+    // Store only the raw DEK bytes (base64) — no vault key, salt, or EDEK.
+    // The vault key never touches sessionStorage.
+    // On restore, we import the raw bytes directly — no PBKDF2 derivation needed.
+    // Risk: raw DEK in sessionStorage is accessible to XSS. Mitigated by CSP + httpOnly cookies.
+    // sessionStorage is tab-scoped — cleared on tab close.
     try {
-      sessionStorage.setItem('pv_session_salt', keyMaterial.vault_key_salt);
-      sessionStorage.setItem('pv_session_edek', keyMaterial.encrypted_dek);
-      sessionStorage.setItem('pv_session_vk', vaultKey);
+      const dek = crypto._getDekForContext();
+      const raw = await globalThis.crypto.subtle.exportKey('raw', dek);
+      const b64 = btoa(String.fromCharCode(...new Uint8Array(raw)));
+      sessionStorage.setItem('pv_session_dek', b64);
     } catch {}
   }, []);
 
   const clearSession = useCallback(() => {
-    sessionStorage.removeItem('pv_session_salt');
-    sessionStorage.removeItem('pv_session_edek');
-    sessionStorage.removeItem('pv_session_vk');
+    sessionStorage.removeItem('pv_session_dek');
   }, []);
 
   const hasSession = useCallback(() => {
-    return !!sessionStorage.getItem('pv_session_vk');
+    return !!sessionStorage.getItem('pv_session_dek');
   }, []);
 
   // ------------------------------------------------------------------
@@ -164,7 +164,7 @@ export function EncryptionProvider({ children, user }) {
 
       // 7. Save session for refresh persistence if preference is on
       if (getUserPreference(preferences, 'vault_persist_session') === 'persist_in_tab') {
-        saveSession(keyMaterial, vaultKey);
+        await saveSession();
       }
 
       return { success: true };
@@ -323,18 +323,26 @@ export function EncryptionProvider({ children, user }) {
         setVaultKeyExists(isTruthy(keyMaterial.has_vault_key));
 
         // Try to restore session from sessionStorage (refresh persistence)
-        const savedVk = sessionStorage.getItem('pv_session_vk');
-        const savedSalt = sessionStorage.getItem('pv_session_salt');
-        const savedEdek = sessionStorage.getItem('pv_session_edek');
-        if (savedVk && savedSalt && savedEdek && isTruthy(keyMaterial.has_vault_key)) {
+        // Only the raw DEK bytes are stored — no vault key, no salt, no EDEK
+        const savedDek = sessionStorage.getItem('pv_session_dek');
+        if (savedDek && isTruthy(keyMaterial.has_vault_key)) {
           try {
-            const success = await crypto.unlockVault(
-              { vault_key_salt: savedSalt, encrypted_dek: savedEdek },
-              savedVk
+            const rawBytes = Uint8Array.from(atob(savedDek), c => c.charCodeAt(0));
+            const dek = await globalThis.crypto.subtle.importKey(
+              'raw', rawBytes, { name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']
             );
-            if (success && !cancelled) {
+            crypto.setDek(dek);
+
+            // Use cached entries or fetch from server
+            const hasCache = await cachePolicy.hasFreshCache();
+            if (!hasCache) {
               const { data: er } = await api.get('/vault.php');
               await entryStore.putAll(apiData({ data: er }) || []);
+              cachePolicy.markCacheRefreshed();
+            }
+
+            if (!cancelled) {
+              await workerDispatcher.setKey(dek);
               setIsUnlocked(true);
               startAutoLock(preferences);
             }
