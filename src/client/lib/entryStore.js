@@ -276,3 +276,6 @@ class EntryStore {
 }
 
 export const entryStore = new EntryStore();
+
+// Exported for testing only
+export { validateEntryShape, checkMutationIntegrity };
