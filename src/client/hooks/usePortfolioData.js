@@ -56,7 +56,7 @@ export default function usePortfolioData() {
     for (const entry of entries) {
       if (entry.entry_type !== 'asset' && entry.entry_type !== 'account') continue;
       try {
-        const d = await decrypt(entry.encrypted_data || entry.data);
+        const d = await decrypt(entry.encrypted_data);
         if (d) {
           // Find the template for this entry
           const tmpl = templates.find(t => t.id === entry.template_id);

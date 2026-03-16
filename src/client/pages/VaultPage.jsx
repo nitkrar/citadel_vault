@@ -184,12 +184,12 @@ export default function VaultPage() {
         const { data: acctResp } = await api.post('/vault.php', {
           entry_type: 'account',
           template_id: acctTpl?.id || null,
-          encrypted_data: acctBlob,
+          encrypted_encrypted_data: acctBlob,
         });
         const acctId = apiData({ data: acctResp })?.id;
         const acctEntry = {
           id: acctId, entry_type: 'account', template_id: acctTpl?.id || null,
-          data: acctBlob, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+          encrypted_data: acctBlob, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
         };
         await entryStore.put(acctEntry);
         setDecryptedCache(prev => ({ ...prev, [acctId]: acctForm }));
@@ -208,12 +208,12 @@ export default function VaultPage() {
         const { data: cashResp } = await api.post('/vault.php', {
           entry_type: 'asset',
           template_id: cashTpl?.id || null,
-          encrypted_data: cashBlob,
+          encrypted_encrypted_data: cashBlob,
         });
         const cashId = apiData({ data: cashResp })?.id;
         const cashEntry = {
           id: cashId, entry_type: 'asset', template_id: cashTpl?.id || null,
-          data: cashBlob, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+          encrypted_data: cashBlob, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
         };
         await entryStore.put(cashEntry);
         setDecryptedCache(prev => ({ ...prev, [cashId]: cashForm }));
@@ -255,7 +255,7 @@ export default function VaultPage() {
     try {
       const blob = await encrypt(updated);
       await api.put(`/vault.php?id=${entryId}`, { encrypted_data: blob });
-      const updatedEntry = { ...entry, data: blob, updated_at: new Date().toISOString() };
+      const updatedEntry = { ...entry, encrypted_data: blob, updated_at: new Date().toISOString() };
       await entryStore.put(updatedEntry);
       setDecryptedCache(prev => ({ ...prev, [entryId]: updated }));
       setEntries(prev => prev.map(e => e.id === entryId ? updatedEntry : e));
@@ -271,7 +271,7 @@ export default function VaultPage() {
           const updatedAsset = { ...ad, value: String(account.balance || 0), _plaid: plaidMeta };
           const assetBlob = await encrypt(updatedAsset);
           await api.put(`/vault.php?id=${asset.id}`, { encrypted_data: assetBlob });
-          const updatedAssetEntry = { ...asset, data: assetBlob, updated_at: new Date().toISOString() };
+          const updatedAssetEntry = { ...asset, encrypted_data: assetBlob, updated_at: new Date().toISOString() };
           await entryStore.put(updatedAssetEntry);
           setDecryptedCache(prev => ({ ...prev, [asset.id]: updatedAsset }));
           setEntries(prev => prev.map(e => e.id === asset.id ? updatedAssetEntry : e));
@@ -352,7 +352,7 @@ export default function VaultPage() {
       const cache = {};
       for (const entry of raw) {
         try {
-          cache[entry.id] = await decrypt(entry.encrypted_data || entry.data);
+          cache[entry.id] = await decrypt(entry.encrypted_data);
         } catch {
           cache[entry.id] = null;
         }
@@ -375,7 +375,7 @@ export default function VaultPage() {
     await entryStore.putAll(raw);
     const cache = {};
     for (const entry of raw) {
-      try { cache[entry.id] = await decrypt(entry.encrypted_data || entry.data); } catch { cache[entry.id] = null; }
+      try { cache[entry.id] = await decrypt(entry.encrypted_data); } catch { cache[entry.id] = null; }
     }
     setEntries(raw);
     setDecryptedCache(cache);
@@ -464,13 +464,13 @@ export default function VaultPage() {
       const { data: resp } = await api.post('/vault.php', {
         entry_type: formType,
         template_id: formTemplateId,
-        encrypted_data: blob,
+        encrypted_encrypted_data: blob,
       });
       const newId = apiData({ data: resp })?.id;
       // Add to local store
       const savedForm = { ...form };
       const savedType = formType;
-      const newEntry = { id: newId, entry_type: formType, template_id: formTemplateId, data: blob, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+      const newEntry = { id: newId, entry_type: formType, template_id: formTemplateId, encrypted_data: blob, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
       await entryStore.put(newEntry);
       setDecryptedCache(prev => ({ ...prev, [newId]: savedForm }));
       setEntries(prev => [newEntry, ...prev]);
@@ -547,7 +547,7 @@ export default function VaultPage() {
       const savedType = formType;
       const updated = {
         ...editEntry,
-        data: blob,
+        encrypted_data: blob,
         entry_type: formType,
         template_id: formTemplateId,
         updated_at: new Date().toISOString(),
@@ -587,7 +587,7 @@ export default function VaultPage() {
       const decrypted = [];
       for (const entry of raw) {
         try {
-          const d = await decrypt(entry.encrypted_data || entry.data);
+          const d = await decrypt(entry.encrypted_data);
           decrypted.push({ ...entry, _decrypted: d });
         } catch {
           decrypted.push({ ...entry, _decrypted: null });
@@ -625,7 +625,7 @@ export default function VaultPage() {
     try {
       const blob = await encrypt(updated);
       await api.put(`/vault.php?id=${assetEntry.id}`, { encrypted_data: blob });
-      const updatedEntry = { ...assetEntry, data: blob, updated_at: new Date().toISOString() };
+      const updatedEntry = { ...assetEntry, encrypted_data: blob, updated_at: new Date().toISOString() };
       await entryStore.put(updatedEntry);
       setDecryptedCache(prev => ({ ...prev, [assetEntry.id]: updated }));
       setEntries(prev => prev.map(e => e.id === assetEntry.id ? updatedEntry : e));
@@ -682,14 +682,14 @@ export default function VaultPage() {
     const { data: resp } = await api.post('/vault.php', {
       entry_type: 'asset',
       template_id: cashTpl?.id || null,
-      encrypted_data: blob,
+      encrypted_encrypted_data: blob,
     });
     const cashId = apiData({ data: resp })?.id;
     const cashEntry = {
       id: cashId,
       entry_type: 'asset',
       template_id: cashTpl?.id || null,
-      data: blob,
+      encrypted_data: blob,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -707,7 +707,7 @@ export default function VaultPage() {
     try {
       const blob = await encrypt(updated);
       await api.put(`/vault.php?id=${assetEntry.id}`, { encrypted_data: blob });
-      const updatedEntry = { ...assetEntry, data: blob, updated_at: new Date().toISOString() };
+      const updatedEntry = { ...assetEntry, encrypted_data: blob, updated_at: new Date().toISOString() };
       await entryStore.put(updatedEntry);
       setDecryptedCache(prev => ({ ...prev, [assetEntry.id]: updated }));
       setEntries(prev => prev.map(e => e.id === assetEntry.id ? updatedEntry : e));
@@ -1230,7 +1230,7 @@ export default function VaultPage() {
                                       const updated = { ...d, [priceKey]: String(priceData.price), currency: priceData.currency };
                                       const blob = await encrypt(updated);
                                       await api.put(`/vault.php?id=${entry.id}`, { encrypted_data: blob });
-                                      await entryStore.put({ ...entry, data: blob, updated_at: new Date().toISOString() });
+                                      await entryStore.put({ ...entry, encrypted_data: blob, updated_at: new Date().toISOString() });
                                       setDecryptedCache(prev => ({ ...prev, [entry.id]: updated }));
                                     }
                                   }
