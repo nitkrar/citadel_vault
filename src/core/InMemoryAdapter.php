@@ -522,10 +522,12 @@ class InMemoryAdapter implements StorageAdapter {
             $fields = json_decode($fields, true) ?? [];
         }
         return [
-            'name'   => $t['name'],
-            'icon'   => $t['icon'] ?? null,
-            'key'    => $t['template_key'] ?? null,
-            'fields' => $fields,
+            'name'         => $t['name'],
+            'icon'         => $t['icon'] ?? null,
+            'key'          => $t['template_key'] ?? null,
+            'subtype'      => $t['subtype'] ?? null,
+            'is_liability' => isset($t['is_liability']) ? (bool)(int)$t['is_liability'] : false,
+            'fields'       => $fields,
         ];
     }
 }

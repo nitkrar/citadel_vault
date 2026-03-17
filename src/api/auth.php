@@ -58,7 +58,7 @@ if ($method === 'POST' && $action === 'login') {
     }
 
     $stmt = $db->prepare(
-        "SELECT id, username, display_name, email, password_hash, role, is_active
+        "SELECT id, username, display_name, email, password_hash, role, is_active, must_reset_password
          FROM users WHERE username = ? OR email = ? LIMIT 1"
     );
     $stmt->execute([$username, $username]);
@@ -382,7 +382,7 @@ if ($method === 'GET' && $action === 'verify-email') {
 // GET ?action=me — Return current user profile
 // ---------------------------------------------------------------------------
 if ($method === 'GET' && $action === 'me') {
-    $payload = Auth::requireAuth();
+    $payload = Auth::requireAuth(allowMustResetPassword: true);
     $userId = $payload['sub'];
 
     $stmt = $db->prepare(
@@ -545,7 +545,7 @@ if ($method === 'PUT' && $action === 'password') {
 // POST ?action=force-change-password — Change password when forced by admin
 // ---------------------------------------------------------------------------
 if ($method === 'POST' && $action === 'force-change-password') {
-    $payload = Auth::requireAuth();
+    $payload = Auth::requireAuth(allowMustResetPassword: true);
     $userId = $payload['sub'];
     $body = Response::getBody();
 

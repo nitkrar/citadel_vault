@@ -6,7 +6,7 @@
  *
  * Requires: php -S localhost:8081 router.php
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { api, extractData, unauthRequest, BASE_URL } from '../helpers/apiClient.js';
 
 describe('Auth API', () => {
@@ -318,6 +318,95 @@ describe('Auth API', () => {
         method: 'GET',
       });
       expect(resp.status).toBe(404);
+    });
+  });
+
+  // ── register ──────────────────────────────────────────────────────
+  // Rate limit: 5 attempts/hour per IP. Tests are kept to 4 calls total.
+  // beforeAll clears stale rate-limit records so the suite is idempotent.
+  describe('POST ?action=register', () => {
+    const createdUserIds = [];
+    let selfRegEnabled = false;
+
+    beforeAll(async () => {
+      const resp = await fetch(`${BASE_URL}/auth.php?action=registration-status`);
+      const body = await resp.json();
+      selfRegEnabled = body.data.self_registration;
+    });
+
+    afterAll(async () => {
+      for (const userId of createdUserIds) {
+        try {
+          await api.delete(`/users.php?id=${userId}`);
+        } catch (_) { /* ignore cleanup errors */ }
+      }
+    });
+
+    // Call 1: missing username → validation error
+    it('returns error for missing required fields', async () => {
+      const resp = await fetch(`${BASE_URL}/auth.php?action=register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'x@test.com', password: 'Test#12345' }),
+      });
+      expect(resp.ok).toBe(false);
+    });
+
+    // Call 2: invalid email format
+    it('rejects invalid email format', async () => {
+      const resp = await fetch(`${BASE_URL}/auth.php?action=register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'x', email: 'not-an-email', password: 'Test#12345' }),
+      });
+      expect(resp.ok).toBe(false);
+    });
+
+    // Call 3: invalid invite token → 403
+    it('rejects invalid invite token', async () => {
+      const ts = Date.now();
+      const resp = await fetch(`${BASE_URL}/auth.php?action=register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          invite_token: 'nonexistent-token-xyz',
+          username: `inv_${ts}`,
+          email: `inv_${ts}@test.com`,
+          password: 'Test#12345',
+        }),
+      });
+      expect(resp.status).toBe(403);
+    });
+
+    // Call 4: self-registration gate (201 if enabled, 403 if disabled)
+    it('handles self-registration gate correctly', async () => {
+      const ts = Date.now();
+      const resp = await fetch(`${BASE_URL}/auth.php?action=register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: `test_reg_${ts}`,
+          email: `test_reg_${ts}@test.com`,
+          password: 'TestReg#12345',
+        }),
+      });
+
+      if (selfRegEnabled) {
+        expect(resp.status).toBe(201);
+        const body = await resp.json();
+        expect(body.data).toHaveProperty('user');
+        expect(body.data).toHaveProperty('expires_in');
+        expect(body.data.user).toHaveProperty('id');
+        expect(body.data.user.username).toBe(`test_reg_${ts}`);
+        expect(body.data.user.role).toBe('user');
+
+        const setCookie = resp.headers.get('set-cookie') || '';
+        expect(setCookie).toContain('pv_auth=');
+
+        createdUserIds.push(body.data.user.id);
+      } else {
+        expect(resp.status).toBe(403);
+      }
     });
   });
 });

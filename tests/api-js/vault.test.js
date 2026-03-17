@@ -268,6 +268,29 @@ describe('Vault API', () => {
       });
       expect(resp.status).toBe(400);
     });
+
+    it('atomicity: invalid entry in batch prevents all entries from being created', async () => {
+      // Get count before attempt
+      const beforeResp = await api.get('/vault.php?action=counts');
+      const beforeCounts = await extractData(beforeResp);
+      const beforeLicenseCount = beforeCounts.license;
+
+      // Send a batch where the second entry has an invalid type — validation should reject all
+      const resp = await api.post('/vault.php?action=bulk-create', {
+        json: {
+          entries: [
+            { entry_type: 'license', template_id: null, encrypted_data: 'YXRvbWljaXR5LXRlc3Q=' },
+            { entry_type: 'INVALID', template_id: null, encrypted_data: 'YXRvbWljaXR5LXRlc3Q=' },
+          ],
+        },
+      });
+      expect(resp.status).toBe(400);
+
+      // Verify count hasn't changed — first entry was NOT committed
+      const afterResp = await api.get('/vault.php?action=counts');
+      const afterCounts = await extractData(afterResp);
+      expect(afterCounts.license).toBe(beforeLicenseCount);
+    });
   });
 
   // ── bulk update ──────────────────────────────────────────────────

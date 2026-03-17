@@ -159,6 +159,42 @@ describe('parseCsv', () => {
   it('throws for single-line input', () => {
     expect(() => parseCsv('Just headers')).toThrow('at least a header row and one data row');
   });
+
+  it('handles Windows \\r\\n line endings', () => {
+    const result = parseCsv('Name,URL\r\nFoo,https://foo.com\r\nBar,https://bar.com\r\n');
+    expect(result.headers).toEqual(['Name', 'URL']);
+    expect(result.rows).toHaveLength(2);
+    expect(result.rows[0]).toEqual(['Foo', 'https://foo.com']);
+    expect(result.rows[1]).toEqual(['Bar', 'https://bar.com']);
+  });
+
+  it('handles multiline quoted cells', () => {
+    const result = parseCsv('Name,Notes\nFoo,"Line 1\nLine 2\nLine 3"');
+    expect(result.headers).toEqual(['Name', 'Notes']);
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0][0]).toBe('Foo');
+    expect(result.rows[0][1]).toBe('Line 1\nLine 2\nLine 3');
+  });
+
+  it('handles escaped quotes "" within fields', () => {
+    const result = parseCsv('Name,Notes\nFoo,"He said ""hello"" to me"');
+    expect(result.rows[0][1]).toBe('He said "hello" to me');
+  });
+
+  it('handles empty fields and trailing commas', () => {
+    const result = parseCsv('A,B,C\n1,,3\n,,\n4,5,');
+    expect(result.headers).toEqual(['A', 'B', 'C']);
+    // Row ",,\n" is all empty — should be filtered
+    expect(result.rows).toHaveLength(2);
+    expect(result.rows[0]).toEqual(['1', '', '3']);
+    expect(result.rows[1]).toEqual(['4', '5', '']);
+  });
+
+  it('handles multiline + escaped quotes + Windows line endings together', () => {
+    const csv = 'Name,Notes\r\nFoo,"Line 1\r\nHe said ""hi""\r\nLine 3"\r\n';
+    const result = parseCsv(csv);
+    expect(result.rows[0][1]).toBe('Line 1\nHe said "hi"\nLine 3');
+  });
 });
 
 // ── generateCsvTemplate ──────────────────────────────────────────────
@@ -171,5 +207,21 @@ describe('generateCsvTemplate', () => {
 
   it('handles empty fields', () => {
     expect(generateCsvTemplate([])).toBe('\n');
+  });
+
+  it('quotes labels containing commas', () => {
+    const fields = [
+      { key: 'a', label: 'Simple' },
+      { key: 'b', label: 'Has, Comma' },
+      { key: 'c', label: 'Normal' },
+    ];
+    expect(generateCsvTemplate(fields)).toBe('Simple,"Has, Comma",Normal\n');
+  });
+
+  it('escapes labels containing double quotes', () => {
+    const fields = [
+      { key: 'a', label: 'Say "Hello"' },
+    ];
+    expect(generateCsvTemplate(fields)).toBe('"Say ""Hello"""\n');
   });
 });

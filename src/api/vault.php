@@ -150,7 +150,7 @@ if ($method === 'POST' && $action === 'bulk-create') {
         Response::error('No entries provided.', 400);
     }
 
-    $ids = [];
+    // Validate all entries before starting the transaction
     foreach ($entries as $entry) {
         $type = $entry['entry_type'] ?? '';
         if (!in_array($type, $validTypes, true)) {
@@ -159,12 +159,25 @@ if ($method === 'POST' && $action === 'bulk-create') {
         if (empty($entry['encrypted_data'])) {
             Response::error('Missing encrypted_data.', 400);
         }
-        $ids[] = $storage->createEntry(
-            $userId,
-            $type,
-            $entry['encrypted_data'],
-            isset($entry['template_id']) ? (int)$entry['template_id'] : null
-        );
+    }
+
+    // All entries valid — insert atomically
+    $db = Database::getInstance();
+    $db->beginTransaction();
+    try {
+        $ids = [];
+        foreach ($entries as $entry) {
+            $ids[] = $storage->createEntry(
+                $userId,
+                $entry['entry_type'],
+                $entry['encrypted_data'],
+                isset($entry['template_id']) ? (int)$entry['template_id'] : null
+            );
+        }
+        $db->commit();
+    } catch (Exception $e) {
+        $db->rollBack();
+        Response::error('Bulk create failed: ' . $e->getMessage(), 500);
     }
 
     Response::success(['ids' => $ids, 'count' => count($ids)]);
@@ -181,16 +194,29 @@ if ($method === 'POST' && $action === 'bulk-update') {
         Response::error('No entries provided.', 400);
     }
 
-    $updated = 0;
+    // Validate all entries before starting the transaction
     foreach ($entries as $entry) {
         if (empty($entry['id']) || empty($entry['encrypted_data'])) {
             Response::error('Each entry requires id and encrypted_data.', 400);
         }
-        $bulkType = $entry['entry_type'] ?? null;
-        $bulkTpl  = isset($entry['template_id']) ? (int)$entry['template_id'] : null;
-        if ($storage->updateEntry($userId, (int)$entry['id'], $entry['encrypted_data'], $bulkType, $bulkTpl)) {
-            $updated++;
+    }
+
+    // All entries valid — update atomically
+    $db = Database::getInstance();
+    $db->beginTransaction();
+    try {
+        $updated = 0;
+        foreach ($entries as $entry) {
+            $bulkType = $entry['entry_type'] ?? null;
+            $bulkTpl  = isset($entry['template_id']) ? (int)$entry['template_id'] : null;
+            if ($storage->updateEntry($userId, (int)$entry['id'], $entry['encrypted_data'], $bulkType, $bulkTpl)) {
+                $updated++;
+            }
         }
+        $db->commit();
+    } catch (Exception $e) {
+        $db->rollBack();
+        Response::error('Bulk update failed: ' . $e->getMessage(), 500);
     }
 
     Response::success(['updated' => $updated]);

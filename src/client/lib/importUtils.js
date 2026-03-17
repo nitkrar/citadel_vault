@@ -145,35 +145,73 @@ export function matchSheetToType(sheetName) {
 
 /**
  * Parse CSV text into { headers, rows }.
- * Handles quoted fields with commas.
+ * Handles quoted fields with commas, escaped quotes (""), multiline quoted
+ * cells, and Windows \r\n line endings.
  */
 export function parseCsv(text) {
-    const lines = text.trim().split('\n').map(line => {
-        const result = [];
-        let current = '';
-        let inQuotes = false;
-        for (let i = 0; i < line.length; i++) {
-            const ch = line[i];
+    // Normalize \r\n → \n, strip lone \r
+    const input = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+
+    const rows = [];
+    let row = [];
+    let cell = '';
+    let inQuotes = false;
+    let i = 0;
+
+    while (i < input.length) {
+        const ch = input[i];
+
+        if (inQuotes) {
             if (ch === '"') {
-                inQuotes = !inQuotes;
-            } else if (ch === ',' && !inQuotes) {
-                result.push(current.trim());
-                current = '';
+                // Peek ahead: escaped quote "" → literal "
+                if (i + 1 < input.length && input[i + 1] === '"') {
+                    cell += '"';
+                    i += 2;
+                } else {
+                    // End of quoted field
+                    inQuotes = false;
+                    i++;
+                }
             } else {
-                current += ch;
+                // Any character inside quotes (including \n) is part of the cell
+                cell += ch;
+                i++;
+            }
+        } else {
+            if (ch === '"') {
+                inQuotes = true;
+                i++;
+            } else if (ch === ',') {
+                row.push(cell.trim());
+                cell = '';
+                i++;
+            } else if (ch === '\n') {
+                row.push(cell.trim());
+                rows.push(row);
+                row = [];
+                cell = '';
+                i++;
+            } else {
+                cell += ch;
+                i++;
             }
         }
-        result.push(current.trim());
-        return result;
-    });
+    }
 
-    if (lines.length < 2) {
+    // Push last cell/row
+    row.push(cell.trim());
+    rows.push(row);
+
+    // Filter empty rows (all cells empty/whitespace)
+    const nonEmptyRows = rows.filter(r => r.some(c => c.trim()));
+
+    if (nonEmptyRows.length < 2) {
         throw new Error('File must have at least a header row and one data row.');
     }
 
     return {
-        headers: lines[0],
-        rows: lines.slice(1).filter(row => row.some(cell => cell.trim())),
+        headers: nonEmptyRows[0],
+        rows: nonEmptyRows.slice(1).filter(r => r.some(c => c.trim())),
     };
 }
 
@@ -208,7 +246,14 @@ export async function parseXlsx(data) {
  * Generate a CSV template string for given fields.
  */
 export function generateCsvTemplate(fields) {
-    return fields.map(f => f.label).join(',') + '\n';
+    return fields.map(f => {
+        const label = f.label;
+        // Quote labels that contain commas or double quotes
+        if (label.includes(',') || label.includes('"')) {
+            return '"' + label.replace(/"/g, '""') + '"';
+        }
+        return label;
+    }).join(',') + '\n';
 }
 
 /**
