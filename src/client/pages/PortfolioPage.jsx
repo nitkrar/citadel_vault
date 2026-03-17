@@ -49,11 +49,9 @@ export default function PortfolioPage() {
   const [activeTab, setActiveTab] = useState('overview');
   const [expandedGroups, setExpandedGroups] = useState({});
   const [snapshotSaving, setSnapshotSaving] = useState(false);
-  const [priceRefreshing, setPriceRefreshing] = useState(false);
-  const [priceRefreshResult, setPriceRefreshResult] = useState(null);
+  const [refreshingAll, setRefreshingAll] = useState(false);
+  const [refreshResult, setRefreshResult] = useState(null);
   const [snapshotPrompt, setSnapshotPrompt] = useState(null); // { staleCount }
-  // balanceRefreshing managed by usePlaidRefresh hook
-  const [balanceRefreshResult, setBalanceRefreshResult] = useState(null);
   const { config } = useAppConfig();
   const plaidEnabled = config?.plaid_enabled === 'true';
 
@@ -68,25 +66,48 @@ export default function PortfolioPage() {
   // ── Refresh bank balances (shared hook) ──────────────────────────
   const { refreshBalances: plaidRefreshBalances, refreshing: balanceRefreshingHook } = usePlaidRefresh();
 
-  const handleRefreshBalances = async () => {
-    setBalanceRefreshResult(null);
-    try {
-      const itemIds = [...new Set(plaidEntries.map(e => e._plaid.item_id))];
-      if (itemIds.length === 0) return;
+  // Combined refresh: prices + balances in parallel
+  const handleRefreshAll = async () => {
+    setRefreshingAll(true);
+    setRefreshResult(null);
+    const results = [];
 
-      const allStored = await entryStore.getAll();
-      const cache = {};
-      for (const s of allStored) {
-        try { cache[s.id] = await decrypt(s.encrypted_data); } catch { /* skip */ }
+    try {
+      const promises = [];
+
+      // Refresh prices (stock/crypto)
+      promises.push(
+        refreshPrices()
+          .then(r => { if (r.count > 0) results.push(`${r.count} price${r.count !== 1 ? 's' : ''}`); })
+          .catch(() => results.push('prices failed'))
+      );
+
+      // Refresh balances (Plaid)
+      if (hasPlaidEntries) {
+        const itemIds = [...new Set(plaidEntries.map(e => e._plaid.item_id))];
+        if (itemIds.length > 0) {
+          promises.push(
+            (async () => {
+              const allStored = await entryStore.getAll();
+              const cache = {};
+              for (const s of allStored) {
+                try { cache[s.id] = await decrypt(s.encrypted_data); } catch { /* skip */ }
+              }
+              const { updated } = await plaidRefreshBalances(itemIds, allStored, cache);
+              if (updated > 0) { results.push(`${updated} balance${updated !== 1 ? 's' : ''}`); refetch(); }
+            })().catch(() => results.push('balances failed'))
+          );
+        }
       }
 
-      const { updated } = await plaidRefreshBalances(itemIds, allStored, cache);
-      setBalanceRefreshResult(`Updated ${updated} balance${updated !== 1 ? 's' : ''}`);
-      if (updated > 0) refetch();
-      setTimeout(() => setBalanceRefreshResult(null), 5000);
+      await Promise.all(promises);
+      setRefreshResult(results.length > 0 ? `Refreshed ${results.join(', ')}` : 'Everything up to date');
+      setTimeout(() => setRefreshResult(null), 5000);
     } catch {
-      setBalanceRefreshResult('Failed to refresh balances');
-      setTimeout(() => setBalanceRefreshResult(null), 5000);
+      setRefreshResult('Refresh failed');
+      setTimeout(() => setRefreshResult(null), 5000);
+    } finally {
+      setRefreshingAll(false);
     }
   };
 
@@ -109,21 +130,7 @@ export default function PortfolioPage() {
     setExpandedGroups(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
-  // ── Refresh prices ─────────────────────────────────────────────
-  const handleRefreshPrices = async () => {
-    setPriceRefreshing(true);
-    setPriceRefreshResult(null);
-    try {
-      const result = await refreshPrices();
-      setPriceRefreshResult(`Fetched ${result.count} price${result.count !== 1 ? 's' : ''}`);
-      setTimeout(() => setPriceRefreshResult(null), 5000);
-    } catch (err) {
-      setPriceRefreshResult('Failed to fetch prices');
-      setTimeout(() => setPriceRefreshResult(null), 5000);
-    } finally {
-      setPriceRefreshing(false);
-    }
-  };
+  // handleRefreshPrices removed — merged into handleRefreshAll
 
   // ── Save snapshot (split model v3) ──────────────────────────────
   const doSaveSnapshot = async () => {
@@ -243,13 +250,8 @@ export default function PortfolioPage() {
               ))}
             </select>
           )}
-          {plaidEnabled && hasPlaidEntries && (
-            <button className="btn btn-secondary" onClick={handleRefreshBalances} disabled={balanceRefreshingHook || isEmpty}>
-              <Link2 size={16} className={balanceRefreshingHook ? 'spin' : ''} /> {balanceRefreshingHook ? 'Refreshing...' : 'Refresh Balances'}
-            </button>
-          )}
-          <button className="btn btn-secondary" onClick={handleRefreshPrices} disabled={priceRefreshing || isEmpty}>
-            <RefreshCw size={16} className={priceRefreshing ? 'spin' : ''} /> {priceRefreshing ? 'Refreshing...' : 'Refresh Prices'}
+          <button className="btn btn-secondary" onClick={handleRefreshAll} disabled={refreshingAll || isEmpty}>
+            <RefreshCw size={16} className={refreshingAll ? 'spin' : ''} /> {refreshingAll ? 'Refreshing...' : 'Refresh All'}
           </button>
           <button className="btn btn-primary" onClick={handleSaveSnapshot} disabled={snapshotSaving || isEmpty}>
             <Camera size={16} /> {snapshotSaving ? 'Saving...' : 'Snapshot'}
@@ -280,7 +282,7 @@ export default function PortfolioPage() {
         </div>
       ) : (
         <>
-          {activeTab === 'overview' && <OverviewTab portfolio={p} fmtD={fmtD} hideAmounts={hideAmounts} priceRefreshResult={priceRefreshResult} balanceRefreshResult={balanceRefreshResult} />}
+          {activeTab === 'overview' && <OverviewTab portfolio={p} fmtD={fmtD} hideAmounts={hideAmounts} refreshResult={refreshResult} />}
           {activeTab === 'country' && <GroupTab groups={p.by_country} fmtD={fmtD} expanded={expandedGroups} toggle={toggleGroup} labelKey="country" />}
           {activeTab === 'account' && <GroupTab groups={p.by_account} fmtD={fmtD} expanded={expandedGroups} toggle={toggleGroup} labelKey="account" />}
           {activeTab === 'type' && <TypeTab groups={p.by_type} fmtD={fmtD} />}
@@ -297,7 +299,7 @@ export default function PortfolioPage() {
 // Overview Tab
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-function OverviewTab({ portfolio, fmtD, hideAmounts, priceRefreshResult, balanceRefreshResult }) {
+function OverviewTab({ portfolio, fmtD, hideAmounts, refreshResult }) {
   const { summary, by_country, by_type } = portfolio;
 
   const countryChartData = useMemo(() =>
@@ -330,9 +332,9 @@ function OverviewTab({ portfolio, fmtD, hideAmounts, priceRefreshResult, balance
 
   return (
     <>
-      {(priceRefreshResult || balanceRefreshResult) && (
+      {refreshResult && (
         <div className="text-muted" style={{ fontSize: 12, marginBottom: 8, textAlign: 'right' }}>
-          {[priceRefreshResult, balanceRefreshResult].filter(Boolean).join(' | ')}
+          {refreshResult}
         </div>
       )}
       {/* Summary Cards */}
