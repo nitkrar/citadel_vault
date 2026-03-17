@@ -42,7 +42,7 @@ if ($method === 'GET' && $action === 'counts') {
 if ($method === 'GET' && $action === 'deleted') {
     $db = Database::getInstance();
     $stmt = $db->prepare(
-        "SELECT ve.id, ve.entry_type, ve.encrypted_data, ve.deleted_at, ve.created_at, ve.updated_at,
+        "SELECT ve.id, ve.entry_type, ve.template_id, ve.encrypted_data, ve.deleted_at, ve.created_at, ve.updated_at,
                 et.name AS template_name, et.icon AS template_icon, et.fields AS template_fields
          FROM vault_entries ve
          LEFT JOIN entry_templates et ON ve.template_id = et.id
