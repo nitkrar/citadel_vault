@@ -9,18 +9,21 @@ export default defineConfig({
     baseURL: 'http://localhost:5173',
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
+    // macOS 15+ blocks headless Chrome (bootstrap_check_in permission denied).
+    // Headed mode works fine — Playwright still uses isolated temp profiles.
+    headless: false,
+    launchOptions: {
+      executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    },
   },
   projects: [
-    // Auth setup — runs first, saves auth state for other tests
     {
       name: 'setup',
       testMatch: /auth\.setup\.js/,
-      use: { browserName: 'chromium' },
     },
     {
-      name: 'firefox',
+      name: 'chromium',
       use: {
-        browserName: 'chromium',
         storageState: 'tests/e2e/.auth/user.json',
       },
       dependencies: ['setup'],
