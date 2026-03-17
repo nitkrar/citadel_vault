@@ -210,7 +210,7 @@ export default function VaultPage() {
         const { data: acctResp } = await api.post('/vault.php', {
           entry_type: 'account',
           template_id: acctTpl?.id || null,
-          encrypted_encrypted_data: acctBlob,
+          encrypted_data: acctBlob,
         });
         const acctId = apiData({ data: acctResp })?.id;
         const acctEntry = {
@@ -235,7 +235,7 @@ export default function VaultPage() {
         const { data: cashResp } = await api.post('/vault.php', {
           entry_type: 'asset',
           template_id: cashTpl?.id || null,
-          encrypted_encrypted_data: cashBlob,
+          encrypted_data: cashBlob,
         });
         const cashId = apiData({ data: cashResp })?.id;
         const cashEntry = {
@@ -709,7 +709,7 @@ export default function VaultPage() {
     const { data: resp } = await api.post('/vault.php', {
       entry_type: 'asset',
       template_id: cashTpl?.id || null,
-      encrypted_encrypted_data: blob,
+      encrypted_data: blob,
     });
     const cashId = apiData({ data: resp })?.id;
     const cashEntry = {
