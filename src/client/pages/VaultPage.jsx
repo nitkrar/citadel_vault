@@ -172,8 +172,34 @@ export default function VaultPage() {
           last_refreshed: new Date().toISOString(),
         };
 
-        // Create Account entry
-        const acctTpl = templates.find(t => t.template_key === 'account' && !t.owner_id && !t.country_code && !t.subtype);
+        // Smart template mapping: match Plaid account type/subtype to Citadel template
+        // Ref: https://plaid.com/docs/api/accounts/
+        const plaidSubtype = acct.subtype || '';
+        const plaidType = acct.type || '';
+        const findAcctTpl = (subtype) => templates.find(t => t.template_key === 'account' && t.subtype === subtype && !t.owner_id);
+        const genericAcctTpl = templates.find(t => t.template_key === 'account' && !t.owner_id && !t.country_code && !t.subtype);
+        const RETIREMENT_SUBTYPES = ['401k', 'roth 401k', 'ira', 'roth', 'sep ira', 'simple ira', '403B', '457b',
+          'pension', 'keogh', 'profit sharing plan', 'thrift savings plan', '401a', 'sarsep', 'lira', 'lif',
+          'lrif', 'lrsp', 'rrsp', 'rrif', 'rdsp', 'resp', 'prif', 'rlif', 'tfsa', 'sipp'];
+
+        let acctTpl;
+        if (plaidType === 'credit') {
+          acctTpl = findAcctTpl('credit_card') || genericAcctTpl;
+        } else if (plaidSubtype === 'checking' || plaidSubtype === 'cash management') {
+          acctTpl = findAcctTpl('checking') || genericAcctTpl;
+        } else if (plaidSubtype === 'savings' || plaidSubtype === 'money market' || plaidSubtype === 'cd' || plaidSubtype === 'cash isa' || plaidSubtype === 'isa') {
+          acctTpl = findAcctTpl('savings') || genericAcctTpl;
+        } else if (plaidSubtype === 'prepaid' || plaidSubtype === 'ebt' || plaidSubtype === 'paypal') {
+          acctTpl = findAcctTpl('wallet') || genericAcctTpl;
+        } else if (RETIREMENT_SUBTYPES.includes(plaidSubtype)) {
+          acctTpl = findAcctTpl('401k') || genericAcctTpl;
+        } else if (plaidType === 'investment' || plaidSubtype === 'brokerage' || plaidSubtype === 'non-taxable brokerage account') {
+          acctTpl = findAcctTpl('brokerage') || genericAcctTpl;
+        } else {
+          acctTpl = genericAcctTpl;
+        }
+        const isLiability = plaidType === 'credit' || plaidType === 'loan';
+
         const acctForm = {
           title: `${acct.name} (${institutionName})`,
           institution: institutionName,
@@ -195,12 +221,13 @@ export default function VaultPage() {
         setDecryptedCache(prev => ({ ...prev, [acctId]: acctForm }));
         setEntries(prev => [acctEntry, ...prev]);
 
-        // Create linked Cash asset
+        // Create linked Cash asset (negative value for credit/liability)
         const cashTpl = templates.find(t => t.template_key === 'asset' && t.subtype === 'cash' && !t.owner_id);
+        const balanceValue = isLiability ? -Math.abs(acct.balance || 0) : (acct.balance || 0);
         const cashForm = {
-          title: `${acct.name} — Cash`,
+          title: `${acct.name} — Balance`,
           linked_account_id: String(acctId),
-          value: String(acct.balance || 0),
+          value: String(balanceValue),
           currency: acct.currency,
           _plaid: plaidMeta,
         };
@@ -1097,28 +1124,79 @@ export default function VaultPage() {
         <div className="flex items-center gap-2 flex-wrap">
           <button className="btn btn-ghost btn-sm" onClick={loadDeleted}><Undo2 size={14} /> Recently Deleted</button>
           <button className="btn btn-secondary btn-sm" onClick={() => setShowImport(true)}><Upload size={14} /> Import</button>
-          {plaidEnabled && (() => {
-            const plaidItemIds = [...new Set(
+          {(() => {
+            const plaidItemIds = plaidEnabled ? [...new Set(
               entries.map(e => decryptedCache[e.id]?._plaid?.item_id).filter(Boolean)
-            )];
+            )] : [];
+            const hasTickers = entries.some(e => {
+              const d = decryptedCache[e.id];
+              const tpl = templates.find(t => t.id === e.template_id) || e.template;
+              return (tpl?.subtype === 'stock' && d?.ticker) || (tpl?.subtype === 'crypto' && d?.coin);
+            });
+            const canRefresh = plaidItemIds.length > 0 || hasTickers;
             return (
               <>
-                {plaidItemIds.length > 0 && (
+                {canRefresh && (
                   <button className="btn btn-secondary btn-sm" disabled={plaidRefreshing}
                     onClick={async () => {
-                      try {
-                        const { updated } = await plaidRefreshBalances(plaidItemIds, entries, decryptedCache,
-                          (id, data) => setDecryptedCache(prev => ({ ...prev, [id]: data })));
-                        setPlaidMsg(`Refreshed ${updated} balance${updated !== 1 ? 's' : ''}`);
-                        setTimeout(() => setPlaidMsg(''), 3000);
-                      } catch { setPlaidMsg('Refresh failed'); setTimeout(() => setPlaidMsg(''), 5000); }
+                      const results = [];
+                      const promises = [];
+                      // Refresh prices
+                      if (hasTickers) {
+                        const tickers = [];
+                        for (const e of entries) {
+                          const d = decryptedCache[e.id];
+                          const tpl = templates.find(t => t.id === e.template_id) || e.template;
+                          if (tpl?.subtype === 'stock' && d?.ticker) tickers.push(d.ticker);
+                          else if (tpl?.subtype === 'crypto' && d?.coin) tickers.push(d.coin);
+                        }
+                        if (tickers.length > 0) {
+                          promises.push(
+                            api.post('/prices.php', { tickers: [...new Set(tickers)] })
+                              .then(async ({ data: resp }) => {
+                                const priceResult = apiData({ data: resp });
+                                const prices = priceResult?.prices || {};
+                                let priceCount = 0;
+                                for (const e of entries) {
+                                  const d = decryptedCache[e.id];
+                                  const tpl = templates.find(t => t.id === e.template_id) || e.template;
+                                  const ticker = tpl?.subtype === 'crypto' ? d?.coin : d?.ticker;
+                                  if (!ticker || !prices[ticker]) continue;
+                                  const priceKey = tpl?.subtype === 'crypto' ? 'price_per_unit' : 'price_per_share';
+                                  const updated = { ...d, [priceKey]: String(prices[ticker].price), currency: prices[ticker].currency };
+                                  const blob = await encrypt(updated);
+                                  await api.put(`/vault.php?id=${e.id}`, { encrypted_data: blob });
+                                  await entryStore.put({ ...e, encrypted_data: blob, updated_at: new Date().toISOString() });
+                                  setDecryptedCache(prev => ({ ...prev, [e.id]: updated }));
+                                  priceCount++;
+                                }
+                                if (priceCount > 0) results.push(`${priceCount} price${priceCount !== 1 ? 's' : ''}`);
+                              })
+                              .catch(() => results.push('prices failed'))
+                          );
+                        }
+                      }
+                      // Refresh balances
+                      if (plaidItemIds.length > 0) {
+                        promises.push(
+                          plaidRefreshBalances(plaidItemIds, entries, decryptedCache,
+                            (id, data) => setDecryptedCache(prev => ({ ...prev, [id]: data })))
+                            .then(({ updated }) => { if (updated > 0) results.push(`${updated} balance${updated !== 1 ? 's' : ''}`); })
+                            .catch(() => results.push('balances failed'))
+                        );
+                      }
+                      await Promise.all(promises);
+                      setPlaidMsg(results.length > 0 ? `Refreshed ${results.join(', ')}` : 'Everything up to date');
+                      setTimeout(() => setPlaidMsg(''), 3000);
                     }}>
-                    <RefreshCw size={14} className={plaidRefreshing ? 'spin' : ''} /> {plaidRefreshing ? 'Refreshing...' : 'Refresh Balances'}
+                    <RefreshCw size={14} className={plaidRefreshing ? 'spin' : ''} /> {plaidRefreshing ? 'Refreshing...' : 'Refresh All'}
                   </button>
                 )}
-                <button className="btn btn-secondary" onClick={openPlaidConnect} disabled={plaidConnectLoading}>
-                  <Landmark size={14} /> {plaidConnectLoading ? 'Connecting...' : 'Connect Bank'}
-                </button>
+                {plaidEnabled && (
+                  <button className="btn btn-secondary" onClick={openPlaidConnect} disabled={plaidConnectLoading}>
+                    <Landmark size={14} /> {plaidConnectLoading ? 'Connecting...' : 'Connect Bank'}
+                  </button>
+                )}
               </>
             );
           })()}
@@ -1209,7 +1287,15 @@ export default function VaultPage() {
                       <tr key={entry.id} style={{ cursor: 'pointer' }} onClick={() => { setViewEntry(entry); }}>
                         <td><Icon size={16} style={{ color: meta.color }} /></td>
                         <td><span className="font-medium">{title}</span></td>
-                        <td><span className="text-muted">{typeof detail === 'string' ? (detail.length > 40 ? detail.slice(0, 40) + '...' : detail) : ''}</span></td>
+                        <td>
+                          <span className="text-muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            {typeof detail === 'string' ? (detail.length > 40 ? detail.slice(0, 40) + '...' : detail) : ''}
+                            {(d?.linked_account_id || d?._plaid) && (
+                              <Link2 size={12} style={{ color: d?._plaid ? 'var(--color-primary, #2563eb)' : 'var(--color-success, #16a34a)', flexShrink: 0 }}
+                                title={d?._plaid ? 'Connected via Plaid' : 'Linked to account'} />
+                            )}
+                          </span>
+                        </td>
                         <td><span className="text-muted" style={{ fontSize: 13 }}>{entry.updated_at ? new Date(entry.updated_at).toLocaleDateString() : '--'}</span></td>
                         <td>
                           <div className="td-actions">
@@ -1578,6 +1664,42 @@ export default function VaultPage() {
                       }}
                     >
                       <RefreshCw size={12} className={plaidRefreshing ? 'spin' : ''} /> {plaidRefreshing ? 'Refreshing...' : 'Refresh'}
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm text-danger"
+                      style={{ fontSize: 11, padding: '2px 8px' }}
+                      onClick={async () => {
+                        if (!confirm('Disconnect this account from Plaid? The entry will be kept but balance refresh will no longer work.')) return;
+                        try {
+                          await api.delete(`/plaid.php?action=disconnect&item_id=${d._plaid.item_id}`);
+                          // Remove _plaid from this entry and linked assets
+                          const updatedData = { ...d };
+                          delete updatedData._plaid;
+                          const blob = await encrypt(updatedData);
+                          await api.put(`/vault.php?id=${viewEntry.id}`, { encrypted_data: blob });
+                          await entryStore.put({ ...viewEntry, encrypted_data: blob, updated_at: new Date().toISOString() });
+                          setDecryptedCache(prev => ({ ...prev, [viewEntry.id]: updatedData }));
+                          // Also remove _plaid from linked assets
+                          for (const entry of entries) {
+                            const ad = decryptedCache[entry.id];
+                            if (ad?._plaid?.item_id === d._plaid.item_id) {
+                              const cleanData = { ...ad };
+                              delete cleanData._plaid;
+                              const assetBlob = await encrypt(cleanData);
+                              await api.put(`/vault.php?id=${entry.id}`, { encrypted_data: assetBlob });
+                              await entryStore.put({ ...entry, encrypted_data: assetBlob, updated_at: new Date().toISOString() });
+                              setDecryptedCache(prev => ({ ...prev, [entry.id]: cleanData }));
+                            }
+                          }
+                          setPlaidMsg('Disconnected from Plaid');
+                          setTimeout(() => setPlaidMsg(''), 3000);
+                        } catch (err) {
+                          setPlaidMsg(err.response?.data?.error || 'Disconnect failed');
+                          setTimeout(() => setPlaidMsg(''), 5000);
+                        }
+                      }}
+                    >
+                      Disconnect
                     </button>
                   </div>
                 </div>
