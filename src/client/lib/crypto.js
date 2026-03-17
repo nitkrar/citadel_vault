@@ -170,6 +170,9 @@ export async function decrypt(blob, key) {
  * Encrypt a JSON object. Serializes to JSON, then encrypts.
  */
 export async function encryptEntry(obj, key) {
+    if (obj === null || obj === undefined) {
+        throw new Error('Cannot encrypt null or undefined data');
+    }
     return encrypt(JSON.stringify(obj), key);
 }
 

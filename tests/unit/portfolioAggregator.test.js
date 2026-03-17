@@ -39,6 +39,17 @@ describe('buildRateMap', () => {
     const map = buildRateMap([{ code: 'XYZ', exchange_rate_to_base: null }]);
     expect(map.XYZ).toBe(0);
   });
+
+  it('defaults to 0 for NaN and non-numeric exchange rates', () => {
+    const map = buildRateMap([
+      { code: 'A', exchange_rate_to_base: 'not-a-number' },
+      { code: 'B', exchange_rate_to_base: undefined },
+      { code: 'C', exchange_rate_to_base: '' },
+    ]);
+    expect(map.A).toBe(0);
+    expect(map.B).toBe(0);
+    expect(map.C).toBe(0);
+  });
 });
 
 // ── buildSymbolMap ──────────────────────────────────────────────────────
@@ -96,6 +107,16 @@ describe('convertCurrency', () => {
 
   it('handles zero', () => {
     expect(convertCurrency(0, 'USD', 'GBP', RATE_MAP)).toBe(0);
+  });
+
+  it('returns amount unchanged when toRate is 0 (no divide-by-zero)', () => {
+    const rateMap = { USD: 0.79, BAD: 0 };
+    expect(convertCurrency(100, 'USD', 'BAD', rateMap)).toBe(100);
+  });
+
+  it('returns amount unchanged when fromRate is 0', () => {
+    const rateMap = { BAD: 0, GBP: 1.0 };
+    expect(convertCurrency(100, 'BAD', 'GBP', rateMap)).toBe(100);
   });
 });
 

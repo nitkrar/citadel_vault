@@ -12,12 +12,13 @@ class Auth {
     public static function generateToken(array $user): string {
         $header = self::base64UrlEncode(json_encode(['alg' => 'HS256', 'typ' => 'JWT']));
         $payload = self::base64UrlEncode(json_encode([
-            'sub'        => $user['id'],
-            'username'   => $user['username'],
-            'role'       => $user['role'],
-            'checked_at' => time(),
-            'iat'        => time(),
-            'exp'        => time() + JWT_EXPIRY,
+            'sub'                 => $user['id'],
+            'username'            => $user['username'],
+            'role'                => $user['role'],
+            'must_reset_password' => !empty($user['must_reset_password']),
+            'checked_at'          => time(),
+            'iat'                 => time(),
+            'exp'                 => time() + JWT_EXPIRY,
         ]));
         $signature = self::base64UrlEncode(hash_hmac('sha256', "$header.$payload", JWT_SECRET, true));
         return "$header.$payload.$signature";
@@ -90,8 +91,12 @@ class Auth {
     /**
      * Require authentication. Validates JWT AND checks is_active in DB.
      * Returns JWT payload with fresh role from database.
+     *
+     * @param bool $allowMustResetPassword  When true, skip the must_reset_password
+     *             block so that the force-change-password and profile endpoints
+     *             remain accessible to users who are forced to change their password.
      */
-    public static function requireAuth(): array {
+    public static function requireAuth(bool $allowMustResetPassword = false): array {
         $token = self::getBearerToken();
         if (!$token) {
             http_response_code(401);
@@ -102,6 +107,12 @@ class Auth {
         if (!$payload) {
             http_response_code(401);
             die(json_encode(['success' => false, 'error' => 'Invalid or expired token.']));
+        }
+
+        // Check must_reset_password from JWT payload (cached path)
+        if (!$allowMustResetPassword && !empty($payload['must_reset_password'])) {
+            http_response_code(403);
+            die(json_encode(['success' => false, 'error' => 'Password change required.', 'must_change_password' => true]));
         }
 
         // Skip DB check if checked_at is within the configured interval
@@ -126,7 +137,7 @@ class Auth {
             return $payload;
         }
 
-        $stmt = $db->prepare("SELECT is_active, role FROM users WHERE id = ?");
+        $stmt = $db->prepare("SELECT is_active, role, must_reset_password FROM users WHERE id = ?");
         $stmt->execute([$payload['sub']]);
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -135,8 +146,14 @@ class Auth {
             die(json_encode(['success' => false, 'error' => 'Account has been deactivated.']));
         }
 
-        // Refresh role and checked_at, reissue JWT cookie
+        if (!$allowMustResetPassword && !empty($user['must_reset_password'])) {
+            http_response_code(403);
+            die(json_encode(['success' => false, 'error' => 'Password change required.', 'must_change_password' => true]));
+        }
+
+        // Refresh role, must_reset_password, and checked_at, reissue JWT cookie
         $payload['role'] = $user['role'];
+        $payload['must_reset_password'] = !empty($user['must_reset_password']);
         $payload['checked_at'] = time();
         $newToken = self::generateTokenFromPayload($payload);
         self::setAuthCookie($newToken);

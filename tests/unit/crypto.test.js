@@ -104,6 +104,23 @@ describe('AES-256-GCM encrypt/decrypt', () => {
     expect(result).toBe(plaintext);
   });
 
+  it('encryptEntry throws on null input', async () => {
+    const dek = await generateDek();
+    await expect(encryptEntry(null, dek)).rejects.toThrow('Cannot encrypt null or undefined data');
+  });
+
+  it('encryptEntry throws on undefined input', async () => {
+    const dek = await generateDek();
+    await expect(encryptEntry(undefined, dek)).rejects.toThrow('Cannot encrypt null or undefined data');
+  });
+
+  it('encryptEntry succeeds with empty object', async () => {
+    const dek = await generateDek();
+    const blob = await encryptEntry({}, dek);
+    const result = await decryptEntry(blob, dek);
+    expect(result).toEqual({});
+  });
+
   it('handles large JSON objects', async () => {
     const dek = await generateDek();
     const obj = {
