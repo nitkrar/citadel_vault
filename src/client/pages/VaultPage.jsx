@@ -464,7 +464,7 @@ export default function VaultPage() {
       const { data: resp } = await api.post('/vault.php', {
         entry_type: formType,
         template_id: formTemplateId,
-        encrypted_encrypted_data: blob,
+        encrypted_data: blob,
       });
       const newId = apiData({ data: resp })?.id;
       // Add to local store
