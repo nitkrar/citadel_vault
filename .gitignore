@@ -14,7 +14,6 @@ TODO.md
 docs/
 skills/
 tests/.venv/
-.pytest_cache/
 tests/e2e/.auth/user.json
 playwright-report/
 test-results/
