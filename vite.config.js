@@ -63,7 +63,12 @@ export default defineConfig(({ mode }) => {
       alias: { '@': path.resolve(__dirname, 'src/client') },
     },
     test: {
-      include: ['tests/unit/**/*.test.js'],
+      include: [
+        'tests/unit/**/*.test.js',
+        'tests/component/**/*.test.{js,jsx}',
+      ],
+      exclude: ['tests/api-js/**'],
+      setupFiles: ['tests/setup.js'],
     },
     server: {
       port: 5173,
