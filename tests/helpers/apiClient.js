@@ -7,9 +7,43 @@ const BASE_URL = process.env.TEST_API_URL || 'http://localhost:8081/src/api';
 
 const TEST_USERS = {
   admin: { username: 'initial_user', password: 'Initial#12$' },
-  // Add more users as fixtures are created:
-  // regular: { username: 'test_regular', password: 'Test#Regular1' },
+  regular: { username: 'test_regular_user', password: 'TestRegular#1' },
 };
+
+/**
+ * Ensure the regular test user exists. Creates via admin API if missing.
+ * Called lazily on first getToken('regular').
+ */
+let regularUserEnsured = false;
+async function ensureRegularUser() {
+  if (regularUserEnsured) return;
+  regularUserEnsured = true;
+
+  const adminToken = await getToken('admin');
+  const { username, password } = TEST_USERS.regular;
+
+  // Try to create — 409 means already exists (fine)
+  const resp = await fetch(`${BASE_URL}/users.php`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${adminToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      username,
+      email: `${username}@test.local`,
+      password,
+      role: 'user',
+    }),
+  });
+
+  if (resp.status === 201 || resp.status === 409) {
+    // New user has must_reset_password=1 — do a force-change to clear it
+    // Login will return must_change_password flag but still give a token
+    return;
+  }
+  console.warn(`ensureRegularUser: unexpected status ${resp.status}`);
+}
 
 let cachedTokens = {};
 
@@ -18,6 +52,9 @@ let cachedTokens = {};
  */
 async function getToken(role = 'admin') {
   if (cachedTokens[role]) return cachedTokens[role];
+
+  // Ensure regular user exists before first login attempt
+  if (role === 'regular') await ensureRegularUser();
 
   const creds = TEST_USERS[role];
   if (!creds) throw new Error(`Unknown test role: ${role}`);
