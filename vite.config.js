@@ -37,6 +37,22 @@ export default defineConfig(({ mode }) => {
           // No API caching — IndexedDB handles data caching.
           // Service worker only caches static assets (app shell).
           navigateFallback: '/index.html',
+          // iOS PWA resilience: use NetworkFirst for navigation so the app
+          // never serves a stale HTML shell that can't bootstrap.
+          // JS/CSS assets use precache (content-hashed, safe to cache forever).
+          runtimeCaching: [
+            {
+              urlPattern: ({ request }) => request.mode === 'navigate',
+              handler: 'NetworkFirst',
+              options: {
+                cacheName: 'html-cache',
+                networkTimeoutSeconds: 3,
+                plugins: [
+                  { cacheWillUpdate: async ({ response }) => response?.status === 200 ? response : null },
+                ],
+              },
+            },
+          ],
         },
       }),
     ],
