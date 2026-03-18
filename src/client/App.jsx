@@ -29,6 +29,7 @@ import DevGuidePage from './pages/DevGuidePage';
 import FeaturesPage from './pages/FeaturesPage';
 import EncryptionKeyModal from './components/EncryptionKeyModal';
 import UpdateToast from './components/UpdateToast';
+import ErrorBoundary from './components/ErrorBoundary';
 
 // --- ProtectedRoute ---
 function ProtectedRoute({ children, adminOnly = false }) {
@@ -231,12 +232,14 @@ function EncryptionWrapper({ children }) {
 // --- App ---
 export default function App() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <EncryptionWrapper>
-          <AppRoutes />
-        </EncryptionWrapper>
-      </AuthProvider>
-    </BrowserRouter>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <AuthProvider>
+          <EncryptionWrapper>
+            <AppRoutes />
+          </EncryptionWrapper>
+        </AuthProvider>
+      </BrowserRouter>
+    </ErrorBoundary>
   );
 }
