@@ -13,10 +13,9 @@ import api from '../api/client';
 import ImportModal from '../components/ImportModal';
 
 const FORMAT_OPTIONS = ['json', 'csv', 'xlsx', 'pdf'];
-const DETAIL_LEVELS = [
-  { value: 'summary', label: 'Summary', desc: 'Titles only' },
-  { value: 'masked', label: 'Masked', desc: 'Secrets hidden' },
-  { value: 'full', label: 'Full', desc: 'All data' },
+const PDF_MODES = [
+  { value: 'overview', label: 'Overview', desc: 'Compact one-liner per entry' },
+  { value: 'full', label: 'Full Detail', desc: 'Every field, secrets included' },
 ];
 
 export default function ImportExportPage() {
@@ -39,7 +38,7 @@ export default function ImportExportPage() {
   // Export
   const [selectedTypes, setSelectedTypes] = useState(new Set(VALID_ENTRY_TYPES));
   const [format, setFormat] = useState('json');
-  const [detailLevel, setDetailLevel] = useState('masked');
+  const [pdfMode, setPdfMode] = useState('overview');
   const [exporting, setExporting] = useState(false);
   const [exported, setExported] = useState(false);
 
@@ -87,7 +86,7 @@ export default function ImportExportPage() {
         await exportXlsx(grouped, dateSuffix);
       } else if (format === 'pdf') {
         const templates = await entryStore.getAllTemplates();
-        await exportPdf(grouped, templates, detailLevel, dateSuffix);
+        await exportPdf(grouped, templates, pdfMode, dateSuffix);
       }
 
       setExported(true);
@@ -138,7 +137,7 @@ export default function ImportExportPage() {
           <span>Exported files contain <strong>unencrypted data</strong>. Store them securely.</span>
         </div>
 
-        {format === 'pdf' && detailLevel === 'full' && (
+        {format === 'pdf' && pdfMode === 'full' && (
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: 8, padding: '10px 12px', marginBottom: 20, color: '#991b1b', fontSize: 13 }}>
             <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
             <span><strong>Full detail</strong> includes all secrets (passwords, keys) in plain text.</span>
@@ -171,13 +170,13 @@ export default function ImportExportPage() {
 
             {format === 'pdf' && (
               <div style={{ marginBottom: 16 }}>
-                <h3 style={{ marginBottom: 8, fontSize: 14 }}>Detail level</h3>
+                <h3 style={{ marginBottom: 8, fontSize: 14 }}>PDF mode</h3>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {DETAIL_LEVELS.map(dl => (
-                    <label key={dl.value} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
-                      <input type="radio" name="detailLevel" checked={detailLevel === dl.value}
-                        onChange={() => setDetailLevel(dl.value)} />
-                      <span><strong>{dl.label}</strong> — {dl.desc}</span>
+                  {PDF_MODES.map(m => (
+                    <label key={m.value} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
+                      <input type="radio" name="pdfMode" checked={pdfMode === m.value}
+                        onChange={() => setPdfMode(m.value)} />
+                      <span><strong>{m.label}</strong> — {m.desc}</span>
                     </label>
                   ))}
                 </div>
