@@ -1,216 +1,206 @@
 /**
  * PDF exporter for Citadel Vault.
  * Produces a structured A4 report using jsPDF.
- * Supports three detail levels: summary, masked, full.
+ * Two modes: overview (compact one-liners) and full (all fields expanded).
  */
 
 import { cleanEntry, TYPE_LABELS } from './exportHelpers';
 
 const MARGIN_LEFT = 15;
-const LINE_HEIGHT_BODY = 6;
-const LINE_HEIGHT_HEADER = 10;
+const INDENT = 20;
+const LINE_HEIGHT = 6;
+const HEADER_HEIGHT = 10;
 const PAGE_BOTTOM = 270;
 const PAGE_TOP = 20;
 
-// Internal fields that are never printed as entry fields.
-const SKIP_FIELDS = new Set(['row_id', 'linked_account_id']);
+// Fields never printed as entry detail lines
+const SKIP_FIELDS = new Set(['row_id', 'linked_account_id', 'title', 'name', 'currency', 'value', 'current_value', 'face_value']);
 
-/**
- * Parse template fields — may be a JSON string or already an array.
- * Returns [] on failure.
- */
+// Currency symbols
+const CURRENCY_SYMBOLS = { GBP: '£', USD: '$', EUR: '€', JPY: '¥', INR: '₹', CAD: 'C$', AUD: 'A$' };
+
+function currencySymbol(code) {
+  return CURRENCY_SYMBOLS[code?.toUpperCase()] || (code ? code + ' ' : '');
+}
+
 function parseFields(raw) {
   if (!raw) return [];
   if (Array.isArray(raw)) return raw;
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+  try { const p = JSON.parse(raw); return Array.isArray(p) ? p : []; } catch { return []; }
 }
 
-/**
- * Find the system template (no owner_id) for a given type.
- */
 function findTemplate(templates, type) {
   return templates.find(t => t.template_key === type && !t.owner_id) ?? null;
 }
 
-/**
- * Render a single entry's fields at the current Y position.
- * Shows ALL fields from the entry, using template definitions for labels and masking hints.
- * Returns the updated Y position.
- */
-function renderEntryFields(doc, entry, templateFields, detailLevel, y) {
-  const clean = cleanEntry(entry);
+function checkPageBreak(doc, y, needed = LINE_HEIGHT) {
+  if (y + needed > PAGE_BOTTOM) { doc.addPage(); return PAGE_TOP; }
+  return y;
+}
 
-  // Build a map from template fields for labels and type info
+/**
+ * Format a value with its currency symbol.
+ * e.g. formatValue(12000, 'GBP') → '£12,000'
+ */
+function formatValue(val, currency) {
+  if (val === undefined || val === null || val === '') return '';
+  const num = Number(val);
+  const sym = currencySymbol(currency);
+  if (!isNaN(num)) {
+    return `${sym}${num.toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+  }
+  return `${sym}${val}`;
+}
+
+/**
+ * Get the primary value from a cleaned entry (value, current_value, or face_value).
+ */
+function getPrimaryValue(clean) {
+  return clean.value ?? clean.current_value ?? clean.face_value ?? null;
+}
+
+/**
+ * Build a compact one-liner for overview mode.
+ * Accounts: "HSBC Current (savings) - GBP"
+ * Assets: "ISA Cash (cash) - £12,000"
+ * Passwords: "Gmail Login"
+ * Licenses: "JetBrains IDE - expires 2027-01-15"
+ * Insurance: "Home Insurance - Aviva - expires 2027-06-01"
+ */
+function buildOneLiner(clean, type) {
+  const title = clean.title ?? clean.name ?? '(untitled)';
+  const subtype = clean.subtype;
+  const titlePart = subtype ? `${title} (${subtype})` : title;
+
+  if (type === 'account') {
+    const currency = clean.currency || '';
+    return currency ? `${titlePart} - ${currency}` : titlePart;
+  }
+  if (type === 'asset') {
+    const val = getPrimaryValue(clean);
+    return val ? `${titlePart} - ${formatValue(val, clean.currency)}` : titlePart;
+  }
+  if (type === 'license') {
+    const exp = clean.expiry_date;
+    return exp ? `${titlePart} - expires ${exp}` : titlePart;
+  }
+  if (type === 'insurance') {
+    const provider = clean.provider || '';
+    const exp = clean.expiry_date || clean.maturity_date || '';
+    const parts = [titlePart, provider, exp ? `expires ${exp}` : ''].filter(Boolean);
+    return parts.join(' - ');
+  }
+  return titlePart;
+}
+
+/**
+ * Render expanded fields for full mode. Skips fields already shown inline (title, value, currency).
+ */
+function renderExpandedFields(doc, entry, templateFields, x, y) {
+  const clean = cleanEntry(entry);
   const fieldMeta = {};
   for (const f of templateFields) {
     const key = f.key ?? f.name;
     if (key) fieldMeta[key] = f;
   }
 
-  // Show all fields from the actual entry data (not just template-defined)
   for (const [key, rawValue] of Object.entries(clean)) {
     if (SKIP_FIELDS.has(key)) continue;
-    if (key === 'title' || key === 'name') continue; // already shown as entry title
-    if (rawValue === undefined || rawValue === null || rawValue === '') continue;
-    // Skip internal/Plaid fields
     if (key.startsWith('_')) continue;
+    if (rawValue === undefined || rawValue === null || rawValue === '') continue;
 
     const meta = fieldMeta[key];
-    let displayValue = String(rawValue);
-
-    // In masked mode, hide secret fields
-    if (detailLevel === 'masked' && meta?.type === 'secret') {
-      displayValue = '********';
-    }
-
     const label = meta?.label ?? key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-    y = checkPageBreak(doc, y, LINE_HEIGHT_BODY);
-    doc.text(`   ${label}: ${displayValue}`, MARGIN_LEFT, y);
-    y += LINE_HEIGHT_BODY;
-  }
 
-  return y;
-}
-
-/**
- * Add a new page if we're too close to the bottom. Returns updated Y.
- */
-function checkPageBreak(doc, y, neededHeight = LINE_HEIGHT_BODY) {
-  if (y + neededHeight > PAGE_BOTTOM) {
-    doc.addPage();
-    return PAGE_TOP;
+    y = checkPageBreak(doc, y, LINE_HEIGHT);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(80, 80, 80);
+    doc.text(`${label}: ${rawValue}`, x, y);
+    y += LINE_HEIGHT;
   }
   return y;
 }
 
-/**
- * Print a section header line. Returns updated Y.
- */
-function renderSectionHeader(doc, text, y) {
-  y = checkPageBreak(doc, y, LINE_HEIGHT_HEADER);
+// ── Section renderers ────────────────────────────────────────────────────
+
+function renderAccountsAndAssets(doc, accounts, assets, templates, mode, y) {
+  const header = `== Accounts & Assets (${accounts.length} account${accounts.length !== 1 ? 's' : ''}, ${assets.length} asset${assets.length !== 1 ? 's' : ''}) ==`;
+  y = checkPageBreak(doc, y, HEADER_HEIGHT);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(14);
   doc.setTextColor(0, 0, 0);
-  doc.text(text, MARGIN_LEFT, y);
-  y += LINE_HEIGHT_HEADER;
-  return y;
-}
+  doc.text(header, MARGIN_LEFT, y);
+  y += HEADER_HEIGHT;
 
-/**
- * Print an entry title line ("N. {title}"). Returns updated Y.
- */
-function renderEntryTitle(doc, rowId, title, y) {
-  y = checkPageBreak(doc, y, LINE_HEIGHT_BODY + 2);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(12);
-  doc.setTextColor(0, 0, 0);
-  doc.text(`${rowId}. ${title ?? '(untitled)'}`, MARGIN_LEFT, y);
-  y += LINE_HEIGHT_BODY + 2;
-  return y;
-}
-
-/**
- * Switch to normal body text style.
- */
-function setBodyStyle(doc) {
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(11);
-  doc.setTextColor(60, 60, 60);
-}
-
-/**
- * Render the Accounts & Assets combined section.
- * Accounts are listed first; their linked assets are indented beneath them.
- * Unlinked assets follow after all accounts.
- */
-function renderAccountsAndAssets(doc, accounts, assets, templates, detailLevel, y) {
-  const accountCount = accounts.length;
-  const assetCount = assets.length;
-
-  const header = `== Accounts & Assets (${accountCount} account${accountCount !== 1 ? 's' : ''}, ${assetCount} asset${assetCount !== 1 ? 's' : ''}) ==`;
-  y = renderSectionHeader(doc, header, y);
-
-  const accountTemplate = findTemplate(templates, 'account');
-  const accountFields = accountTemplate ? parseFields(accountTemplate.fields) : [];
-
-  const assetTemplate = findTemplate(templates, 'asset');
-  const assetFields = assetTemplate ? parseFields(assetTemplate.fields) : [];
-
+  const accountFields = parseFields(findTemplate(templates, 'account')?.fields);
+  const assetFields = parseFields(findTemplate(templates, 'asset')?.fields);
   const linkedAssetIds = new Set();
 
   for (const account of accounts) {
     const clean = cleanEntry(account);
-    const title = clean.title ?? clean.name ?? '(untitled)';
+    const oneLiner = buildOneLiner(clean, 'account');
 
-    y = renderEntryTitle(doc, account.row_id, title, y);
+    y = checkPageBreak(doc, y, LINE_HEIGHT + 2);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.setTextColor(0, 0, 0);
+    doc.text(`${account.row_id}. ${oneLiner}`, MARGIN_LEFT, y);
+    y += LINE_HEIGHT + 2;
 
-    if (detailLevel !== 'summary') {
-      setBodyStyle(doc);
-      y = renderEntryFields(doc, account, accountFields, detailLevel, y);
+    // Full mode: expanded account fields
+    if (mode === 'full') {
+      y = renderExpandedFields(doc, account, accountFields, INDENT, y);
     }
 
-    // Find assets linked to this account
-    const linkedAssets = assets.filter(
-      a => String(a.linked_account_id) === String(account.row_id)
-    );
-
-    for (const asset of linkedAssets) {
+    // Linked assets
+    const linked = assets.filter(a => String(a.linked_account_id) === String(account.row_id));
+    for (const asset of linked) {
       linkedAssetIds.add(asset.row_id);
       const assetClean = cleanEntry(asset);
+      const val = getPrimaryValue(assetClean);
       const assetTitle = assetClean.title ?? assetClean.name ?? '(untitled)';
+      const valuePart = val ? ` - ${formatValue(val, assetClean.currency)}` : '';
 
-      y = checkPageBreak(doc, y, LINE_HEIGHT_BODY);
+      y = checkPageBreak(doc, y, LINE_HEIGHT);
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(11);
       doc.setTextColor(80, 80, 80);
+      doc.text(`   |-- ${assetTitle}${valuePart}`, MARGIN_LEFT, y);
+      y += LINE_HEIGHT;
 
-      if (detailLevel === 'summary') {
-        doc.text(`   |-- ${assetTitle}`, MARGIN_LEFT, y);
-        y += LINE_HEIGHT_BODY;
-      } else {
-        doc.text(`   |-- ${assetTitle}`, MARGIN_LEFT, y);
-        y += LINE_HEIGHT_BODY;
-        setBodyStyle(doc);
-        y = renderEntryFields(doc, asset, assetFields, detailLevel, y);
+      // Full mode: expanded asset fields
+      if (mode === 'full') {
+        y = renderExpandedFields(doc, asset, assetFields, INDENT + 10, y);
       }
     }
 
-    // Blank line between accounts
     y += 2;
   }
 
   // Unlinked assets
-  const unlinkedAssets = assets.filter(a => !linkedAssetIds.has(a.row_id));
-
-  if (unlinkedAssets.length > 0) {
-    y = checkPageBreak(doc, y, LINE_HEIGHT_BODY + 4);
+  const unlinked = assets.filter(a => !linkedAssetIds.has(a.row_id));
+  if (unlinked.length > 0) {
+    y = checkPageBreak(doc, y, LINE_HEIGHT + 4);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(12);
     doc.setTextColor(0, 0, 0);
     doc.text('Unlinked Assets:', MARGIN_LEFT, y);
-    y += LINE_HEIGHT_BODY + 2;
+    y += LINE_HEIGHT + 2;
 
-    for (const asset of unlinkedAssets) {
+    for (const asset of unlinked) {
       const assetClean = cleanEntry(asset);
-      const assetTitle = assetClean.title ?? assetClean.name ?? '(untitled)';
+      const oneLiner = buildOneLiner(assetClean, 'asset');
 
-      y = checkPageBreak(doc, y, LINE_HEIGHT_BODY);
+      y = checkPageBreak(doc, y, LINE_HEIGHT);
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(11);
       doc.setTextColor(60, 60, 60);
+      doc.text(`   ${asset.row_id}. ${oneLiner}`, MARGIN_LEFT, y);
+      y += LINE_HEIGHT;
 
-      if (detailLevel === 'summary') {
-        doc.text(`   ${asset.row_id}. ${assetTitle}`, MARGIN_LEFT, y);
-        y += LINE_HEIGHT_BODY;
-      } else {
-        y = renderEntryTitle(doc, asset.row_id, assetTitle, y);
-        setBodyStyle(doc);
-        y = renderEntryFields(doc, asset, assetFields, detailLevel, y);
+      if (mode === 'full') {
+        y = renderExpandedFields(doc, asset, assetFields, INDENT + 5, y);
       }
     }
   }
@@ -218,69 +208,72 @@ function renderAccountsAndAssets(doc, accounts, assets, templates, detailLevel, 
   return y;
 }
 
-/**
- * Render a standard section (password, license, insurance, custom).
- * Returns updated Y.
- */
-function renderStandardSection(doc, type, entries, templates, detailLevel, y) {
+function renderStandardSection(doc, type, entries, templates, mode, y) {
   if (entries.length === 0) return y;
 
   const label = TYPE_LABELS[type] ?? type;
-  const header = `== ${label} (${entries.length}) ==`;
-  y = renderSectionHeader(doc, header, y);
+  y = checkPageBreak(doc, y, HEADER_HEIGHT);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.setTextColor(0, 0, 0);
+  doc.text(`== ${label} (${entries.length}) ==`, MARGIN_LEFT, y);
+  y += HEADER_HEIGHT;
 
-  const template = findTemplate(templates, type);
-  const fields = template ? parseFields(template.fields) : [];
+  const fields = parseFields(findTemplate(templates, type)?.fields);
 
   for (const entry of entries) {
     const clean = cleanEntry(entry);
-    const title = clean.title ?? clean.name ?? '(untitled)';
+    const oneLiner = buildOneLiner(clean, type);
 
-    y = renderEntryTitle(doc, entry.row_id, title, y);
+    y = checkPageBreak(doc, y, LINE_HEIGHT + 2);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.setTextColor(0, 0, 0);
+    doc.text(`${entry.row_id}. ${oneLiner}`, MARGIN_LEFT, y);
+    y += LINE_HEIGHT + 2;
 
-    if (detailLevel !== 'summary') {
-      setBodyStyle(doc);
-      y = renderEntryFields(doc, entry, fields, detailLevel, y);
+    if (mode === 'full') {
+      y = renderExpandedFields(doc, entry, fields, INDENT, y);
     }
 
-    // Small gap between entries
     y += 2;
   }
 
   return y;
 }
 
+// ── Main export ──────────────────────────────────────────────────────────
+
 /**
- * Export vault data to a PDF file and trigger browser download.
- *
+ * Export vault data to PDF.
  * @param {Object} grouped - Output of assignRowIdsAndRemap()
  * @param {Object[]} templates - Template objects from IndexedDB
- * @param {'summary'|'masked'|'full'} detailLevel
+ * @param {'overview'|'full'} mode
  * @param {string} dateSuffix - e.g. "2026-03-19"
  */
-export async function exportPdf(grouped, templates, detailLevel, dateSuffix) {
+export async function exportPdf(grouped, templates, mode, dateSuffix) {
   const { jsPDF } = await import('jspdf');
-
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   let y = PAGE_TOP;
 
-  // --- Title ---
+  // Title
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(16);
   doc.setTextColor(0, 0, 0);
   doc.text(`CITADEL VAULT EXPORT — ${dateSuffix}`, MARGIN_LEFT, y);
   y += 10;
 
-  // --- Subtitle ---
+  // Mode label
+  const modeLabel = mode === 'full' ? 'Full Detail' : 'Overview';
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(12);
   doc.setTextColor(100, 100, 100);
-  doc.text(`Detail level: ${detailLevel}`, MARGIN_LEFT, y);
+  doc.text(modeLabel, MARGIN_LEFT, y);
   y += 8;
 
-  // --- Warning for full detail ---
-  if (detailLevel === 'full') {
-    y = checkPageBreak(doc, y, LINE_HEIGHT_BODY + 2);
+  // Warning for full mode
+  if (mode === 'full') {
+    y = checkPageBreak(doc, y, LINE_HEIGHT + 2);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
     doc.setTextColor(180, 0, 0);
@@ -288,30 +281,23 @@ export async function exportPdf(grouped, templates, detailLevel, dateSuffix) {
     y += 8;
   }
 
-  // Spacer before content
   y += 4;
 
-  // --- Accounts & Assets (combined section) ---
+  // Accounts & Assets
   const accounts = grouped.account ?? [];
   const assets = grouped.asset ?? [];
-
   if (accounts.length > 0 || assets.length > 0) {
-    y = renderAccountsAndAssets(doc, accounts, assets, templates, detailLevel, y);
+    y = renderAccountsAndAssets(doc, accounts, assets, templates, mode, y);
     y += 4;
   }
 
-  // --- Standard sections (in order, skipping account + asset) ---
-  const STANDARD_TYPES = ['password', 'license', 'insurance', 'custom'];
-
-  for (const type of STANDARD_TYPES) {
+  // Standard sections
+  for (const type of ['password', 'license', 'insurance', 'custom']) {
     const entries = grouped[type] ?? [];
     if (entries.length === 0) continue;
-
-    y = renderStandardSection(doc, type, entries, templates, detailLevel, y);
+    y = renderStandardSection(doc, type, entries, templates, mode, y);
     y += 4;
   }
 
-  // --- Save ---
-  const filename = `citadel-export-${dateSuffix}.pdf`;
-  doc.save(filename);
+  doc.save(`citadel-export-${dateSuffix}.pdf`);
 }
