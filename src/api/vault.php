@@ -25,12 +25,12 @@ $validTypes = ['password', 'account', 'asset', 'license', 'insurance', 'custom']
 // GET ?action=counts — Entry counts by type (for dashboard, no blobs)
 // ---------------------------------------------------------------------------
 if ($method === 'GET' && $action === 'counts') {
-    $entries = $storage->getEntries($userId);
+    $raw = $storage->getEntryCounts($userId);
+    // Ensure all valid types are present (zero-fill missing ones)
     $counts = array_fill_keys($validTypes, 0);
-    foreach ($entries as $entry) {
-        $type = $entry['entry_type'];
+    foreach ($raw as $type => $cnt) {
         if (isset($counts[$type])) {
-            $counts[$type]++;
+            $counts[$type] = $cnt;
         }
     }
     Response::success($counts);
@@ -260,8 +260,12 @@ if ($method === 'PUT' && $id) {
         Response::error("Invalid entry type: $entryType", 400);
     }
 
-    if (!$storage->updateEntry($userId, $id, $encryptedData, $entryType, $templateId)) {
-        Response::error('Entry not found.', 404);
+    try {
+        if (!$storage->updateEntry($userId, $id, $encryptedData, $entryType, $templateId)) {
+            Response::error('Entry not found.', 404);
+        }
+    } catch (InvalidArgumentException $e) {
+        Response::error($e->getMessage(), 400);
     }
 
     Response::success(['message' => 'Entry updated.']);

@@ -60,6 +60,22 @@ class MariaDbAdapter implements StorageAdapter {
         return array_map([$this, 'shapeEntryRow'], $rows);
     }
 
+    public function getEntryCounts(int $userId): array {
+        $stmt = $this->db->prepare(
+            'SELECT entry_type, COUNT(*) AS cnt
+             FROM vault_entries
+             WHERE user_id = ? AND deleted_at IS NULL
+             GROUP BY entry_type'
+        );
+        $stmt->execute([$userId]);
+        $rows = $stmt->fetchAll();
+        $counts = [];
+        foreach ($rows as $row) {
+            $counts[$row['entry_type']] = (int)$row['cnt'];
+        }
+        return $counts;
+    }
+
     public function getEntry(int $userId, int $entryId): ?array {
         $stmt = $this->db->prepare(
             'SELECT ve.id, ve.entry_type, ve.template_id, ve.schema_version,
@@ -93,6 +109,24 @@ class MariaDbAdapter implements StorageAdapter {
     }
 
     public function updateEntry(int $userId, int $entryId, string $encryptedData, ?string $entryType = null, ?int $templateId = null): bool {
+        // Enforce template_id immutability: reject if caller tries to change it
+        if ($templateId !== null) {
+            $stmt = $this->db->prepare(
+                'SELECT template_id FROM vault_entries WHERE id = ? AND user_id = ? AND deleted_at IS NULL'
+            );
+            $stmt->execute([$entryId, $userId]);
+            $existing = $stmt->fetch();
+            if (!$existing) {
+                return false; // entry not found
+            }
+            $existingTpl = $existing['template_id'] !== null ? (int)$existing['template_id'] : null;
+            if ($existingTpl !== null && $existingTpl !== $templateId) {
+                throw new InvalidArgumentException(
+                    "template_id is immutable after creation. Cannot change from {$existingTpl} to {$templateId}."
+                );
+            }
+        }
+
         $setClauses = ['encrypted_data = ?'];
         $params = [$encryptedData];
 
