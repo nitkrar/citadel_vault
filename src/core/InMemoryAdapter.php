@@ -65,6 +65,16 @@ class InMemoryAdapter implements StorageAdapter {
         }, array_values($results));
     }
 
+    public function getEntryCounts(int $userId): array {
+        $counts = [];
+        foreach ($this->entries as $e) {
+            if ($e['user_id'] !== $userId || $e['deleted_at'] !== null) continue;
+            $type = $e['entry_type'];
+            $counts[$type] = ($counts[$type] ?? 0) + 1;
+        }
+        return $counts;
+    }
+
     public function getEntry(int $userId, int $entryId): ?array {
         $entry = $this->entries[$entryId] ?? null;
         if (!$entry || $entry['user_id'] !== $userId || $entry['deleted_at'] !== null) {

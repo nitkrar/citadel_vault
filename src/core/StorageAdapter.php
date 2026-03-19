@@ -21,6 +21,12 @@ interface StorageAdapter {
     function getEntries(int $userId, ?string $entryType = null): array;
 
     /**
+     * Get entry counts grouped by type (lightweight, no blobs).
+     * @return array Associative array of entry_type => count
+     */
+    function getEntryCounts(int $userId): array;
+
+    /**
      * Get a single entry by ID, only if owned by the given user.
      * @return array|null Entry row or null if not found / not owned
      */
