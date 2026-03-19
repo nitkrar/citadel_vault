@@ -23,10 +23,17 @@ INNER JOIN users u ON si.recipient_id = u.id
 SET si.recipient_id = 0
 WHERE u.role = 'ghost' AND u.id != 0;
 
--- Step 3: Add UNIQUE constraint
+-- Step 3: Add UNIQUE constraint (skip if already exists)
 -- MySQL treats NULL recipient_id values as distinct (won't conflict)
-ALTER TABLE shared_items
-ADD UNIQUE KEY `uq_share_sender_entry_recipient` (`sender_id`, `source_entry_id`, `recipient_id`);
+SET @exists = (SELECT COUNT(*) FROM information_schema.STATISTICS
+               WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'shared_items'
+               AND INDEX_NAME = 'uq_share_sender_entry_recipient');
+SET @sql = IF(@exists = 0,
+    'ALTER TABLE shared_items ADD UNIQUE KEY `uq_share_sender_entry_recipient` (`sender_id`, `source_entry_id`, `recipient_id`)',
+    'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- Step 4: Delete per-identifier ghost users (vault keys cascade-delete via FK)
 DELETE FROM users WHERE role = 'ghost' AND id != 0;
