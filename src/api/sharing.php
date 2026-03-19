@@ -11,6 +11,7 @@ require_once __DIR__ . '/../../config/config.php';
 require_once __DIR__ . '/../core/Auth.php';
 require_once __DIR__ . '/../core/Storage.php';
 require_once __DIR__ . '/../core/Encryption.php';
+require_once __DIR__ . '/../core/SharingToken.php';
 
 Response::setCors();
 
@@ -22,8 +23,8 @@ $storage = Storage::adapter();
 $db = Database::getInstance();
 
 // ---------------------------------------------------------------------------
-// GET ?action=recipient-key&identifier=X — Always returns a public key
-// Never 404. If user doesn't exist, creates ghost user with throw-away key.
+// GET ?action=recipient-key&identifier=X — Resolve recipient, return public key + signed token
+// Never 404. If user doesn't exist, uses global ghost user (id=0).
 // ---------------------------------------------------------------------------
 if ($method === 'GET' && $action === 'recipient-key') {
     $identifier = trim($_GET['identifier'] ?? '');
@@ -50,15 +51,25 @@ if ($method === 'GET' && $action === 'recipient-key') {
     $recipient = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if ($recipient && !empty($recipient['public_key'])) {
-        // Real user with vault set up
         Response::success([
-            'public_key' => $recipient['public_key'],
-            'is_ghost'   => false,
+            'public_key'      => $recipient['public_key'],
+            'is_ghost'        => false,
+            'recipient_token' => SharingToken::generate((int)$recipient['id']),
         ]);
     }
 
-    // No real user found (or no vault key) — generate ghost key pair
-    // CRITICAL: Private key is discarded. Data encrypted with this key is unrecoverable.
+    // No real user found — use global ghost user (id=0)
+    // Check if ghost already has a public key
+    $ghostKeys = $storage->getVaultKeys(0);
+    if ($ghostKeys && !empty($ghostKeys['public_key'])) {
+        Response::success([
+            'public_key'      => $ghostKeys['public_key'],
+            'is_ghost'        => true,
+            'recipient_token' => SharingToken::generate(0),
+        ]);
+    }
+
+    // Ghost has no key yet — generate RSA keypair, discard private key
     $config = [
         'private_key_bits' => 2048,
         'private_key_type' => OPENSSL_KEYTYPE_RSA,
@@ -67,9 +78,8 @@ if ($method === 'GET' && $action === 'recipient-key') {
     $details = openssl_pkey_get_details($res);
     $ghostPublicKeyPem = $details['key'];
 
-    // Convert PEM to base64 DER (SPKI) for consistency with client-side format
+    // Convert PEM to base64 DER (SPKI) for client-side format
     $pemLines = explode("\n", trim($ghostPublicKeyPem));
-    // Remove header/footer lines
     $derBase64 = '';
     foreach ($pemLines as $line) {
         if (strpos($line, '-----') === false) {
@@ -77,47 +87,20 @@ if ($method === 'GET' && $action === 'recipient-key') {
         }
     }
 
-    // Check if ghost user already exists for this identifier
-    $ghostUsername = '__ghost_' . md5($identifier) . '__';
-    $stmt = $db->prepare(
-        "SELECT id FROM users WHERE username = ? AND role = 'ghost'"
-    );
-    $stmt->execute([$ghostUsername]);
-    $existingGhost = $stmt->fetch(PDO::FETCH_ASSOC);
-
-    if ($existingGhost) {
-        // Return the STORED public key — don't generate a new one
-        $existingKeys = $storage->getVaultKeys((int)$existingGhost['id']);
-        if ($existingKeys && !empty($existingKeys['public_key'])) {
-            Response::success([
-                'public_key' => $existingKeys['public_key'],
-                'is_ghost'   => true,
-            ]);
-        }
-    }
-
-    // Create new ghost user
-    $stmt = $db->prepare(
-        "INSERT INTO users (username, email, password_hash, role, is_active)
-         VALUES (?, ?, '', 'ghost', 0)"
-    );
-    $ghostEmail = 'ghost_' . md5($identifier) . '@system.internal';
-    $stmt->execute([$ghostUsername, $ghostEmail]);
-    $ghostUserId = (int)$db->lastInsertId();
-
-    // Store ghost's public key (private key is NOT stored — discarded here)
-    $storage->setVaultKeys($ghostUserId, [
-        'public_key' => $derBase64,
-    ]);
+    // Store ghost's public key (private key discarded — unrecoverable by design)
+    $storage->setVaultKeys(0, ['public_key' => $derBase64]);
 
     Response::success([
-        'public_key' => $derBase64,
-        'is_ghost'   => true,
+        'public_key'      => $derBase64,
+        'is_ghost'        => true,
+        'recipient_token' => SharingToken::generate(0),
     ]);
 }
 
 // ---------------------------------------------------------------------------
-// POST ?action=share — Batch share entry with recipients
+// POST ?action=share — Batch share entry with recipients (token-based)
+// Accepts signed recipient_token from recipient-key, not raw identifiers.
+// Upserts: re-sharing with same recipient updates the encrypted blob.
 // ---------------------------------------------------------------------------
 if ($method === 'POST' && $action === 'share') {
     $body = Response::getBody();
@@ -138,43 +121,43 @@ if ($method === 'POST' && $action === 'share') {
     }
 
     $created = [];
+    $skipped = 0;
     foreach ($recipients as $r) {
-        $identifier = trim($r['identifier'] ?? '');
+        $token = $r['recipient_token'] ?? '';
         $encryptedData = $r['encrypted_data'] ?? '';
 
-        if (empty($identifier) || empty($encryptedData)) {
+        if (empty($token) || empty($encryptedData)) {
+            $skipped++;
             continue;
         }
 
-        // Resolve recipient
-        $recipientId = null;
-        $isGhost = 0;
-
-        // Try real user
-        $stmt = $db->prepare(
-            "SELECT id FROM users WHERE (username = ? OR email = ?) AND is_active = 1 AND role != 'ghost'"
-        );
-        $stmt->execute([$identifier, $identifier]);
-        $realUser = $stmt->fetch(PDO::FETCH_ASSOC);
-
-        if ($realUser) {
-            $recipientId = (int)$realUser['id'];
-        } else {
-            // Try ghost user
-            $stmt = $db->prepare(
-                "SELECT id FROM users WHERE username = ? AND role = 'ghost'"
-            );
-            $stmt->execute(['__ghost_' . md5($identifier) . '__']);
-            $ghostUser = $stmt->fetch(PDO::FETCH_ASSOC);
-            if ($ghostUser) {
-                $recipientId = (int)$ghostUser['id'];
-                $isGhost = 1;
-            }
+        // Validate signed token — extracts recipient_id, checks HMAC + expiry
+        $recipientId = SharingToken::validate($token);
+        if ($recipientId === null) {
+            $skipped++;
+            continue; // expired or tampered token
         }
 
-        $shareId = $storage->createShare([
+        // Self-share check (belt-and-suspenders — recipient-key also blocks this)
+        if ($recipientId === $userId) {
+            $skipped++;
+            continue;
+        }
+
+        // Determine ghost status and get display identifier
+        $isGhost = ($recipientId === 0) ? 1 : 0;
+        $recipientIdentifier = 'unknown';
+        $stmt = $db->prepare("SELECT username FROM users WHERE id = ?");
+        $stmt->execute([$recipientId]);
+        $recipientUser = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($recipientUser) {
+            $recipientIdentifier = $recipientUser['username'];
+        }
+
+        // Upsert: creates or updates share on same (sender, entry, recipient)
+        $shareId = $storage->upsertShare([
             'sender_id'            => $userId,
-            'recipient_identifier' => $identifier,
+            'recipient_identifier' => $recipientIdentifier,
             'recipient_id'         => $recipientId,
             'source_entry_id'      => $sourceEntryId,
             'entry_type'           => $entry['entry_type'],
@@ -188,7 +171,7 @@ if ($method === 'POST' && $action === 'share') {
     $ipHash = Encryption::hashIp($_SERVER['REMOTE_ADDR'] ?? null);
     $storage->logAction($userId, 'share_created', 'vault_entry', $sourceEntryId, $ipHash);
 
-    Response::success(['share_ids' => $created, 'count' => count($created)]);
+    Response::success(['share_ids' => $created, 'count' => count($created), 'skipped' => $skipped]);
 }
 
 // ---------------------------------------------------------------------------

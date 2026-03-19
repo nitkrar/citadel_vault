@@ -115,6 +115,14 @@ interface StorageAdapter {
     function createShare(array $shareData): int;
 
     /**
+     * Upsert a shared item. If (sender, entry, recipient) already exists,
+     * update the encrypted_data. Otherwise create a new row.
+     * @param array $shareData Associative array with required fields
+     * @return int The share ID (new or existing)
+     */
+    function upsertShare(array $shareData): int;
+
+    /**
      * Update a shared item's encrypted data (on-edit re-share).
      * @return bool True if updated
      */
