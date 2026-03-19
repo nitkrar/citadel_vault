@@ -1,19 +1,45 @@
-import { useState } from 'react';
-import { FileDown, Upload, Lock, AlertTriangle, Check } from 'lucide-react';
+import { useState, useCallback } from 'react';
+import { FileDown, Upload, Lock, AlertTriangle, Check, CheckCircle } from 'lucide-react';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { entryStore } from '../lib/entryStore';
 import { VALID_ENTRY_TYPES } from '../lib/defaults';
+import { apiData } from '../lib/checks';
+import { groupByType, assignRowIdsAndRemap } from '../lib/exportHelpers';
+import { exportJson } from '../lib/exportJson';
+import { exportCsvZip } from '../lib/exportCsvZip';
+import { exportXlsx } from '../lib/exportXlsx';
+import { exportPdf } from '../lib/exportPdf';
+import api from '../api/client';
 import ImportModal from '../components/ImportModal';
+
+const FORMAT_OPTIONS = ['json', 'csv', 'xlsx', 'pdf'];
+const DETAIL_LEVELS = [
+  { value: 'summary', label: 'Summary', desc: 'Titles only' },
+  { value: 'masked', label: 'Masked', desc: 'Secrets hidden' },
+  { value: 'full', label: 'Full', desc: 'All data' },
+];
 
 export default function ImportExportPage() {
   const { isUnlocked, decrypt } = useEncryption();
 
   // Import
   const [showImport, setShowImport] = useState(false);
+  const [importSuccess, setImportSuccess] = useState(false);
+
+  const handleImportComplete = useCallback(async () => {
+    try {
+      const { data: resp } = await api.get('/vault.php');
+      const entries = apiData({ data: resp }) || [];
+      await entryStore.putAll(entries);
+    } catch { /* IndexedDB refresh failed — export will use stale data */ }
+    setImportSuccess(true);
+    setExported(false);
+  }, []);
 
   // Export
   const [selectedTypes, setSelectedTypes] = useState(new Set(VALID_ENTRY_TYPES));
   const [format, setFormat] = useState('json');
+  const [detailLevel, setDetailLevel] = useState('masked');
   const [exporting, setExporting] = useState(false);
   const [exported, setExported] = useState(false);
 
@@ -34,12 +60,13 @@ export default function ImportExportPage() {
       const entries = await entryStore.getAll();
       const filtered = entries.filter(e => selectedTypes.has(e.entry_type));
 
+      // Decrypt all entries, attaching internal metadata
       const decrypted = [];
       for (const entry of filtered) {
         try {
           const d = await decrypt(entry.encrypted_data);
-          if (d) decrypted.push({ type: entry.entry_type, ...d });
-        } catch { /* skip */ }
+          if (d) decrypted.push({ _dbId: entry.id, _entryType: entry.entry_type, ...d });
+        } catch { /* skip undecryptable */ }
       }
 
       if (decrypted.length === 0) {
@@ -48,43 +75,21 @@ export default function ImportExportPage() {
         return;
       }
 
-      let blob, filename;
+      // Group by type, assign row IDs, remap linkage
+      const grouped = assignRowIdsAndRemap(groupByType(decrypted));
       const dateSuffix = new Date().toISOString().split('T')[0];
 
       if (format === 'json') {
-        const json = JSON.stringify(decrypted, null, 2);
-        blob = new Blob([json], { type: 'application/json' });
-        filename = `citadel-export-${dateSuffix}.json`;
+        exportJson(grouped, dateSuffix);
       } else if (format === 'csv') {
-        const allKeys = new Set();
-        decrypted.forEach(d => Object.keys(d).forEach(k => allKeys.add(k)));
-        const keys = ['type', ...Array.from(allKeys).filter(k => k !== 'type').sort()];
-        const header = keys.join(',');
-        const rows = decrypted.map(d =>
-          keys.map(k => {
-            const val = d[k] ?? '';
-            const str = String(val);
-            return str.includes(',') || str.includes('"') || str.includes('\n')
-              ? `"${str.replace(/"/g, '""')}"` : str;
-          }).join(',')
-        );
-        blob = new Blob([[header, ...rows].join('\n')], { type: 'text/csv' });
-        filename = `citadel-export-${dateSuffix}.csv`;
+        await exportCsvZip(grouped, dateSuffix);
       } else if (format === 'xlsx') {
-        const XLSX = await import('xlsx');
-        const ws = XLSX.utils.json_to_sheet(decrypted);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'Vault Export');
-        XLSX.writeFile(wb, `citadel-export-${dateSuffix}.xlsx`);
-        setExported(true);
-        setExporting(false);
-        return;
+        await exportXlsx(grouped, dateSuffix);
+      } else if (format === 'pdf') {
+        const templates = await entryStore.getAllTemplates();
+        await exportPdf(grouped, templates, detailLevel, dateSuffix);
       }
 
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = filename; a.click();
-      URL.revokeObjectURL(url);
       setExported(true);
     } catch (err) {
       alert('Export failed: ' + (err.message || 'Unknown error'));
@@ -114,9 +119,14 @@ export default function ImportExportPage() {
           Upload a CSV or Excel file to bulk-add entries. Supports Google Sheets URLs.
           All data is encrypted in your browser before being stored.
         </p>
-        <button className="btn btn-primary" onClick={() => setShowImport(true)}>
+        <button className="btn btn-primary" onClick={() => { setShowImport(true); setImportSuccess(false); }}>
           <Upload size={16} /> Import from File
         </button>
+        {importSuccess && (
+          <div className="flex items-center gap-2" style={{ marginTop: 12, color: '#16a34a', fontSize: 13 }}>
+            <CheckCircle size={16} /> Import complete — entries are ready to export.
+          </div>
+        )}
       </div>
 
       {/* ── Export Section ──────────────────────────────────────── */}
@@ -127,6 +137,13 @@ export default function ImportExportPage() {
           <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
           <span>Exported files contain <strong>unencrypted data</strong>. Store them securely.</span>
         </div>
+
+        {format === 'pdf' && detailLevel === 'full' && (
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: 8, padding: '10px 12px', marginBottom: 20, color: '#991b1b', fontSize: 13 }}>
+            <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span><strong>Full detail</strong> includes all secrets (passwords, keys) in plain text.</span>
+          </div>
+        )}
 
         <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
           <div>
@@ -143,14 +160,29 @@ export default function ImportExportPage() {
 
           <div>
             <h3 style={{ marginBottom: 12, fontSize: 14 }}>Format</h3>
-            <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
-              {['json', 'csv', 'xlsx'].map(f => (
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+              {FORMAT_OPTIONS.map(f => (
                 <button key={f} className={`btn btn-sm ${format === f ? 'btn-primary' : 'btn-ghost'}`}
                   onClick={() => setFormat(f)}>
                   {f.toUpperCase()}
                 </button>
               ))}
             </div>
+
+            {format === 'pdf' && (
+              <div style={{ marginBottom: 16 }}>
+                <h3 style={{ marginBottom: 8, fontSize: 14 }}>Detail level</h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {DETAIL_LEVELS.map(dl => (
+                    <label key={dl.value} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
+                      <input type="radio" name="detailLevel" checked={detailLevel === dl.value}
+                        onChange={() => setDetailLevel(dl.value)} />
+                      <span><strong>{dl.label}</strong> — {dl.desc}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <button className="btn btn-primary" onClick={handleExport}
               disabled={exporting || selectedTypes.size === 0}>
@@ -160,7 +192,7 @@ export default function ImportExportPage() {
         </div>
       </div>
 
-      <ImportModal isOpen={showImport} onClose={() => setShowImport(false)} onImportComplete={() => setExported(false)} />
+      <ImportModal isOpen={showImport} onClose={() => setShowImport(false)} onImportComplete={handleImportComplete} />
     </div>
   );
 }
