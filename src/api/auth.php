@@ -32,9 +32,14 @@ try {
 // GET ?action=registration-status — Public: check if self-registration is open
 // ---------------------------------------------------------------------------
 if ($method === 'GET' && $action === 'registration-status') {
+    $inviteRequestsEnabled = false;
+    $sr = $storage->getSystemSetting('invite_requests_enabled');
+    if ($sr !== null) $inviteRequestsEnabled = ($sr === 'true');
+
     Response::success([
         'self_registration' => $selfRegistration,
         'require_email_verification' => $requireEmailVerification,
+        'invite_requests_enabled' => $inviteRequestsEnabled,
     ]);
 }
 

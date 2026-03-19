@@ -208,8 +208,15 @@ if ($method === 'DELETE' && $action === 'revoke') {
 // ---------------------------------------------------------------------------
 // POST ?action=request — Public: request an invite (sends email to admin)
 // No auth required — this is for unauthenticated users on the register page
+// Gated by invite_requests_enabled system setting (admin-controlled)
 // ---------------------------------------------------------------------------
 if ($method === 'POST' && $action === 'request') {
+    // Check if invite requests are enabled (admin toggle)
+    $requestsEnabled = $storage->getSystemSetting('invite_requests_enabled');
+    if ($requestsEnabled !== 'true') {
+        Response::error('Invite requests are currently disabled.', 403);
+    }
+
     $body = Response::getBody();
     $email = Response::sanitize($body['email'] ?? '');
     $name  = Response::sanitize($body['name'] ?? '');
@@ -218,13 +225,20 @@ if ($method === 'POST' && $action === 'request') {
         Response::error('A valid email address is required.', 400);
     }
 
-    // Rate limiting — 3 requests per hour per IP
+    // Rate limiting — per IP
     $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-    $ipHash = Auth::hashForRateLimit('invite_request_ip', $ip);
+    $ipHash = Encryption::hashIp($ip);
     if (Auth::isRateLimited($db, 'invite_request', $ipHash, RATE_LIMIT_INVITE_REQ, RATE_LIMIT_INVITE_REQ_WINDOW)) {
         Response::error('Too many invite requests. Please try again later.', 429);
     }
     Auth::recordRateLimit($db, 'invite_request', $ipHash);
+
+    // Check if this email already requested (UNIQUE constraint on invite_requests.email)
+    $stmt = $db->prepare("SELECT id FROM invite_requests WHERE email = ? LIMIT 1");
+    $stmt->execute([$email]);
+    if ($stmt->fetch()) {
+        Response::error('A request for this email has already been submitted.', 409);
+    }
 
     // Check if email is already registered
     $stmt = $db->prepare("SELECT id FROM users WHERE email = ? LIMIT 1");
@@ -239,8 +253,14 @@ if ($method === 'POST' && $action === 'request') {
     );
     $stmt->execute([$email]);
     if ($stmt->fetch()) {
-        Response::error('An invite has already been sent to this email. Please check your inbox or contact the person who invited you.', 409);
+        Response::error('An invite has already been sent to this email. Please check your inbox.', 409);
     }
+
+    // Record the request (tracks email + IP hash for audit)
+    $stmt = $db->prepare(
+        "INSERT INTO invite_requests (email, name, ip_hash) VALUES (?, ?, ?)"
+    );
+    $stmt->execute([$email, $name ?: null, $ipHash]);
 
     // Send request email to admin
     $adminEmail = defined('ADMIN_EMAIL') && ADMIN_EMAIL ? ADMIN_EMAIL : '';

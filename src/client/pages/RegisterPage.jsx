@@ -61,6 +61,7 @@ export default function RegisterPage() {
 
   // Registration mode from backend
   const [selfRegOpen, setSelfRegOpen] = useState(null); // null=loading, true/false
+  const [inviteRequestsEnabled, setInviteRequestsEnabled] = useState(false);
 
   const { register: authRegister } = useAuth();
   const navigate = useNavigate();
@@ -72,6 +73,7 @@ export default function RegisterPage() {
       .then((res) => {
         const data = res.data?.data || res.data;
         setSelfRegOpen(!!data.self_registration);
+        setInviteRequestsEnabled(!!data.invite_requests_enabled);
       })
       .catch(() => setSelfRegOpen(false));
 
@@ -246,10 +248,13 @@ export default function RegisterPage() {
               {howToOpen && <div style={{ padding: '0 16px 14px' }}>
               <ol style={{ margin: 0, paddingLeft: 18, marginBottom: 12 }}>
                 <li>Ask someone who already has an account to invite you from their Profile page.</li>
-                <li>Or, request an invite from the administrator using the form below.</li>
+                {inviteRequestsEnabled
+                  ? <li>Or, request an invite from the administrator using the form below.</li>
+                  : <li>Or, ask someone on the site to invite you.</li>
+                }
               </ol>
 
-              {requestResult ? (
+              {inviteRequestsEnabled && (requestResult ? (
                 <div className={`alert ${requestResult.type === 'success' ? 'alert-success' : 'alert-danger'}`} style={{ padding: '8px 12px', fontSize: '0.8rem' }}>
                   {requestResult.text}
                 </div>
@@ -297,7 +302,7 @@ export default function RegisterPage() {
                     <Send size={14} /> {requestSending ? 'Sending...' : 'Request Invite'}
                   </button>
                 </div>
-              )}
+              ))}
               </div>}
             </div>
           </div>
