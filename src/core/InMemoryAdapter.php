@@ -256,6 +256,22 @@ class InMemoryAdapter implements StorageAdapter {
         return $id;
     }
 
+    public function upsertShare(array $shareData): int {
+        // Check for existing share with same (sender, entry, recipient)
+        foreach ($this->sharedItems as $id => $item) {
+            if ($item['sender_id'] === $shareData['sender_id']
+                && $item['source_entry_id'] === $shareData['source_entry_id']
+                && $item['recipient_id'] === $shareData['recipient_id']) {
+                // Update existing
+                $this->sharedItems[$id]['encrypted_data'] = $shareData['encrypted_data'];
+                $this->sharedItems[$id]['updated_at'] = date('Y-m-d H:i:s');
+                return $id;
+            }
+        }
+        // No existing — create new
+        return $this->createShare($shareData);
+    }
+
     public function updateShare(int $shareId, string $encryptedData): bool {
         if (!isset($this->sharedItems[$shareId])) {
             return false;

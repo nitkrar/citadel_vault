@@ -65,6 +65,9 @@ define('JWT_EXPIRY', (int)env('JWT_EXPIRY', 28800)); // 8 hours
 // Audit HMAC (for hashing IPs in audit log)
 define('AUDIT_HMAC_SECRET', env('AUDIT_HMAC_SECRET', ''));
 
+// Sharing token HMAC (signs recipient tokens for the share flow)
+define('SHARING_TOKEN_SECRET', env('SHARING_TOKEN_SECRET', ''));
+
 // Storage adapter
 define('STORAGE_ADAPTER', env('STORAGE_ADAPTER', 'mariadb'));
 
@@ -103,6 +106,9 @@ if (!JWT_SECRET) {
 }
 if (!AUDIT_HMAC_SECRET) {
     $_criticalErrors[] = 'AUDIT_HMAC_SECRET is not set. Run: openssl rand -hex 32';
+}
+if (!SHARING_TOKEN_SECRET) {
+    $_criticalErrors[] = 'SHARING_TOKEN_SECRET is not set. Run: openssl rand -hex 32';
 }
 if (!DB_PASS) {
     $_criticalErrors[] = 'DB_PASS is not set.';

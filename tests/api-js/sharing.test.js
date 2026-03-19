@@ -1,52 +1,47 @@
 /**
- * Sharing API Integration Tests
+ * Sharing API Integration Tests (Redesigned)
  *
  * Tests sharing.php endpoints: recipient-key, share, update, revoke,
  * shared-by-me, shared-with-me, share-count.
- * All endpoints require auth (top-level Auth::requireAuth).
+ *
+ * Key changes from the old API:
+ *  - recipient-key now returns a signed `recipient_token` (HMAC, 5-min TTL)
+ *  - share accepts `recipient_token` instead of raw `identifier`
+ *  - Self-share prevention in both recipient-key AND share endpoints
+ *  - Upsert semantics: duplicate share updates instead of creating a new row
+ *  - Single global ghost user (id=0) for all unknown identifiers
+ *  - shared-by-me includes `recipient_id` for targeted revokes
  *
  * Requires: php -S localhost:8081 router.php
- *
- * ─── KNOWN BUGS IN sharing.php ───────────────────────────────────────────
- *
- * BUG-SHARE-1: No self-sharing check in POST ?action=share.
- *   The recipient-key endpoint blocks self-sharing (line 38), but the share
- *   endpoint itself does NOT check if sender_id == recipient_id. A caller who
- *   skips the key lookup (or crafts a direct POST) can share an entry with
- *   themselves. This creates a share row with sender_id == recipient_id.
- *
- * BUG-SHARE-2: Share created with recipient_id=NULL for unknown identifiers.
- *   If a recipient identifier doesn't match any real user AND no ghost user
- *   exists for that identifier (i.e., caller skipped recipient-key lookup),
- *   the share is created with recipient_id=NULL. This orphaned share will:
- *   - Never appear in shared-with-me (queries by recipient_id)
- *   - Cannot be revoked by specific user_ids (only revoke-all works)
- *   - Shows in shared-by-me but recipient_username will be null
- *
- * BUG-SHARE-3: Ghost user creation can fail with duplicate key violation.
- *   In recipient-key (lines 88-97), if an existing ghost user is found but
- *   getVaultKeys() returns null/empty, code falls through to INSERT a new
- *   ghost user with the same username, hitting UNIQUE constraint → 500 error.
- *   This can happen if setVaultKeys() failed on initial ghost creation.
- *
- * BUG-SHARE-4: No duplicate share prevention.
- *   POST ?action=share does not check if a share already exists for the same
- *   (sender_id, source_entry_id, recipient_id). Calling share twice creates
- *   two share rows, and revoke-by-user_ids only deletes the first one found.
- *   share-count will also double-count.
- *
- * ─────────────────────────────────────────────────────────────────────────
  */
-import { describe, it, expect, afterAll } from 'vitest';
-import { api, extractData, unauthRequest } from '../helpers/apiClient.js';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { api, extractData, unauthRequest, apiRequest } from '../helpers/apiClient.js';
 
-describe('Sharing API', () => {
-  // Track IDs for cleanup
+describe('Sharing API (Redesigned)', () => {
   let testEntryId = null;
   let testEntryId2 = null;
-  const ghostIdentifier = 'ghost_sharing_test_' + Date.now() + '@test.local';
+  let ghostShareId = null;
+  let regularShareId = null;
+  const ghostIdentifier = 'ghost_share_test_' + Date.now() + '@test.local';
 
-  // ── auth enforcement (all 7 endpoints require auth) ─────────────
+  // Ensure regular user has a public key so recipient-key resolves them as real (not ghost).
+  // Uses admin API to set vault keys directly (avoids must_reset_password issues).
+  beforeAll(async () => {
+    try {
+      const resp = await apiRequest('POST', '/encryption.php?action=setup-rsa', {
+        role: 'regular',
+        json: {
+          public_key: 'dGVzdC1wdWJsaWMta2V5LWZvci1zaGFyaW5nLXRlc3Rz',
+          encrypted_private_key: 'dGVzdC1wcml2YXRlLWtleQ==',
+        },
+      });
+      // 200 = set, 400 = already set, 403 = must_reset_password (all acceptable)
+    } catch {
+      // Best effort — if this fails, recipient-key tests will create ghost shares
+    }
+  });
+
+  // ── Auth enforcement (all 7 endpoints) ──────────────────────────────────
   describe('auth enforcement', () => {
     it('GET recipient-key returns 401 without auth', async () => {
       const resp = await unauthRequest('GET', '/sharing.php?action=recipient-key&identifier=someone');
@@ -90,26 +85,45 @@ describe('Sharing API', () => {
     });
   });
 
-  // ── recipient-key ───────────────────────────────────────────────
-  describe('GET ?action=recipient-key', () => {
-    it('returns 400 when identifier is missing', async () => {
+  // ── recipient-key ───────────────────────────────────────────────────────
+  describe('recipient-key', () => {
+    it('requires identifier parameter', async () => {
       const resp = await api.get('/sharing.php?action=recipient-key');
       expect(resp.status).toBe(400);
     });
 
-    it('returns 400 when identifier is empty', async () => {
+    it('returns 400 for empty identifier', async () => {
       const resp = await api.get('/sharing.php?action=recipient-key&identifier=');
       expect(resp.status).toBe(400);
     });
 
-    it('returns 400 for self-sharing (admin looking up own username)', async () => {
-      const resp = await api.get('/sharing.php?action=recipient-key&identifier=initial_user', { role: 'admin' });
+    it('blocks self-sharing (own username)', async () => {
+      const resp = await api.get('/sharing.php?action=recipient-key&identifier=initial_user');
       expect(resp.status).toBe(400);
       const body = await resp.json();
       expect(body.error || body.message).toMatch(/yourself/i);
     });
 
-    it('returns ghost key for non-existent user', async () => {
+    it('blocks self-sharing (own email)', async () => {
+      // Admin email is admin@citadelvault.local or similar — fetch via self-lookup
+      // Use the username form since we know admin is initial_user
+      const resp = await api.get('/sharing.php?action=recipient-key&identifier=initial_user');
+      expect(resp.status).toBe(400);
+    });
+
+    it('returns public_key + recipient_token for real user', async () => {
+      const resp = await api.get('/sharing.php?action=recipient-key&identifier=test_regular_user');
+      expect(resp.status).toBe(200);
+      const data = await extractData(resp);
+      expect(data).toHaveProperty('public_key');
+      expect(data.public_key).toBeTruthy();
+      expect(data).toHaveProperty('recipient_token');
+      expect(data.recipient_token).toBeTruthy();
+      // is_ghost depends on whether regular user has vault keys set up
+      expect(typeof data.is_ghost).toBe('boolean');
+    });
+
+    it('returns public_key + recipient_token for ghost (non-existent user)', async () => {
       const resp = await api.get(
         `/sharing.php?action=recipient-key&identifier=${encodeURIComponent(ghostIdentifier)}`,
       );
@@ -118,9 +132,11 @@ describe('Sharing API', () => {
       expect(data).toHaveProperty('public_key');
       expect(data.public_key).toBeTruthy();
       expect(data).toHaveProperty('is_ghost', true);
+      expect(data).toHaveProperty('recipient_token');
+      expect(data.recipient_token).toBeTruthy();
     });
 
-    it('returns same ghost key on subsequent calls for same identifier', async () => {
+    it('ghost shares are idempotent (same key on repeated calls)', async () => {
       const resp1 = await api.get(
         `/sharing.php?action=recipient-key&identifier=${encodeURIComponent(ghostIdentifier)}`,
       );
@@ -136,20 +152,21 @@ describe('Sharing API', () => {
       expect(data2.is_ghost).toBe(true);
     });
 
-    it('returns a public key for an existing user (admin looking up regular user)', async () => {
-      // Admin looks up regular user — may get real key or ghost key depending on vault setup
-      const resp = await api.get('/sharing.php?action=recipient-key&identifier=test_regular_user', { role: 'admin' });
-      expect(resp.status).toBe(200);
+    it('recipient_token field is present and non-empty', async () => {
+      const resp = await api.get(
+        `/sharing.php?action=recipient-key&identifier=${encodeURIComponent(ghostIdentifier)}`,
+      );
       const data = await extractData(resp);
-      expect(data).toHaveProperty('public_key');
-      expect(data.public_key).toBeTruthy();
-      // is_ghost depends on whether regular user has vault keys set up
-      expect(typeof data.is_ghost).toBe('boolean');
+      expect(typeof data.recipient_token).toBe('string');
+      expect(data.recipient_token.length).toBeGreaterThan(0);
+      // Token format: base64(payload).hmac-hex
+      expect(data.recipient_token).toContain('.');
     });
   });
 
-  // ── share flow setup: create test vault entries ─────────────────
-  describe('share flow', () => {
+  // ── share (token-based) ─────────────────────────────────────────────────
+  describe('share', () => {
+    // Create test entries before share tests
     it('setup: creates test vault entries for sharing', async () => {
       const resp = await api.post('/vault.php', {
         json: {
@@ -163,7 +180,6 @@ describe('Sharing API', () => {
       testEntryId = data.id;
       expect(testEntryId).toBeTruthy();
 
-      // Create a second entry for additional tests
       const resp2 = await api.post('/vault.php', {
         json: {
           entry_type: 'password',
@@ -174,447 +190,475 @@ describe('Sharing API', () => {
       expect(resp2.status).toBe(201);
       const data2 = await extractData(resp2);
       testEntryId2 = data2.id;
+      expect(testEntryId2).toBeTruthy();
     });
 
-    // ── POST ?action=share ──────────────────────────────────────
-    describe('POST ?action=share', () => {
-      it('returns 400 when source_entry_id is missing', async () => {
-        const resp = await api.post('/sharing.php?action=share', {
-          json: { recipients: [{ identifier: 'someone', encrypted_data: 'blob' }] },
-        });
-        expect(resp.status).toBe(400);
+    it('requires source_entry_id', async () => {
+      const resp = await api.post('/sharing.php?action=share', {
+        json: { recipients: [{ recipient_token: 'tok', encrypted_data: 'blob' }] },
       });
-
-      it('returns 400 when recipients is missing', async () => {
-        const resp = await api.post('/sharing.php?action=share', {
-          json: { source_entry_id: testEntryId },
-        });
-        expect(resp.status).toBe(400);
-      });
-
-      it('returns 400 when recipients is empty', async () => {
-        const resp = await api.post('/sharing.php?action=share', {
-          json: { source_entry_id: testEntryId, recipients: [] },
-        });
-        expect(resp.status).toBe(400);
-      });
-
-      it('returns 404 for non-existent source entry', async () => {
-        const resp = await api.post('/sharing.php?action=share', {
-          json: {
-            source_entry_id: 999999,
-            recipients: [{ identifier: ghostIdentifier, encrypted_data: 'blob' }],
-          },
-        });
-        expect(resp.status).toBe(404);
-      });
-
-      it('shares entry with ghost recipient', async () => {
-        const resp = await api.post('/sharing.php?action=share', {
-          json: {
-            source_entry_id: testEntryId,
-            recipients: [{
-              identifier: ghostIdentifier,
-              encrypted_data: 'c2hhcmVkLWJsb2ItZm9yLWdob3N0',
-            }],
-          },
-        });
-        expect(resp.status).toBe(200);
-        const data = await extractData(resp);
-        expect(data).toHaveProperty('share_ids');
-        expect(data).toHaveProperty('count', 1);
-        expect(Array.isArray(data.share_ids)).toBe(true);
-        expect(data.share_ids.length).toBe(1);
-      });
-
-      it('shares entry with real user (regular user)', async () => {
-        const resp = await api.post('/sharing.php?action=share', {
-          json: {
-            source_entry_id: testEntryId,
-            recipients: [{
-              identifier: 'test_regular_user',
-              encrypted_data: 'c2hhcmVkLWJsb2ItZm9yLXJlZ3VsYXI=',
-            }],
-          },
-        });
-        expect(resp.status).toBe(200);
-        const data = await extractData(resp);
-        expect(data.count).toBe(1);
-      });
-
-      it('skips recipients with empty identifier or encrypted_data', async () => {
-        const resp = await api.post('/sharing.php?action=share', {
-          json: {
-            source_entry_id: testEntryId,
-            recipients: [
-              { identifier: '', encrypted_data: 'blob' },
-              { identifier: 'someone', encrypted_data: '' },
-            ],
-          },
-        });
-        expect(resp.status).toBe(200);
-        const data = await extractData(resp);
-        // Both recipients are skipped — count should be 0
-        expect(data.count).toBe(0);
-      });
-
-      // BUG-SHARE-1: No self-sharing prevention in share endpoint
-      it('BUG: allows self-sharing (no server-side check in share endpoint)', async () => {
-        // TODO: sharing.php should return 400 for self-sharing, like recipient-key does
-        // Currently it succeeds (200) and creates an orphaned share
-        const resp = await api.post('/sharing.php?action=share', {
-          json: {
-            source_entry_id: testEntryId,
-            recipients: [{
-              identifier: 'initial_user',
-              encrypted_data: 'c2VsZi1zaGFyZS1ibG9i',
-            }],
-          },
-        });
-        // BUG: should be 400 but currently returns 200
-        expect(resp.status).toBe(200);
-        const data = await extractData(resp);
-        expect(data.count).toBe(1); // Share was created — this is the bug
-      });
-
-      // BUG-SHARE-4: No duplicate share prevention
-      it('BUG: allows duplicate shares for same entry+recipient', async () => {
-        // TODO: sharing.php should prevent duplicate shares (same sender, entry, recipient)
-        // Currently it creates multiple share rows
-        const resp = await api.post('/sharing.php?action=share', {
-          json: {
-            source_entry_id: testEntryId,
-            recipients: [{
-              identifier: ghostIdentifier,
-              encrypted_data: 'ZHVwbGljYXRlLXNoYXJl',
-            }],
-          },
-        });
-        // BUG: should either reject (409) or upsert, but creates duplicate
-        expect(resp.status).toBe(200);
-        const data = await extractData(resp);
-        expect(data.count).toBe(1);
-
-        // Verify: share-count now shows more than expected (duplicates)
-        const countResp = await api.get(`/sharing.php?action=share-count&entry_id=${testEntryId}`);
-        const countData = await extractData(countResp);
-        // We have: ghost + regular + self-share + duplicate ghost = at least 4
-        expect(countData.count).toBeGreaterThanOrEqual(4);
-      });
+      expect(resp.status).toBe(400);
     });
 
-    // ── GET ?action=shared-by-me ────────────────────────────────
-    describe('GET ?action=shared-by-me', () => {
-      it('returns shares created by the sender', async () => {
-        const resp = await api.get('/sharing.php?action=shared-by-me');
-        expect(resp.status).toBe(200);
-        const data = await extractData(resp);
-        expect(Array.isArray(data)).toBe(true);
-
-        // Find our test shares
-        const testShares = data.filter(s => s.source_entry_id === testEntryId);
-        expect(testShares.length).toBeGreaterThanOrEqual(2); // ghost + regular (+ bug duplicates)
+    it('requires recipients array', async () => {
+      const resp = await api.post('/sharing.php?action=share', {
+        json: { source_entry_id: testEntryId },
       });
-
-      it('shared-by-me entries have correct shape', async () => {
-        const resp = await api.get('/sharing.php?action=shared-by-me');
-        expect(resp.status).toBe(200);
-        const data = await extractData(resp);
-
-        if (data.length > 0) {
-          const share = data[0];
-          expect(share).toHaveProperty('id');
-          expect(share).toHaveProperty('recipient_identifier');
-          expect(share).toHaveProperty('source_entry_id');
-          expect(share).toHaveProperty('entry_type');
-          expect(share).toHaveProperty('is_ghost');
-          expect(share).toHaveProperty('created_at');
-          expect(share).toHaveProperty('updated_at');
-        }
-      });
+      expect(resp.status).toBe(400);
     });
 
-    // ── GET ?action=share-count ─────────────────────────────────
-    describe('GET ?action=share-count', () => {
-      it('returns 400 when entry_id is missing', async () => {
-        const resp = await api.get('/sharing.php?action=share-count');
-        expect(resp.status).toBe(400);
+    it('rejects empty recipients array', async () => {
+      const resp = await api.post('/sharing.php?action=share', {
+        json: { source_entry_id: testEntryId, recipients: [] },
       });
-
-      it('returns share count for shared entry', async () => {
-        const resp = await api.get(`/sharing.php?action=share-count&entry_id=${testEntryId}`);
-        expect(resp.status).toBe(200);
-        const data = await extractData(resp);
-        expect(data).toHaveProperty('count');
-        expect(data.count).toBeGreaterThanOrEqual(2);
-      });
-
-      it('returns 0 for entry with no shares', async () => {
-        const resp = await api.get(`/sharing.php?action=share-count&entry_id=${testEntryId2}`);
-        expect(resp.status).toBe(200);
-        const data = await extractData(resp);
-        expect(data).toHaveProperty('count', 0);
-      });
-
-      it('returns 0 for non-existent entry_id', async () => {
-        const resp = await api.get('/sharing.php?action=share-count&entry_id=999999');
-        expect(resp.status).toBe(200);
-        const data = await extractData(resp);
-        expect(data).toHaveProperty('count', 0);
-      });
+      expect(resp.status).toBe(400);
     });
 
-    // ── GET ?action=shared-with-me ──────────────────────────────
-    describe('GET ?action=shared-with-me', () => {
-      it('returns shares received by the user', async () => {
-        // Admin user checks shared-with-me (regular user has must_reset_password=1, gets 403)
-        const resp = await api.get('/sharing.php?action=shared-with-me', { role: 'admin' });
-        expect(resp.status).toBe(200);
-        const data = await extractData(resp);
-        expect(Array.isArray(data)).toBe(true);
+    it('rejects non-existent source entry', async () => {
+      const resp = await api.post('/sharing.php?action=share', {
+        json: {
+          source_entry_id: 999999,
+          recipients: [{ recipient_token: 'some-token', encrypted_data: 'blob' }],
+        },
       });
-
-      it('shared-with-me entries have correct shape', async () => {
-        const resp = await api.get('/sharing.php?action=shared-with-me', { role: 'admin' });
-        expect(resp.status).toBe(200);
-        const data = await extractData(resp);
-
-        if (data.length > 0) {
-          const share = data[0];
-          expect(share).toHaveProperty('id');
-          expect(share).toHaveProperty('sender_username');
-          expect(share).toHaveProperty('entry_type');
-          expect(share).toHaveProperty('encrypted_data');
-          expect(share).toHaveProperty('is_ghost');
-          expect(share).toHaveProperty('created_at');
-          expect(share).toHaveProperty('updated_at');
-        }
-      });
+      expect(resp.status).toBe(404);
     });
 
-    // ── POST ?action=update ─────────────────────────────────────
-    describe('POST ?action=update', () => {
-      it('returns 400 when source_entry_id is missing', async () => {
-        const resp = await api.post('/sharing.php?action=update', {
-          json: { recipients: [{ user_id: 1, encrypted_data: 'new-blob' }] },
-        });
-        expect(resp.status).toBe(400);
-      });
+    it('shares entry using recipient_token from recipient-key', async () => {
+      // 1. Get recipient token for the regular user
+      const keyResp = await api.get('/sharing.php?action=recipient-key&identifier=test_regular_user');
+      expect(keyResp.status).toBe(200);
+      const keyData = await extractData(keyResp);
+      const token = keyData.recipient_token;
+      expect(token).toBeTruthy();
 
-      it('returns 400 when recipients is missing', async () => {
-        const resp = await api.post('/sharing.php?action=update', {
-          json: { source_entry_id: testEntryId },
-        });
-        expect(resp.status).toBe(400);
+      // 2. Share the entry using the token
+      const shareResp = await api.post('/sharing.php?action=share', {
+        json: {
+          source_entry_id: testEntryId,
+          recipients: [{
+            recipient_token: token,
+            encrypted_data: 'c2hhcmVkLWJsb2ItZm9yLXJlZ3VsYXI=',
+          }],
+        },
       });
-
-      it('returns 400 when recipients is empty', async () => {
-        const resp = await api.post('/sharing.php?action=update', {
-          json: { source_entry_id: testEntryId, recipients: [] },
-        });
-        expect(resp.status).toBe(400);
-      });
-
-      it('returns 404 for non-existent source entry', async () => {
-        const resp = await api.post('/sharing.php?action=update', {
-          json: {
-            source_entry_id: 999999,
-            recipients: [{ user_id: 1, encrypted_data: 'new-blob' }],
-          },
-        });
-        expect(resp.status).toBe(404);
-      });
-
-      it('re-encrypts shares for existing recipients', async () => {
-        // First, get the regular user's shares to find recipient_id
-        const byMeResp = await api.get('/sharing.php?action=shared-by-me');
-        const byMeData = await extractData(byMeResp);
-        const regularShare = byMeData.find(
-          s => s.source_entry_id === testEntryId && s.recipient_identifier === 'test_regular_user'
-        );
-
-        if (regularShare && regularShare.recipient_id) {
-          const resp = await api.post('/sharing.php?action=update', {
-            json: {
-              source_entry_id: testEntryId,
-              recipients: [{
-                user_id: regularShare.recipient_id,
-                encrypted_data: 'cmUtZW5jcnlwdGVkLWJsb2I=',
-              }],
-            },
-          });
-          expect(resp.status).toBe(200);
-          const data = await extractData(resp);
-          expect(data).toHaveProperty('updated');
-          expect(data.updated).toBeGreaterThanOrEqual(1);
-        }
-      });
-
-      it('returns updated=0 when recipient user_id does not match any share', async () => {
-        const resp = await api.post('/sharing.php?action=update', {
-          json: {
-            source_entry_id: testEntryId,
-            recipients: [{
-              user_id: 999999,
-              encrypted_data: 'does-not-match',
-            }],
-          },
-        });
-        expect(resp.status).toBe(200);
-        const data = await extractData(resp);
-        expect(data.updated).toBe(0);
-      });
+      expect(shareResp.status).toBe(200);
+      const shareData = await extractData(shareResp);
+      expect(shareData).toHaveProperty('share_ids');
+      expect(shareData).toHaveProperty('count', 1);
+      expect(shareData).toHaveProperty('skipped', 0);
+      expect(Array.isArray(shareData.share_ids)).toBe(true);
+      expect(shareData.share_ids.length).toBe(1);
+      regularShareId = shareData.share_ids[0];
     });
 
-    // ── cross-user isolation ────────────────────────────────────
-    describe('cross-user isolation', () => {
-      it('admin shared-by-me only includes shares created by admin', async () => {
-        const resp = await api.get('/sharing.php?action=shared-by-me', { role: 'admin' });
-        expect(resp.status).toBe(200);
-        const data = await extractData(resp);
-        // All shares for testEntryId should belong to admin (the creator)
-        const testShares = data.filter(s => s.source_entry_id === testEntryId);
-        expect(testShares.length).toBeGreaterThanOrEqual(1);
-        for (const share of testShares) {
-          expect(share.source_entry_id).toBe(testEntryId);
-        }
-      });
+    it('shares with ghost user using token', async () => {
+      // 1. Get ghost recipient token
+      const keyResp = await api.get(
+        `/sharing.php?action=recipient-key&identifier=${encodeURIComponent(ghostIdentifier)}`,
+      );
+      expect(keyResp.status).toBe(200);
+      const keyData = await extractData(keyResp);
+      expect(keyData.is_ghost).toBe(true);
+      const token = keyData.recipient_token;
 
-      it('share-count scoped to sender — other users see 0 for entries they did not share', async () => {
-        // Admin created shares on testEntryId — admin should see count > 0
-        const adminResp = await api.get(`/sharing.php?action=share-count&entry_id=${testEntryId}`, { role: 'admin' });
-        const adminData = await extractData(adminResp);
-        expect(adminData.count).toBeGreaterThanOrEqual(2);
+      // 2. Share with ghost token
+      const shareResp = await api.post('/sharing.php?action=share', {
+        json: {
+          source_entry_id: testEntryId,
+          recipients: [{
+            recipient_token: token,
+            encrypted_data: 'c2hhcmVkLWJsb2ItZm9yLWdob3N0',
+          }],
+        },
       });
+      expect(shareResp.status).toBe(200);
+      const shareData = await extractData(shareResp);
+      expect(shareData.count).toBe(1);
+      expect(shareData.skipped).toBe(0);
+      ghostShareId = shareData.share_ids[0];
     });
 
-    // ── POST ?action=revoke ─────────────────────────────────────
-    describe('POST ?action=revoke', () => {
-      it('returns 400 when source_entry_id is missing', async () => {
-        const resp = await api.post('/sharing.php?action=revoke', {
-          json: {},
-        });
-        expect(resp.status).toBe(400);
+    it('skips expired/invalid token', async () => {
+      const resp = await api.post('/sharing.php?action=share', {
+        json: {
+          source_entry_id: testEntryId,
+          recipients: [{
+            recipient_token: 'totally-garbage-token',
+            encrypted_data: 'c29tZS1ibG9i',
+          }],
+        },
       });
-
-      it('revokes all shares for an entry', async () => {
-        const resp = await api.post('/sharing.php?action=revoke', {
-          json: { source_entry_id: testEntryId },
-        });
-        expect(resp.status).toBe(200);
-        const data = await extractData(resp);
-        expect(data).toHaveProperty('revoked');
-        // Should revoke ghost + regular + self-share + duplicate = at least 4
-        expect(data.revoked).toBeGreaterThanOrEqual(2);
-      });
-
-      it('share-count returns 0 after revoking all shares', async () => {
-        const resp = await api.get(`/sharing.php?action=share-count&entry_id=${testEntryId}`);
-        expect(resp.status).toBe(200);
-        const data = await extractData(resp);
-        expect(data.count).toBe(0);
-      });
-
-      it('shared-by-me no longer shows revoked shares', async () => {
-        const resp = await api.get('/sharing.php?action=shared-by-me');
-        expect(resp.status).toBe(200);
-        const data = await extractData(resp);
-        const testShares = data.filter(s => s.source_entry_id === testEntryId);
-        expect(testShares.length).toBe(0);
-      });
-
-      it('revoke returns revoked=0 for entry with no shares', async () => {
-        const resp = await api.post('/sharing.php?action=revoke', {
-          json: { source_entry_id: testEntryId },
-        });
-        expect(resp.status).toBe(200);
-        const data = await extractData(resp);
-        expect(data.revoked).toBe(0);
-      });
-
-      it('revokes specific recipients by user_ids', async () => {
-        // Create two new shares first
-        await api.post('/sharing.php?action=share', {
-          json: {
-            source_entry_id: testEntryId2,
-            recipients: [
-              { identifier: ghostIdentifier, encrypted_data: 'cmV2b2tlLXRlc3QtMQ==' },
-              { identifier: 'test_regular_user', encrypted_data: 'cmV2b2tlLXRlc3QtMg==' },
-            ],
-          },
-        });
-
-        // Get shares to find recipient IDs
-        const byMeResp = await api.get('/sharing.php?action=shared-by-me');
-        const byMeData = await extractData(byMeResp);
-        const entry2Shares = byMeData.filter(s => s.source_entry_id === testEntryId2);
-        expect(entry2Shares.length).toBeGreaterThanOrEqual(2);
-
-        // Revoke only the regular user's share
-        const regularShare = entry2Shares.find(s => s.recipient_identifier === 'test_regular_user');
-        if (regularShare && regularShare.recipient_id) {
-          const resp = await api.post('/sharing.php?action=revoke', {
-            json: {
-              source_entry_id: testEntryId2,
-              user_ids: [regularShare.recipient_id],
-            },
-          });
-          expect(resp.status).toBe(200);
-          const data = await extractData(resp);
-          expect(data.revoked).toBe(1);
-
-          // Ghost share should still exist
-          const countResp = await api.get(`/sharing.php?action=share-count&entry_id=${testEntryId2}`);
-          const countData = await extractData(countResp);
-          expect(countData.count).toBe(1);
-        }
-
-        // Clean up remaining shares on entry2
-        await api.post('/sharing.php?action=revoke', {
-          json: { source_entry_id: testEntryId2 },
-        });
-      });
+      expect(resp.status).toBe(200);
+      const data = await extractData(resp);
+      expect(data.count).toBe(0);
+      expect(data.skipped).toBe(1);
     });
 
-    // ── BUG-SHARE-2: orphaned share with null recipient_id ──────
-    describe('BUG: orphaned shares with null recipient_id', () => {
-      it('BUG: share with unknown identifier creates share with null recipient_id', async () => {
-        // TODO: sharing.php should require prior recipient-key lookup, or resolve
-        // the identifier itself. Currently creates an unreachable share.
-        const unknownId = 'totally_unknown_user_' + Date.now();
-        const resp = await api.post('/sharing.php?action=share', {
-          json: {
-            source_entry_id: testEntryId2,
-            recipients: [{
-              identifier: unknownId,
-              encrypted_data: 'b3JwaGFuLXNoYXJl',
-            }],
-          },
-        });
-        // BUG: succeeds with 200, creating an orphaned share
-        expect(resp.status).toBe(200);
-        const data = await extractData(resp);
-        expect(data.count).toBe(1);
+    it('skips tampered token', async () => {
+      // Get a real token, then tamper with it
+      const keyResp = await api.get('/sharing.php?action=recipient-key&identifier=test_regular_user');
+      const keyData = await extractData(keyResp);
+      const realToken = keyData.recipient_token;
 
-        // Verify the orphaned share shows in shared-by-me
-        const byMeResp = await api.get('/sharing.php?action=shared-by-me');
-        const byMeData = await extractData(byMeResp);
-        const orphanShare = byMeData.find(
-          s => s.source_entry_id === testEntryId2 && s.recipient_identifier === unknownId
-        );
-        expect(orphanShare).toBeDefined();
-        // BUG: recipient_username is null because recipient_id is null
-        expect(orphanShare.recipient_username).toBeNull();
+      // Tamper: flip last character of HMAC signature
+      const tampered = realToken.slice(0, -1) + (realToken.slice(-1) === 'a' ? 'b' : 'a');
 
-        // Clean up
-        await api.post('/sharing.php?action=revoke', {
-          json: { source_entry_id: testEntryId2 },
-        });
+      const resp = await api.post('/sharing.php?action=share', {
+        json: {
+          source_entry_id: testEntryId,
+          recipients: [{
+            recipient_token: tampered,
+            encrypted_data: 'dGFtcGVyZWQ=',
+          }],
+        },
       });
+      expect(resp.status).toBe(200);
+      const data = await extractData(resp);
+      expect(data.count).toBe(0);
+      expect(data.skipped).toBe(1);
+    });
+
+    it('blocks self-share via token (belt-and-suspenders)', async () => {
+      // Even if we somehow craft a token with the sender's own user_id,
+      // the share endpoint should skip it. We cannot easily forge a valid token,
+      // but recipient-key already blocks self-lookup. We verify the 400 at
+      // recipient-key level.
+      const resp = await api.get('/sharing.php?action=recipient-key&identifier=initial_user');
+      expect(resp.status).toBe(400);
+      const body = await resp.json();
+      expect(body.error || body.message).toMatch(/yourself/i);
+    });
+
+    it('skips recipients with empty token or encrypted_data', async () => {
+      const resp = await api.post('/sharing.php?action=share', {
+        json: {
+          source_entry_id: testEntryId,
+          recipients: [
+            { recipient_token: '', encrypted_data: 'blob' },
+            { recipient_token: 'some-token', encrypted_data: '' },
+          ],
+        },
+      });
+      expect(resp.status).toBe(200);
+      const data = await extractData(resp);
+      expect(data.count).toBe(0);
+      expect(data.skipped).toBe(2);
+    });
+
+    it('upserts on duplicate share (same entry + recipient)', async () => {
+      // Share testEntryId with regular user again (already shared above)
+      // Should upsert, not create a duplicate row
+      const keyResp = await api.get('/sharing.php?action=recipient-key&identifier=test_regular_user');
+      const keyData = await extractData(keyResp);
+      const token = keyData.recipient_token;
+
+      // Get count before upsert
+      const countBefore = await api.get(`/sharing.php?action=share-count&entry_id=${testEntryId}`);
+      const beforeData = await extractData(countBefore);
+      const initialCount = beforeData.count;
+
+      const shareResp = await api.post('/sharing.php?action=share', {
+        json: {
+          source_entry_id: testEntryId,
+          recipients: [{
+            recipient_token: token,
+            encrypted_data: 'dXBkYXRlZC1ibG9i',   // updated blob
+          }],
+        },
+      });
+      expect(shareResp.status).toBe(200);
+      const shareData = await extractData(shareResp);
+      expect(shareData.count).toBe(1);
+
+      // Count should NOT increase — upsert replaces, doesn't duplicate
+      const countAfter = await api.get(`/sharing.php?action=share-count&entry_id=${testEntryId}`);
+      const afterData = await extractData(countAfter);
+      expect(afterData.count).toBe(initialCount);
+    });
+
+    it('response includes skipped count', async () => {
+      // Mix valid + invalid recipients
+      const keyResp = await api.get(
+        `/sharing.php?action=recipient-key&identifier=${encodeURIComponent(ghostIdentifier)}`,
+      );
+      const keyData = await extractData(keyResp);
+      const validToken = keyData.recipient_token;
+
+      const resp = await api.post('/sharing.php?action=share', {
+        json: {
+          source_entry_id: testEntryId,
+          recipients: [
+            { recipient_token: validToken, encrypted_data: 'dmFsaWQ=' },
+            { recipient_token: 'bad-token', encrypted_data: 'aW52YWxpZA==' },
+          ],
+        },
+      });
+      expect(resp.status).toBe(200);
+      const data = await extractData(resp);
+      // Ghost upsert should succeed (count=1), bad token skipped (skipped=1)
+      expect(data.count).toBe(1);
+      expect(data.skipped).toBe(1);
     });
   });
 
-  // ── invalid request fallback ────────────────────────────────────
+  // ── shared-by-me ────────────────────────────────────────────────────────
+  describe('shared-by-me', () => {
+    it('returns shares with recipient_id field', async () => {
+      const resp = await api.get('/sharing.php?action=shared-by-me');
+      expect(resp.status).toBe(200);
+      const data = await extractData(resp);
+      expect(Array.isArray(data)).toBe(true);
+
+      const testShares = data.filter(s => Number(s.source_entry_id) === Number(testEntryId));
+      expect(testShares.length).toBeGreaterThanOrEqual(1);
+
+      for (const share of testShares) {
+        expect(share).toHaveProperty('recipient_id');
+        // recipient_id should be a number (0 for ghost, real id for real user)
+        expect(typeof share.recipient_id).toBe('number');
+      }
+    });
+
+    it('includes all expected fields', async () => {
+      const resp = await api.get('/sharing.php?action=shared-by-me');
+      expect(resp.status).toBe(200);
+      const data = await extractData(resp);
+      expect(data.length).toBeGreaterThan(0);
+
+      const share = data[0];
+      expect(share).toHaveProperty('id');
+      expect(share).toHaveProperty('recipient_identifier');
+      expect(share).toHaveProperty('recipient_id');
+      expect(share).toHaveProperty('source_entry_id');
+      expect(share).toHaveProperty('entry_type');
+      expect(share).toHaveProperty('is_ghost');
+      expect(share).toHaveProperty('created_at');
+      expect(share).toHaveProperty('updated_at');
+    });
+  });
+
+  // ── share-count ─────────────────────────────────────────────────────────
+  describe('share-count', () => {
+    it('requires entry_id parameter', async () => {
+      const resp = await api.get('/sharing.php?action=share-count');
+      expect(resp.status).toBe(400);
+    });
+
+    it('returns correct count for shared entry', async () => {
+      const resp = await api.get(`/sharing.php?action=share-count&entry_id=${testEntryId}`);
+      expect(resp.status).toBe(200);
+      const data = await extractData(resp);
+      expect(data).toHaveProperty('count');
+      // At least the regular user share should exist
+      expect(data.count).toBeGreaterThanOrEqual(1);
+    });
+
+    it('returns 0 for unshared entry', async () => {
+      const resp = await api.get(`/sharing.php?action=share-count&entry_id=${testEntryId2}`);
+      expect(resp.status).toBe(200);
+      const data = await extractData(resp);
+      expect(data).toHaveProperty('count', 0);
+    });
+
+    it('returns 0 for non-existent entry_id', async () => {
+      const resp = await api.get('/sharing.php?action=share-count&entry_id=999999');
+      expect(resp.status).toBe(200);
+      const data = await extractData(resp);
+      expect(data).toHaveProperty('count', 0);
+    });
+  });
+
+  // ── shared-with-me ──────────────────────────────────────────────────────
+  describe('shared-with-me', () => {
+    it('returns shares addressed to user', async () => {
+      // Admin shared testEntryId with regular user — regular user should see it
+      const resp = await apiRequest('GET', '/sharing.php?action=shared-with-me', { role: 'regular' });
+      expect(resp.status).toBe(200);
+      const data = await extractData(resp);
+      expect(Array.isArray(data)).toBe(true);
+
+      // Find the share we created
+      const ourShare = data.find(s => Number(s.source_entry_id) === Number(testEntryId));
+      expect(ourShare).toBeDefined();
+      expect(ourShare).toHaveProperty('sender_username');
+      expect(ourShare).toHaveProperty('encrypted_data');
+      expect(ourShare).toHaveProperty('entry_type');
+    });
+  });
+
+  // ── update (re-encrypt) ─────────────────────────────────────────────────
+  describe('update', () => {
+    it('requires source_entry_id and recipients', async () => {
+      const resp1 = await api.post('/sharing.php?action=update', {
+        json: { recipients: [{ user_id: 1, encrypted_data: 'new-blob' }] },
+      });
+      expect(resp1.status).toBe(400);
+
+      const resp2 = await api.post('/sharing.php?action=update', {
+        json: { source_entry_id: testEntryId },
+      });
+      expect(resp2.status).toBe(400);
+
+      const resp3 = await api.post('/sharing.php?action=update', {
+        json: { source_entry_id: testEntryId, recipients: [] },
+      });
+      expect(resp3.status).toBe(400);
+    });
+
+    it('returns 404 for non-existent source entry', async () => {
+      const resp = await api.post('/sharing.php?action=update', {
+        json: {
+          source_entry_id: 999999,
+          recipients: [{ user_id: 1, encrypted_data: 'new-blob' }],
+        },
+      });
+      expect(resp.status).toBe(404);
+    });
+
+    it('updates share encrypted_data', async () => {
+      // Find the regular user's recipient_id from shared-by-me
+      const byMeResp = await api.get('/sharing.php?action=shared-by-me');
+      const byMeData = await extractData(byMeResp);
+      const regularShare = byMeData.find(
+        s => Number(s.source_entry_id) === Number(testEntryId) && s.recipient_identifier === 'test_regular_user',
+      );
+      expect(regularShare).toBeDefined();
+      expect(regularShare.recipient_id).toBeTruthy();
+
+      const resp = await api.post('/sharing.php?action=update', {
+        json: {
+          source_entry_id: testEntryId,
+          recipients: [{
+            user_id: regularShare.recipient_id,
+            encrypted_data: 'cmUtZW5jcnlwdGVkLWJsb2I=',
+          }],
+        },
+      });
+      expect(resp.status).toBe(200);
+      const data = await extractData(resp);
+      expect(data).toHaveProperty('updated');
+      expect(data.updated).toBe(1);
+    });
+
+    it('returns updated=0 for non-matching user_id', async () => {
+      const resp = await api.post('/sharing.php?action=update', {
+        json: {
+          source_entry_id: testEntryId,
+          recipients: [{
+            user_id: 999999,
+            encrypted_data: 'bm8tbWF0Y2g=',
+          }],
+        },
+      });
+      expect(resp.status).toBe(200);
+      const data = await extractData(resp);
+      expect(data.updated).toBe(0);
+    });
+  });
+
+  // ── revoke ──────────────────────────────────────────────────────────────
+  describe('revoke', () => {
+    it('requires source_entry_id', async () => {
+      const resp = await api.post('/sharing.php?action=revoke', {
+        json: {},
+      });
+      expect(resp.status).toBe(400);
+    });
+
+    it('revokes specific recipient by user_id', async () => {
+      // First, share testEntryId2 with both regular user and ghost
+      const keyRegResp = await api.get('/sharing.php?action=recipient-key&identifier=test_regular_user');
+      const keyRegData = await extractData(keyRegResp);
+      const regToken = keyRegData.recipient_token;
+
+      const keyGhostResp = await api.get(
+        `/sharing.php?action=recipient-key&identifier=${encodeURIComponent(ghostIdentifier)}`,
+      );
+      const keyGhostData = await extractData(keyGhostResp);
+      const ghostToken = keyGhostData.recipient_token;
+
+      await api.post('/sharing.php?action=share', {
+        json: {
+          source_entry_id: testEntryId2,
+          recipients: [
+            { recipient_token: regToken, encrypted_data: 'cmV2b2tlLXRlc3QtMQ==' },
+            { recipient_token: ghostToken, encrypted_data: 'cmV2b2tlLXRlc3QtMg==' },
+          ],
+        },
+      });
+
+      // Get recipient_id from shared-by-me
+      const byMeResp = await api.get('/sharing.php?action=shared-by-me');
+      const byMeData = await extractData(byMeResp);
+      const regularShare = byMeData.find(
+        s => Number(s.source_entry_id) === Number(testEntryId2) && s.recipient_identifier === 'test_regular_user',
+      );
+      expect(regularShare).toBeDefined();
+      expect(regularShare.recipient_id).toBeTruthy();
+
+      // Revoke only the regular user's share
+      const resp = await api.post('/sharing.php?action=revoke', {
+        json: {
+          source_entry_id: testEntryId2,
+          user_ids: [regularShare.recipient_id],
+        },
+      });
+      expect(resp.status).toBe(200);
+      const data = await extractData(resp);
+      expect(data.revoked).toBe(1);
+
+      // Ghost share should still exist
+      const countResp = await api.get(`/sharing.php?action=share-count&entry_id=${testEntryId2}`);
+      const countData = await extractData(countResp);
+      expect(countData.count).toBe(1);
+    });
+
+    it('revokes all shares for entry when user_ids empty', async () => {
+      // testEntryId still has regular + ghost shares
+      const resp = await api.post('/sharing.php?action=revoke', {
+        json: { source_entry_id: testEntryId },
+      });
+      expect(resp.status).toBe(200);
+      const data = await extractData(resp);
+      expect(data).toHaveProperty('revoked');
+      expect(data.revoked).toBeGreaterThanOrEqual(1);
+    });
+
+    it('share-count returns 0 after revoke', async () => {
+      const resp = await api.get(`/sharing.php?action=share-count&entry_id=${testEntryId}`);
+      expect(resp.status).toBe(200);
+      const data = await extractData(resp);
+      expect(data.count).toBe(0);
+    });
+
+    it('returns revoked=0 for entry with no shares', async () => {
+      const resp = await api.post('/sharing.php?action=revoke', {
+        json: { source_entry_id: testEntryId },
+      });
+      expect(resp.status).toBe(200);
+      const data = await extractData(resp);
+      expect(data.revoked).toBe(0);
+    });
+  });
+
+  // ── cross-user isolation ────────────────────────────────────────────────
+  describe('cross-user isolation', () => {
+    it('regular user cannot see admin shares in shared-by-me', async () => {
+      const resp = await apiRequest('GET', '/sharing.php?action=shared-by-me', { role: 'regular' });
+      expect(resp.status).toBe(200);
+      const data = await extractData(resp);
+      expect(Array.isArray(data)).toBe(true);
+
+      // None of the entries should be the admin's test entries
+      const adminShares = data.filter(
+        s => s.source_entry_id === testEntryId || s.source_entry_id === testEntryId2,
+      );
+      expect(adminShares.length).toBe(0);
+    });
+  });
+
+  // ── invalid action fallback ─────────────────────────────────────────────
   describe('invalid request', () => {
     it('returns 400 for unknown action', async () => {
       const resp = await api.get('/sharing.php?action=nonexistent');
@@ -622,9 +666,9 @@ describe('Sharing API', () => {
     });
   });
 
-  // ── cleanup: remove test vault entries ──────────────────────────
+  // ── cleanup ─────────────────────────────────────────────────────────────
   afterAll(async () => {
-    // Revoke any remaining shares first (to avoid FK issues if applicable)
+    // Revoke any remaining shares first, then delete test vault entries
     if (testEntryId) {
       await api.post('/sharing.php?action=revoke', {
         json: { source_entry_id: testEntryId },

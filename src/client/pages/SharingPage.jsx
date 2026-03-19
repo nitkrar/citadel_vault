@@ -65,7 +65,7 @@ export default function SharingPage() {
     const entries = await entryStore.getAll();
     const cache = {};
     for (const e of entries) {
-      try { cache[e.id] = await decrypt(e.data); } catch { cache[e.id] = null; }
+      try { cache[e.id] = await decrypt(e.encrypted_data); } catch { cache[e.id] = null; }
     }
     setMyEntries(entries);
     setDecryptedEntries(cache);
@@ -85,7 +85,7 @@ export default function SharingPage() {
     setSharing(true);
     try {
       const { data: keyResp } = await api.get(`/sharing.php?action=recipient-key&identifier=${encodeURIComponent(shareRecipient.trim())}`);
-      const { public_key } = apiData({ data: keyResp });
+      const { public_key, recipient_token } = apiData({ data: keyResp });
 
       const entry = myEntries.find(e => e.id === parseInt(shareEntryId));
       const plainData = decryptedEntries[entry.id];
@@ -96,7 +96,7 @@ export default function SharingPage() {
 
       await api.post('/sharing.php?action=share', {
         source_entry_id: parseInt(shareEntryId),
-        recipients: [{ identifier: shareRecipient.trim(), encrypted_data: encryptedData }],
+        recipients: [{ recipient_token, encrypted_data: encryptedData }],
       });
 
       setShowShareModal(false);
