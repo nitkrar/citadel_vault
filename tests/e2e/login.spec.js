@@ -36,7 +36,7 @@ test.describe('Login Page', () => {
     await page.click('button[type="submit"]');
 
     // Should redirect to dashboard
-    await page.waitForURL('**/');
+    await page.waitForURL('/');
     // Should see authenticated content (sidebar nav)
     await expect(page.locator('nav, .sidebar, .layout-sidebar').first()).toBeVisible({ timeout: 10000 });
   });
@@ -55,17 +55,10 @@ test.describe('Logout', () => {
     await page.fill('input[autocomplete="username webauthn"]', 'initial_user');
     await page.fill('input[autocomplete="current-password"]', 'Initial#12$');
     await page.click('button[type="submit"]');
-    await page.waitForURL('**/');
+    await page.waitForURL('/');
 
-    // Find and click logout button/link
-    const logoutBtn = page.locator('text=Sign Out, button:has-text("Sign Out"), [aria-label="Sign Out"]').first();
-    if (await logoutBtn.isVisible()) {
-      await logoutBtn.click();
-    } else {
-      // Logout might be in sidebar — look for LogOut icon or text
-      const sidebarLogout = page.locator('button:has-text("Logout"), a:has-text("Logout"), button:has-text("Sign out")').first();
-      await sidebarLogout.click();
-    }
+    // Find and click logout button in sidebar footer
+    await page.locator('button:has-text("Sign Out")').click();
 
     // Should redirect to login or home
     await page.waitForURL(/\/(login|home)/);

@@ -7,7 +7,7 @@
  * Requires: php -S localhost:8081 router.php
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { api, extractData, unauthRequest, BASE_URL } from '../helpers/apiClient.js';
+import { api, extractData, unauthRequest, BASE_URL, apiRequest, resetTokens } from '../helpers/apiClient.js';
 
 describe('Auth API', () => {
   // ── registration-status (public) ─────────────────────────────────
@@ -318,6 +318,96 @@ describe('Auth API', () => {
         method: 'GET',
       });
       expect(resp.status).toBe(404);
+    });
+  });
+
+  // ── integration edge cases ───────────────────────────────────────
+  describe('integration edge cases', () => {
+    it('password-change → re-login: new password works, old password fails', async () => {
+      // Change admin password to a new value
+      const changeResp = await apiRequest('PUT', '/auth.php?action=password', {
+        role: 'admin',
+        json: { current_password: 'Initial#12$', new_password: 'Changed#99!' },
+      });
+      expect(changeResp.status).toBe(200);
+
+      // Reset cached tokens so subsequent logins use fresh credentials
+      resetTokens();
+
+      // Login with NEW password must succeed
+      const newLoginResp = await fetch(`${BASE_URL}/auth.php?action=login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'initial_user', password: 'Changed#99!' }),
+      });
+      expect(newLoginResp.status).toBe(200);
+
+      // Login with OLD password must fail
+      const oldLoginResp = await fetch(`${BASE_URL}/auth.php?action=login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'initial_user', password: 'Initial#12$' }),
+      });
+      expect(oldLoginResp.status).toBe(401);
+
+      // CLEANUP: restore original password so other tests are not broken
+      const restoreResp = await apiRequest('PUT', '/auth.php?action=password', {
+        role: 'admin',
+        json: { current_password: 'Changed#99!', new_password: 'Initial#12$' },
+      });
+      expect(restoreResp.status).toBe(200);
+
+      // Reset tokens again so subsequent tests get a fresh admin session
+      resetTokens();
+    });
+
+    it('deactivated user is blocked from API access', async () => {
+      // Admin fetches user list to find the regular user's ID
+      const usersResp = await apiRequest('GET', '/users.php', { role: 'admin' });
+      expect(usersResp.status).toBe(200);
+      const usersBody = await usersResp.json();
+      const users = usersBody?.data ?? usersBody;
+      const regularUser = Array.isArray(users)
+        ? users.find((u) => u.username === 'test_regular_user')
+        : null;
+      expect(regularUser).toBeTruthy();
+      const userId = regularUser.id;
+
+      // Admin deactivates the regular user
+      const deactivateResp = await apiRequest('PUT', `/users.php?id=${userId}`, {
+        role: 'admin',
+        json: { is_active: false },
+      });
+      expect(deactivateResp.status).toBe(200);
+
+      // Login AFTER deactivation — the server must reject credentials for an
+      // inactive account (the login handler checks is_active before issuing a
+      // token, so no JWT caching window applies here).
+      // auth.php login returns 403 specifically for deactivated accounts.
+      const loginAfterDeactivateResp = await fetch(`${BASE_URL}/auth.php?action=login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'test_regular_user', password: 'TestRegular#1' }),
+      });
+      expect(loginAfterDeactivateResp.status).toBe(403);
+
+      // CLEANUP: re-activate the regular user
+      const reactivateResp = await apiRequest('PUT', `/users.php?id=${userId}`, {
+        role: 'admin',
+        json: { is_active: true },
+      });
+      expect(reactivateResp.status).toBe(200);
+    });
+
+    it('force-change-password endpoint returns 403 when flag is not set', async () => {
+      // Admin user does not have must_reset_password set, so the endpoint
+      // should reject the call with 403 (flag not set). This confirms the
+      // endpoint is reachable and enforces its guard correctly.
+      const resp = await apiRequest('POST', '/auth.php?action=force-change-password', {
+        role: 'admin',
+        json: { new_password: 'Initial#12$' },
+      });
+      expect(resp.status).toBe(403);
     });
   });
 

@@ -80,6 +80,7 @@ export default function SearchableSelect({
         break;
       case 'Enter':
         e.preventDefault();
+        if (filtered.length === 0) break;
         if (filtered[highlightIdx] && !filtered[highlightIdx].disabled) handleSelect(filtered[highlightIdx].value);
         break;
       case 'Escape':

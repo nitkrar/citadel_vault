@@ -30,19 +30,19 @@ test.describe('Portfolio Page', () => {
   test('portfolio page shows tabs when vault is unlocked', async ({ page }) => {
     await page.goto('/portfolio');
 
-    // If vault is unlocked, portfolio tabs should be visible
-    const hasModal = await page.locator('.modal').isVisible().catch(() => false);
-    if (!hasModal) {
-      // Look for portfolio tab names
+    const modal = page.locator('.modal');
+    const pageContent = page.locator('.page-content, [class*="portfolio"]').first();
+
+    // Wait for page to settle
+    await expect(
+      pageContent.or(modal)
+    ).toBeVisible({ timeout: 10000 });
+
+    // If vault is unlocked, at least one portfolio tab must be visible
+    if (!(await modal.isVisible())) {
       const tabTexts = ['Overview', 'By Country', 'By Account', 'By Asset Type', 'All Assets', 'By Currency', 'History'];
-      for (const tabText of tabTexts) {
-        const tab = page.locator(`text="${tabText}"`).first();
-        // At least some tabs should be visible (some might be scrolled off on mobile)
-        if (await tab.isVisible().catch(() => false)) {
-          await expect(tab).toBeVisible();
-          break;
-        }
-      }
+      const anyTab = page.locator(tabTexts.map(t => `text="${t}"`).join(', ')).first();
+      await expect(anyTab).toBeVisible({ timeout: 5000 });
     }
   });
 });

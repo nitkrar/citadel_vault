@@ -666,6 +666,89 @@ describe('Sharing API (Redesigned)', () => {
     });
   });
 
+  // ── edge cases ──────────────────────────────────────────────────────────
+  describe('edge cases', () => {
+    let edgeEntryId = null;
+
+    beforeAll(async () => {
+      const resp = await api.post('/vault.php', {
+        json: {
+          entry_type: 'password',
+          template_id: 1,
+          encrypted_data: 'ZWRnZS1jYXNlLWVudHJ5',
+        },
+      });
+      if (resp.status === 201) {
+        const data = await extractData(resp);
+        edgeEntryId = data.id;
+      }
+    });
+
+    afterAll(async () => {
+      if (edgeEntryId) {
+        await api.post('/sharing.php?action=revoke', {
+          json: { source_entry_id: edgeEntryId },
+        });
+        await api.delete(`/vault.php?id=${edgeEntryId}`);
+      }
+    });
+
+    it('handles concurrent ghost user creation without crash', async () => {
+      expect(edgeEntryId).toBeTruthy();
+
+      // Use a unique identifier not seen elsewhere in the test suite
+      const concurrentGhost = 'concurrent_ghost_' + Date.now() + '@test.local';
+
+      // Step 1: Fetch recipient tokens for the same ghost identifier concurrently.
+      // recipient-key is the endpoint that creates/finds the ghost user row, so
+      // this is where the INSERT race can occur.
+      const [keyResult1, keyResult2] = await Promise.allSettled([
+        api.get(`/sharing.php?action=recipient-key&identifier=${encodeURIComponent(concurrentGhost)}`),
+        api.get(`/sharing.php?action=recipient-key&identifier=${encodeURIComponent(concurrentGhost)}`),
+      ]);
+
+      // Neither request should produce a 500 — the DB layer must handle the
+      // duplicate-key scenario gracefully (IGNORE / upsert / re-select).
+      for (const result of [keyResult1, keyResult2]) {
+        if (result.status === 'fulfilled') {
+          expect(result.value.status).not.toBe(500);
+        }
+        // A rejected promise (network error) is acceptable evidence of no crash,
+        // but we prefer both to succeed.
+      }
+
+      // Step 2: Collect valid tokens from whichever requests succeeded with 200.
+      const tokens = [];
+      for (const result of [keyResult1, keyResult2]) {
+        if (result.status === 'fulfilled' && result.value.status === 200) {
+          const data = await extractData(result.value);
+          if (data.recipient_token) {
+            tokens.push(data.recipient_token);
+          }
+        }
+      }
+
+      // At least one request must have returned a usable token.
+      expect(tokens.length).toBeGreaterThanOrEqual(1);
+
+      // Step 3: Share the entry using one of the obtained tokens to confirm the
+      // ghost user row is coherent (not left in a corrupt state by the race).
+      const shareResp = await api.post('/sharing.php?action=share', {
+        json: {
+          source_entry_id: edgeEntryId,
+          recipients: [{
+            recipient_token: tokens[0],
+            encrypted_data: 'Y29uY3VycmVudC1ibG9i',
+          }],
+        },
+      });
+      expect(shareResp.status).not.toBe(500);
+      expect(shareResp.status).toBe(200);
+      const shareData = await extractData(shareResp);
+      expect(shareData.count).toBe(1);
+    });
+  });
+
   // ── cleanup ─────────────────────────────────────────────────────────────
   afterAll(async () => {
     // Revoke any remaining shares first, then delete test vault entries

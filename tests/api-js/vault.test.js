@@ -8,7 +8,7 @@
  * Requires: php -S localhost:8081 router.php
  */
 import { describe, it, expect } from 'vitest';
-import { api, extractData, unauthRequest } from '../helpers/apiClient.js';
+import { api, extractData, unauthRequest, noAuthRequest } from '../helpers/apiClient.js';
 
 describe('Vault API', () => {
   let createdEntryId = null;
@@ -47,6 +47,30 @@ describe('Vault API', () => {
 
     it('GET deleted returns 401 without auth', async () => {
       const resp = await unauthRequest('GET', '/vault.php?action=deleted');
+      expect(resp.status).toBe(401);
+    });
+
+    it('GET list returns 401 with no auth header', async () => {
+      const resp = await noAuthRequest('GET', '/vault.php');
+      expect(resp.status).toBe(401);
+    });
+
+    it('POST create returns 401 with no auth header', async () => {
+      const resp = await noAuthRequest('POST', '/vault.php', {
+        json: { entry_type: 'password', template_id: 1, encrypted_data: 'x' },
+      });
+      expect(resp.status).toBe(401);
+    });
+
+    it('PUT update returns 401 with no auth header', async () => {
+      const resp = await noAuthRequest('PUT', '/vault.php?id=1', {
+        json: { encrypted_data: 'x' },
+      });
+      expect(resp.status).toBe(401);
+    });
+
+    it('DELETE returns 401 with no auth header', async () => {
+      const resp = await noAuthRequest('DELETE', '/vault.php?id=1');
       expect(resp.status).toBe(401);
     });
   });
@@ -109,7 +133,7 @@ describe('Vault API', () => {
   // ── read single ──────────────────────────────────────────────────
   describe('GET ?id=N (single entry)', () => {
     it('returns single entry by id', async () => {
-      if (!createdEntryId) return;
+      expect(createdEntryId, 'entry must have been created by prior test').toBeTruthy();
       const resp = await api.get(`/vault.php?id=${createdEntryId}`);
       expect(resp.status).toBe(200);
       const data = await extractData(resp);
@@ -170,7 +194,7 @@ describe('Vault API', () => {
   // ── update ───────────────────────────────────────────────────────
   describe('PUT ?id=N (update entry)', () => {
     it('updates encrypted_data', async () => {
-      if (!createdEntryId) return;
+      expect(createdEntryId, 'entry must have been created by prior test').toBeTruthy();
       const resp = await api.put(`/vault.php?id=${createdEntryId}`, {
         json: {
           encrypted_data: 'dXBkYXRlZC1lbmNyeXB0ZWQtZGF0YQ==',
@@ -182,7 +206,7 @@ describe('Vault API', () => {
     });
 
     it('verifies updated data persists', async () => {
-      if (!createdEntryId) return;
+      expect(createdEntryId, 'entry must have been created by prior test').toBeTruthy();
       const resp = await api.get(`/vault.php?id=${createdEntryId}`);
       expect(resp.status).toBe(200);
       const data = await extractData(resp);
@@ -190,7 +214,7 @@ describe('Vault API', () => {
     });
 
     it('returns 400 for missing encrypted_data', async () => {
-      if (!createdEntryId) return;
+      expect(createdEntryId, 'entry must have been created by prior test').toBeTruthy();
       const resp = await api.put(`/vault.php?id=${createdEntryId}`, {
         json: {},
       });
@@ -205,7 +229,7 @@ describe('Vault API', () => {
     });
 
     it('returns 400 for invalid entry_type on update', async () => {
-      if (!createdEntryId) return;
+      expect(createdEntryId, 'entry must have been created by prior test').toBeTruthy();
       const resp = await api.put(`/vault.php?id=${createdEntryId}`, {
         json: { encrypted_data: 'abc', entry_type: 'invalid_type' },
       });
@@ -296,7 +320,7 @@ describe('Vault API', () => {
   // ── bulk update ──────────────────────────────────────────────────
   describe('POST ?action=bulk-update', () => {
     it('updates multiple entries', async () => {
-      if (bulkCreatedIds.length < 2) return;
+      expect(bulkCreatedIds.length, 'bulk entries must have been created by prior test').toBeGreaterThanOrEqual(2);
       const resp = await api.post('/vault.php?action=bulk-update', {
         json: {
           entries: [
@@ -339,7 +363,7 @@ describe('Vault API', () => {
   // ── delete (soft) ────────────────────────────────────────────────
   describe('DELETE ?id=N (soft delete)', () => {
     it('soft-deletes an entry', async () => {
-      if (!createdEntryId) return;
+      expect(createdEntryId, 'entry must have been created by prior test').toBeTruthy();
       const resp = await api.delete(`/vault.php?id=${createdEntryId}`);
       expect(resp.status).toBe(200);
       const data = await extractData(resp);
@@ -349,7 +373,7 @@ describe('Vault API', () => {
     });
 
     it('returns 404 after entry is deleted', async () => {
-      if (!createdEntryId) return;
+      expect(createdEntryId, 'entry must have been created by prior test').toBeTruthy();
       const resp = await api.get(`/vault.php?id=${createdEntryId}`);
       // Deleted entries should not appear in normal GET
       expect(resp.status).toBe(404);
@@ -388,7 +412,7 @@ describe('Vault API', () => {
   // ── restore ──────────────────────────────────────────────────────
   describe('POST ?action=restore&id=N', () => {
     it('restores a soft-deleted entry', async () => {
-      if (!createdEntryId) return;
+      expect(createdEntryId, 'entry must have been created by prior test').toBeTruthy();
       const resp = await api.post(`/vault.php?action=restore&id=${createdEntryId}`);
       // May be 200 (restored) or 404 (already purged or not deleted)
       expect([200, 404]).toContain(resp.status);
@@ -414,10 +438,56 @@ describe('Vault API', () => {
     });
   });
 
+  // ── edge cases ───────────────────────────────────────────────────
+  describe('edge cases', () => {
+    it('returns 400 for encrypted_data as array', async () => {
+      const resp = await api.post('/vault.php', {
+        json: { entry_type: 'password', template_id: 1, encrypted_data: [1, 2, 3] },
+      });
+      expect(resp.status).toBe(400);
+    });
+
+    it('accepts non-existent template_id on create (no FK constraint)', async () => {
+      // template_id is client-side only — the server stores it as-is without FK validation.
+      // A non-existent template_id must be accepted (201) and the value must be preserved.
+      const resp = await api.post('/vault.php', {
+        json: { entry_type: 'password', template_id: 999999, encrypted_data: 'dGVzdA==' },
+      });
+      expect(resp.status).toBe(201);
+      const data = await extractData(resp);
+      expect(data).toHaveProperty('id');
+      expect(typeof data.id).toBe('number');
+      // Cleanup
+      await api.delete(`/vault.php?id=${data.id}`);
+    });
+
+    it('handles oversized bulk-create array without crashing', { timeout: 30000 }, async () => {
+      // The server has no batch size cap, so 1000 entries will be accepted (200).
+      // The goal is to verify the server does not crash (no 500) and that all
+      // created rows are cleaned up. Cleanup is parallelised to avoid timeout.
+      const entries = Array.from({ length: 1000 }, () => ({
+        entry_type: 'password',
+        template_id: 1,
+        encrypted_data: 'YnVsay10ZXN0LW92ZXJzaXplZA==',
+      }));
+      const resp = await api.post('/vault.php?action=bulk-create', {
+        json: { entries },
+      });
+      expect(resp.status).not.toBe(500);
+      if (resp.status === 200) {
+        const data = await extractData(resp);
+        if (data.ids && data.ids.length > 0) {
+          // Parallel cleanup to stay within the extended timeout
+          await Promise.all(data.ids.map((id) => api.delete(`/vault.php?id=${id}`)));
+        }
+      }
+    });
+  });
+
   // ── cleanup: remove all test entries ─────────────────────────────
   describe('cleanup', () => {
     it('removes single test entry', async () => {
-      if (!createdEntryId) return;
+      if (!createdEntryId) return; // cleanup — OK to skip if nothing was created
       // Delete it (may already be deleted — that's fine)
       await api.delete(`/vault.php?id=${createdEntryId}`);
     });
