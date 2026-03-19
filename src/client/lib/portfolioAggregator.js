@@ -131,7 +131,7 @@ export function recalculateSnapshot(entries, rateMap, displayCurrency) {
   const enrichedEntries = [];
 
   for (const e of entries) {
-    if (!e || e.raw_value === undefined) continue;
+    if (!e || e.raw_value === undefined || Number.isNaN(e.raw_value)) continue;
 
     const currency = e.currency || displayCurrency;
     const displayValue = convertCurrency(e.raw_value, currency, displayCurrency, rateMap);

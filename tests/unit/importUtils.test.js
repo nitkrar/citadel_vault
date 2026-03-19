@@ -225,3 +225,56 @@ describe('generateCsvTemplate', () => {
     expect(generateCsvTemplate(fields)).toBe('"Say ""Hello"""\n');
   });
 });
+
+// ── parseCsv edge cases ─────────────────────────────────────────────────
+
+describe('parseCsv edge cases', () => {
+  it('handles quoted fields containing newlines', () => {
+    // RFC 4180: newlines within quoted fields should not split the row
+    const csv = 'title,notes\n"My Entry","Line 1\nLine 2\nLine 3"\n"Second","Simple"';
+    const { headers, rows } = parseCsv(csv);
+    expect(headers).toEqual(['title', 'notes']);
+    expect(rows).toHaveLength(2);
+    expect(rows[0][0]).toBe('My Entry');
+    expect(rows[0][1]).toBe('Line 1\nLine 2\nLine 3');
+    expect(rows[1][0]).toBe('Second');
+  });
+
+  it('handles quoted fields containing commas', () => {
+    const csv = 'name,address\n"Smith, John","123 Main St, Apt 4"';
+    const { headers, rows } = parseCsv(csv);
+    expect(rows[0][0]).toBe('Smith, John');
+    expect(rows[0][1]).toBe('123 Main St, Apt 4');
+  });
+
+  it('handles escaped quotes within quoted fields', () => {
+    const csv = 'title,notes\n"He said ""hello""","OK"';
+    const { headers, rows } = parseCsv(csv);
+    expect(rows[0][0]).toBe('He said "hello"');
+  });
+});
+
+// ── generateCsvTemplate edge cases ──────────────────────────────────────
+
+describe('generateCsvTemplate edge cases', () => {
+  it('properly quotes labels containing commas', () => {
+    const fields = [
+      { key: 'name', label: 'Full Name, First Last', type: 'text' },
+      { key: 'amount', label: 'Amount', type: 'number' },
+    ];
+    const csv = generateCsvTemplate(fields);
+    const firstLine = csv.split('\n')[0];
+    // Label with comma should be quoted
+    expect(firstLine).toContain('"Full Name, First Last"');
+    expect(firstLine).toContain('Amount');
+  });
+
+  it('properly quotes labels containing quotes', () => {
+    const fields = [
+      { key: 'desc', label: 'Description "short"', type: 'text' },
+    ];
+    const csv = generateCsvTemplate(fields);
+    // Quotes inside should be escaped as ""
+    expect(csv).toContain('"Description ""short"""');
+  });
+});
