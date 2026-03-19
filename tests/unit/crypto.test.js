@@ -389,3 +389,51 @@ describe('Snapshot encryption round-trip', () => {
     expect(result).toBeNull();
   });
 });
+
+// ── Edge cases ──────────────────────────────────────────────────────
+
+describe('Edge cases', () => {
+  it('encryptEntry with undefined values — JSON.stringify drops them', async () => {
+    // JSON.stringify({ a: 1, b: undefined }) => '{"a":1}' — b is silently dropped
+    const dek = await generateDek();
+    const obj = { title: 'test', value: undefined, nested: { x: undefined } };
+    const blob = await encryptEntry(obj, dek);
+    const decrypted = await decryptEntry(blob, dek);
+    // undefined values should be dropped by JSON.stringify
+    expect(decrypted).toEqual({ title: 'test', nested: {} });
+    expect(decrypted).not.toHaveProperty('value');
+  });
+
+  it('deriveWrappingKey with empty string passphrase — PBKDF2 accepts it', async () => {
+    // PBKDF2 does not reject empty passphrases — this is a known behavior
+    const salt = toBase64(crypto.getRandomValues(new Uint8Array(16)));
+    // Should not throw — PBKDF2 accepts empty input
+    const key = await deriveWrappingKey('', salt);
+    expect(key).toBeTruthy();
+    expect(key.type).toBe('secret');
+  });
+
+  it('encryptEntry rejects null', async () => {
+    const dek = await generateDek();
+    await expect(encryptEntry(null, dek)).rejects.toThrow('Cannot encrypt null');
+  });
+
+  it('encryptEntry rejects undefined', async () => {
+    const dek = await generateDek();
+    await expect(encryptEntry(undefined, dek)).rejects.toThrow('Cannot encrypt null');
+  });
+
+  it('encryptEntry handles empty object', async () => {
+    const dek = await generateDek();
+    const blob = await encryptEntry({}, dek);
+    const decrypted = await decryptEntry(blob, dek);
+    expect(decrypted).toEqual({});
+  });
+
+  it('encryptEntry handles object with only undefined values', async () => {
+    const dek = await generateDek();
+    const blob = await encryptEntry({ a: undefined, b: undefined }, dek);
+    const decrypted = await decryptEntry(blob, dek);
+    expect(decrypted).toEqual({}); // all undefined values dropped
+  });
+});

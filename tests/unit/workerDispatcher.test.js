@@ -149,3 +149,63 @@ describe('terminate', () => {
     expect(isWorkerActive()).toBe(false);
   });
 });
+
+// ── terminate edge cases ────────────────────────────────────────────
+
+describe('terminate edge cases', () => {
+  beforeEach(() => {
+    terminate();
+  });
+
+  it('terminate resets worker state after configure', () => {
+    configure({ workerMode: 'count', workerThreshold: '10' });
+    terminate();
+    expect(isWorkerActive()).toBe(false);
+  });
+
+  it('terminate is safe to call multiple times', () => {
+    terminate();
+    terminate();
+    terminate();
+    expect(isWorkerActive()).toBe(false);
+  });
+
+  it('terminate resets adaptive decision so next configure starts fresh', () => {
+    configure({ workerMode: 'adaptive', workerThreshold: '50', workerAdaptiveMs: '200' });
+    terminate();
+    // After terminate, reconfiguring should work cleanly
+    configure({ workerMode: 'count', workerThreshold: '100' });
+    const c = getConfig();
+    expect(c.mode).toBe('count');
+    expect(c.threshold).toBe(100);
+  });
+
+  it('config is not cleared by terminate — only worker/key/adaptive state', () => {
+    configure({ workerMode: 'adaptive_decay', workerThreshold: '75', workerAdaptiveMs: '300' });
+    terminate();
+    // Config object persists — terminate does not reset it
+    const c = getConfig();
+    expect(c.mode).toBe('adaptive_decay');
+    expect(c.threshold).toBe(75);
+    expect(c.adaptiveMs).toBe(300);
+  });
+
+  it('main-thread operations work normally after terminate', async () => {
+    configure({ workerMode: 'disabled', workerThreshold: '1' });
+    terminate();
+    // Re-configure to disabled mode and run a main-thread op
+    configure({ workerMode: 'disabled', workerThreshold: '1' });
+    const fakeDek = {};
+    const results = await decryptBatch(['invalid_blob'], fakeDek);
+    expect(results).toHaveLength(1);
+    expect(results[0]).toBeNull();
+    expect(isWorkerActive()).toBe(false);
+  });
+
+  // NOTE: terminate() clears the pendingMessages Map without resolving or
+  // rejecting outstanding promises. Any in-flight worker-path promise
+  // (from postAndWait) will hang forever — the resolve/reject callbacks
+  // are discarded when the Map is cleared. This is acceptable because
+  // terminate() is called on logout, where dangling promises are harmless.
+  // We cannot test this in Node/Vitest since real Web Workers aren't available.
+});

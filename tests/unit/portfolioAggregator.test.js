@@ -450,3 +450,36 @@ describe('aggregatePortfolio gain/loss integration', () => {
     expect(result.assets[0].gainLoss).toBeUndefined();
   });
 });
+
+// ── recalculateSnapshot edge cases ──────────────────────────────────────
+
+describe('recalculateSnapshot edge cases', () => {
+  it('NaN raw_value does not poison totals', () => {
+    const entries = [
+      { name: 'Good', raw_value: 1000, currency: 'GBP', is_liability: false },
+      { name: 'Bad', raw_value: NaN, currency: 'GBP', is_liability: false },
+      { name: 'Also Good', raw_value: 2000, currency: 'GBP', is_liability: false },
+    ];
+    const result = recalculateSnapshot(entries, { GBP: 1.0 }, 'GBP');
+    // NaN should not make total_assets NaN
+    expect(Number.isNaN(result.total_assets)).toBe(false);
+  });
+
+  it('null entry in array is skipped', () => {
+    const entries = [
+      null,
+      { name: 'Valid', raw_value: 500, currency: 'GBP', is_liability: false },
+    ];
+    const result = recalculateSnapshot(entries, { GBP: 1.0 }, 'GBP');
+    expect(result.total_assets).toBe(500);
+  });
+
+  it('entry with raw_value undefined is skipped', () => {
+    const entries = [
+      { name: 'No Value', currency: 'GBP' },
+      { name: 'Has Value', raw_value: 100, currency: 'GBP', is_liability: false },
+    ];
+    const result = recalculateSnapshot(entries, { GBP: 1.0 }, 'GBP');
+    expect(result.total_assets).toBe(100);
+  });
+});
