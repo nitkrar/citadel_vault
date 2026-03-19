@@ -248,10 +248,7 @@ export default function RegisterPage() {
               {howToOpen && <div style={{ padding: '0 16px 14px' }}>
               <ol style={{ margin: 0, paddingLeft: 18, marginBottom: 12 }}>
                 <li>Ask someone who already has an account to invite you from their Profile page.</li>
-                {inviteRequestsEnabled
-                  ? <li>Or, request an invite from the administrator using the form below.</li>
-                  : <li>Or, ask someone on the site to invite you.</li>
-                }
+                {inviteRequestsEnabled && <li>Or, request an invite from the administrator using the form below.</li>}
               </ol>
 
               {inviteRequestsEnabled && (requestResult ? (
