@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import api from '../api/client';
-import { Settings, Save, UserPlus, ShieldCheck, KeyRound, Clock, Zap, Database, Plug } from 'lucide-react';
+import { Settings, Save, UserPlus, ShieldCheck, KeyRound, Clock, Zap, Database, Plug, Trash2 } from 'lucide-react';
 import Section from '../components/Section';
 
 const CATEGORY_META = {
@@ -84,6 +84,8 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [cleaningUp, setCleaningUp] = useState(false);
+  const [cleanupResult, setCleanupResult] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -192,6 +194,47 @@ export default function SettingsPage() {
           </button>
         </div>
       </form>
+
+      <Section icon={Trash2} title="Data Cleanup" defaultOpen={false}>
+        <p className="text-muted" style={{ fontSize: 13, marginBottom: 12 }}>
+          Purge stale security data: rate limit entries (&gt;7 days), rejected invite requests (&gt;30 days),
+          and operational audit logs (&gt;30 days). Security audit events are kept for 90 days.
+        </p>
+        <button
+          type="button"
+          className="btn btn-sm btn-outline"
+          disabled={cleaningUp}
+          onClick={async () => {
+            setCleaningUp(true);
+            setCleanupResult(null);
+            try {
+              const res = await api.post('/settings.php?action=cleanup');
+              const data = res.data?.data || res.data;
+              const purged = data.purged || {};
+              const total = Object.values(purged).reduce((a, b) => a + b, 0);
+              setCleanupResult({ type: 'success', text: `Cleaned up ${total} rows.`, detail: purged });
+            } catch (err) {
+              setCleanupResult({ type: 'error', text: err.response?.data?.error || 'Cleanup failed.' });
+            }
+            setCleaningUp(false);
+          }}
+        >
+          <Trash2 size={14} /> {cleaningUp ? 'Cleaning...' : 'Run Cleanup'}
+        </button>
+        {cleanupResult && (
+          <div className={`alert ${cleanupResult.type === 'success' ? 'alert-success' : 'alert-danger'}`} style={{ marginTop: 8, fontSize: 13 }}>
+            {cleanupResult.text}
+            {cleanupResult.detail && (
+              <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text-muted)' }}>
+                Rate limits: {cleanupResult.detail.rate_limits || 0},
+                Invite requests: {cleanupResult.detail.invite_requests || 0},
+                Audit (operational): {cleanupResult.detail.audit_log_operational || 0},
+                Audit (old): {cleanupResult.detail.audit_log_old || 0}
+              </div>
+            )}
+          </div>
+        )}
+      </Section>
     </div>
   );
 }
