@@ -177,12 +177,16 @@ export async function decryptBatch(entries, dek) {
 export async function encryptBatch(items, dek) {
   if (!shouldUseWorker(items.length)) {
     const start = performance.now();
-    const results = [];
-    for (const item of items) {
-      results.push(await encryptEntry(item, dek));
+    try {
+      const results = [];
+      for (const item of items) {
+        results.push(await encryptEntry(item, dek));
+      }
+      recordTiming(performance.now() - start);
+      return results;
+    } catch (err) {
+      throw new Error('encryptBatch (main thread) failed: ' + err.message);
     }
-    recordTiming(performance.now() - start);
-    return results;
   }
   await ensureWorkerKey();
   return postAndWait('encryptBatch', { items });

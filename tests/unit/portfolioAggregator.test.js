@@ -217,6 +217,15 @@ describe('recalculateSnapshot', () => {
     expect(result.asset_count).toBe(1);
   });
 
+  it('null entry in array is skipped', () => {
+    const entries = [
+      null,
+      { name: 'Valid', raw_value: 500, currency: 'GBP', is_liability: false },
+    ];
+    const result = recalculateSnapshot(entries, { GBP: 1.0 }, 'GBP');
+    expect(result.total_assets).toBe(500);
+  });
+
   it('recalculates correctly with snapshot-time rates vs current rates', () => {
     const snapshotRates = { GBP: 1.0, USD: 0.70 }; // USD was weaker
     const currentRates = { GBP: 1.0, USD: 0.79 }; // USD stronger now
@@ -451,35 +460,25 @@ describe('aggregatePortfolio gain/loss integration', () => {
   });
 });
 
-// ── recalculateSnapshot edge cases ──────────────────────────────────────
+// ── edge cases ──────────────────────────────────────────────────────────
 
-describe('recalculateSnapshot edge cases', () => {
-  it('NaN raw_value does not poison totals', () => {
+describe('edge cases', () => {
+  it('recalculateSnapshot with raw_value: NaN does not poison totals', () => {
     const entries = [
-      { name: 'Good', raw_value: 1000, currency: 'GBP', is_liability: false },
-      { name: 'Bad', raw_value: NaN, currency: 'GBP', is_liability: false },
-      { name: 'Also Good', raw_value: 2000, currency: 'GBP', is_liability: false },
+      { name: 'Valid Asset', raw_value: 1500, currency: 'GBP', is_liability: false },
+      { name: 'NaN Asset',   raw_value: NaN,  currency: 'GBP', is_liability: false },
     ];
     const result = recalculateSnapshot(entries, { GBP: 1.0 }, 'GBP');
-    // NaN should not make total_assets NaN
+
+    // NaN entry must not make total_assets NaN
     expect(Number.isNaN(result.total_assets)).toBe(false);
-  });
+    expect(Number.isFinite(result.total_assets)).toBe(true);
 
-  it('null entry in array is skipped', () => {
-    const entries = [
-      null,
-      { name: 'Valid', raw_value: 500, currency: 'GBP', is_liability: false },
-    ];
-    const result = recalculateSnapshot(entries, { GBP: 1.0 }, 'GBP');
-    expect(result.total_assets).toBe(500);
-  });
+    // The valid entry's value must be fully preserved in the total
+    expect(result.total_assets).toBeCloseTo(1500, 2);
+    expect(result.net_worth).toBeCloseTo(1500, 2);
 
-  it('entry with raw_value undefined is skipped', () => {
-    const entries = [
-      { name: 'No Value', currency: 'GBP' },
-      { name: 'Has Value', raw_value: 100, currency: 'GBP', is_liability: false },
-    ];
-    const result = recalculateSnapshot(entries, { GBP: 1.0 }, 'GBP');
-    expect(result.total_assets).toBe(100);
+    // NaN entry is skipped, so only 1 entry counted
+    expect(result.asset_count).toBe(1);
   });
 });

@@ -53,7 +53,9 @@ export async function hasFreshCache() {
 
   // Check TTL
   if (config.ttlHours > 0) {
-    const cachedAt = parseInt(sessionStorage.getItem(CACHE_TIMESTAMP_KEY) || '0', 10);
+    let rawTs;
+    try { rawTs = sessionStorage.getItem(CACHE_TIMESTAMP_KEY); } catch { rawTs = '0'; }
+    const cachedAt = parseInt(rawTs || '0', 10);
     if (cachedAt > 0 && (Date.now() - cachedAt) > config.ttlHours * 3600000) {
       return false;
     }

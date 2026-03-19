@@ -145,7 +145,7 @@ async function extractData(resp) {
 }
 
 /**
- * Make an unauthenticated API request (for testing 401 enforcement).
+ * Make an unauthenticated API request with an invalid token (for testing 401 enforcement).
  */
 async function unauthRequest(method, path, { json, params } = {}) {
   let url = `${BASE_URL}${path}`;
@@ -163,12 +163,30 @@ async function unauthRequest(method, path, { json, params } = {}) {
   });
 }
 
+/**
+ * Make a request with NO Authorization header at all (for testing missing-header 401).
+ */
+async function noAuthRequest(method, path, { json, params } = {}) {
+  let url = `${BASE_URL}${path}`;
+  if (params) {
+    const qs = new URLSearchParams(params).toString();
+    url += (url.includes('?') ? '&' : '?') + qs;
+  }
+  return fetch(url, {
+    method,
+    headers: {
+      ...(json ? { 'Content-Type': 'application/json' } : {}),
+    },
+    ...(json ? { body: JSON.stringify(json) } : {}),
+  });
+}
+
 /** Reset cached tokens (call in afterAll if needed). */
 function resetTokens() { cachedTokens = {}; }
 
 export {
   BASE_URL, TEST_USERS, getToken,
-  apiRequest, extractData, unauthRequest, resetTokens,
+  apiRequest, extractData, unauthRequest, noAuthRequest, resetTokens,
 };
 
 // Convenience shortcuts

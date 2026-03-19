@@ -24,18 +24,18 @@ test.describe('Vault Page', () => {
   test('vault page has tab navigation', async ({ page }) => {
     await page.goto('/vault');
 
-    // If encryption modal appears, we can still verify the page loaded
-    // Look for vault-related elements (tabs, buttons, etc.)
-    // Tabs might be: password, account, asset, license, insurance, custom
+    // If encryption modal appears, vault is locked — skip tab check
+    const modal = page.locator('.modal');
     const tabElements = page.locator('.tab, [role="tab"], button[class*="tab"]');
 
-    // Wait for either tabs or modal
-    const hasModal = await page.locator('.modal').isVisible().catch(() => false);
-    if (!hasModal) {
-      // Vault is unlocked — should see entry type tabs
-      await expect(tabElements.first()).toBeVisible({ timeout: 5000 }).catch(() => {
-        // Tabs might use different markup — that's OK for a smoke test
-      });
+    // Wait for page to settle
+    await expect(
+      tabElements.first().or(modal)
+    ).toBeVisible({ timeout: 10000 });
+
+    // If vault is unlocked, tabs must be visible
+    if (!(await modal.isVisible())) {
+      await expect(tabElements.first()).toBeVisible({ timeout: 5000 });
     }
   });
 

@@ -1,7 +1,13 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { api, unauthRequest } from '../helpers/apiClient.js';
 
 describe('Templates API — /templates.php', () => {
+  // Track template IDs created during tests for afterAll cleanup
+  let _updateTemplateId;
+  let _requestPromoTemplateId;
+  let _approvePromoTemplateId;
+  let _approvePromoTemplateKey;
+
   // -----------------------------------------------------------------------
   // Auth enforcement
   // -----------------------------------------------------------------------
@@ -147,6 +153,7 @@ describe('Templates API — /templates.php', () => {
       });
       const data = await api.data(resp);
       customTemplateId = data.id;
+      _updateTemplateId = data.id;
     });
 
     it('updates name of own custom template', async () => {
@@ -248,6 +255,7 @@ describe('Templates API — /templates.php', () => {
       });
       const data = await api.data(resp);
       promotionTemplateId = data.id;
+      _requestPromoTemplateId = data.id;
     });
 
     it('requests promotion for own template', async () => {
@@ -276,16 +284,18 @@ describe('Templates API — /templates.php', () => {
 
     beforeAll(async () => {
       // Create and request promotion
+      _approvePromoTemplateKey = 'approve_test_' + Date.now();
       const createResp = await api.post('/templates.php', {
         params: { action: 'create' },
         json: {
-          template_key: 'approve_test_' + Date.now(),
+          template_key: _approvePromoTemplateKey,
           name: 'Approval Candidate',
           fields: [{ key: 'title', label: 'Title', type: 'text' }],
         },
       });
       const createData = await api.data(createResp);
       promotionTemplateId = createData.id;
+      _approvePromoTemplateId = createData.id;
 
       // Request promotion
       await api.post('/templates.php', {
@@ -331,5 +341,37 @@ describe('Templates API — /templates.php', () => {
       });
       expect(resp.status).toBe(400);
     });
+  });
+
+  // -----------------------------------------------------------------------
+  // Cleanup — delete templates created during tests
+  // -----------------------------------------------------------------------
+  afterAll(async () => {
+    const ids = [_updateTemplateId, _requestPromoTemplateId, _approvePromoTemplateId].filter(Boolean);
+    for (const id of ids) {
+      try {
+        await api.delete(`/templates.php?id=${id}`);
+      } catch (_) {
+        // ignore
+      }
+    }
+
+    // Delete the global copy created by approve-promotion (owner_id = NULL)
+    if (_approvePromoTemplateKey) {
+      try {
+        const listResp = await api.get('/templates.php');
+        if (listResp.ok) {
+          const templates = await api.data(listResp);
+          const globalCopy = Array.isArray(templates)
+            ? templates.find((t) => t.template_key === _approvePromoTemplateKey && !t.owner_id)
+            : null;
+          if (globalCopy) {
+            await api.delete(`/templates.php?id=${globalCopy.id}`);
+          }
+        }
+      } catch (_) {
+        // ignore
+      }
+    }
   });
 });

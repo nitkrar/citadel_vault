@@ -18,7 +18,7 @@ export const VALID_ENTRY_TYPES = [
 ];
 
 export function getUserPreference(prefs, key) {
-    return prefs[key] ?? PREFERENCE_DEFAULTS[key];
+    return prefs?.[key] ?? PREFERENCE_DEFAULTS[key];
 }
 
 export function getVaultKeyMinLength(keyType) {

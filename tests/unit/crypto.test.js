@@ -390,7 +390,7 @@ describe('Snapshot encryption round-trip', () => {
   });
 });
 
-// ── Edge cases ──────────────────────────────────────────────────────
+// ── Edge cases (extended) ────────────────────────────────────────────
 
 describe('Edge cases', () => {
   it('encryptEntry with undefined values — JSON.stringify drops them', async () => {

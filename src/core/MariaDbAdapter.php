@@ -32,8 +32,10 @@ class MariaDbAdapter implements StorageAdapter {
     // =========================================================================
 
     public function getEntries(int $userId, ?string $entryType = null): array {
-        // Cleanup: permanently delete entries that have been soft-deleted for more than 1 day
-        $this->purgeExpiredSoftDeletes($userId);
+        // Cleanup: probabilistic purge of soft-deleted entries older than 1 day (~5% of requests)
+        if (rand(1, 20) === 1) {
+            $this->purgeExpiredSoftDeletes($userId);
+        }
 
         $sql = 'SELECT ve.id, ve.entry_type, ve.template_id, ve.schema_version,
                        ve.encrypted_data, ve.created_at, ve.updated_at,

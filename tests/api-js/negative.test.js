@@ -149,9 +149,8 @@ describe('Cross-user isolation', () => {
 
   it('regular user cannot update admin entry', async () => {
     if (!adminEntryId) return;
-    const resp = await regularApi.put('/vault.php', {
+    const resp = await regularApi.put(`/vault.php?id=${adminEntryId}`, {
       json: {
-        id: adminEntryId,
         entry_type: 'password',
         template_id: 1,
         encrypted_data: 'aGFja2VkLWRhdGE=',
@@ -367,5 +366,149 @@ describe('Admin self-protection', () => {
     const resp = await api.delete('/users.php?id=1');
     // Should reject — either 400 (self-delete guard) or 403
     expect([400, 403]).toContain(resp.status);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 9. Snapshot Cross-User Isolation
+// ---------------------------------------------------------------------------
+describe('snapshot cross-user isolation', () => {
+  let adminSnapshotId = null;
+  const today = new Date().toISOString().slice(0, 10);
+
+  beforeAll(async () => {
+    // Admin creates a snapshot.
+    // snapshots.php requires `encrypted_meta` (not `meta`) and each entry
+    // must carry `encrypted_data` — plain-text meta/entry fields are rejected.
+    const resp = await api.post('/snapshots.php', {
+      json: {
+        snapshot_date: today,
+        encrypted_meta: 'dGVzdC1tZXRhLWVuY3J5cHRlZA==',
+        entries: [
+          { entry_id: 1, encrypted_data: 'dGVzdC1lbnRyeS1lbmNyeXB0ZWQ=' },
+        ],
+      },
+    });
+    if (resp.status === 200 || resp.status === 201) {
+      const data = await extractData(resp);
+      adminSnapshotId = data?.id ?? data?.snapshot_id ?? null;
+    }
+  });
+
+  it('regular user cannot read admin snapshot by ID', async () => {
+    if (!adminSnapshotId) return;
+    const resp = await apiRequest('GET', `/snapshots.php`, {
+      params: { id: adminSnapshotId },
+      role: 'regular',
+    });
+    expect([403, 404]).toContain(resp.status);
+  });
+
+  // Cleanup
+  it('cleanup: admin deletes test snapshot', async () => {
+    if (!adminSnapshotId) return;
+    await api.delete(`/snapshots.php?id=${adminSnapshotId}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 10. Update Soft-Deleted Entry
+// ---------------------------------------------------------------------------
+describe('update soft-deleted entry', () => {
+  let deletedEntryId = null;
+
+  beforeAll(async () => {
+    // Admin creates a vault entry
+    const createResp = await api.post('/vault.php', {
+      json: {
+        entry_type: 'password',
+        template_id: 1,
+        encrypted_data: 'dGVzdC1zb2Z0LWRlbA==',
+      },
+    });
+    if (createResp.status === 201) {
+      const data = await extractData(createResp);
+      deletedEntryId = data.id;
+      // Soft-delete it
+      await api.delete(`/vault.php?id=${deletedEntryId}`);
+    }
+  });
+
+  it('PUT update on a soft-deleted entry returns 404', async () => {
+    if (!deletedEntryId) return;
+    const resp = await api.put(`/vault.php?id=${deletedEntryId}`, {
+      json: {
+        entry_type: 'password',
+        template_id: 1,
+        encrypted_data: 'dXBkYXRlZC1kZWxldGVk',
+      },
+    });
+    expect(resp.status).toBe(404);
+  });
+
+  // Cleanup: restore the soft-deleted entry so it becomes visible, then delete it again.
+  // Without this the row accumulates across test runs (deleted_at is set, never cleared).
+  it('cleanup: restore then delete soft-deleted test entry', async () => {
+    if (!deletedEntryId) return;
+    await api.post(`/vault.php?action=restore&id=${deletedEntryId}`, {});
+    await api.delete(`/vault.php?id=${deletedEntryId}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 11. Cross-User Bulk-Update
+// ---------------------------------------------------------------------------
+describe('cross-user bulk-update', () => {
+  let adminEntryIdForBulk = null;
+  const originalEncryptedData = 'YWRtaW4tYnVsay10ZXN0';
+
+  beforeAll(async () => {
+    // Admin creates an entry to use as the bulk-update target
+    const resp = await api.post('/vault.php', {
+      json: {
+        entry_type: 'password',
+        template_id: 1,
+        encrypted_data: originalEncryptedData,
+      },
+    });
+    if (resp.status === 201) {
+      const data = await extractData(resp);
+      adminEntryIdForBulk = data.id;
+    }
+  });
+
+  it('regular user bulk-update does not modify admin entry', async () => {
+    if (!adminEntryIdForBulk) return;
+
+    // Regular user attempts to bulk-update admin's entry
+    await apiRequest('POST', '/vault.php', {
+      params: { action: 'bulk-update' },
+      json: {
+        entries: [
+          {
+            id: adminEntryIdForBulk,
+            entry_type: 'password',
+            template_id: 1,
+            encrypted_data: 'aGFja2VkLWJ1bGs=',
+          },
+        ],
+      },
+      role: 'regular',
+    });
+
+    // Verify admin's entry is unchanged by reading it as admin.
+    // A 404 here would mean the bulk-update destroyed the entry — a security failure.
+    const checkResp = await api.get('/vault.php', {
+      params: { id: adminEntryIdForBulk },
+    });
+    expect(checkResp.status).toBe(200);
+    const entry = await extractData(checkResp);
+    expect(entry.encrypted_data).toBe(originalEncryptedData);
+  });
+
+  // Cleanup
+  it('cleanup: admin deletes bulk-update test entry', async () => {
+    if (!adminEntryIdForBulk) return;
+    await api.delete(`/vault.php?id=${adminEntryIdForBulk}`);
   });
 });
