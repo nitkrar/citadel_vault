@@ -20,7 +20,8 @@ import api from '../api/client';
 import { fmtCurrency, MASKED, apiData } from '../lib/checks';
 import { buildRateMap, recalculateSnapshot } from '../lib/portfolioAggregator';
 import * as workerDispatcher from '../lib/workerDispatcher';
-import usePlaidRefresh from '../hooks/usePlaidRefresh';
+import { hasAnyIntegration, getIntegration, getIntegrationType } from '../integrations/helpers';
+import { getProvider } from '../integrations/modules';
 
 const CHART_COLORS = [
   '#3b82f6', '#22c55e', '#f59e0b', '#ef4444',
@@ -58,13 +59,12 @@ export default function PortfolioPage() {
   // Find Plaid-connected entries from portfolio data
   const plaidEntries = useMemo(() => {
     if (!portfolio?.assets) return [];
-    return portfolio.assets.filter(a => a._plaid);
+    return portfolio.assets.filter(a => hasAnyIntegration(a));
   }, [portfolio]);
 
   const hasPlaidEntries = plaidEntries.length > 0;
 
-  // ── Refresh bank balances (shared hook) ──────────────────────────
-  const { refreshBalances: plaidRefreshBalances, refreshing: balanceRefreshingHook } = usePlaidRefresh();
+  const [balanceRefreshingHook, setBalanceRefreshingHook] = useState(false);
 
   // Combined refresh: prices + balances in parallel
   const handleRefreshAll = async () => {
@@ -84,8 +84,11 @@ export default function PortfolioPage() {
 
       // Refresh balances (Plaid)
       if (hasPlaidEntries) {
-        const itemIds = [...new Set(plaidEntries.map(e => e._plaid.item_id))];
+        const itemIds = [...new Set(plaidEntries.map(e => getIntegration(e, getIntegrationType(e))?.item_id).filter(Boolean))];
         if (itemIds.length > 0) {
+          const provider = getProvider('plaid');
+          if (provider) {
+          setBalanceRefreshingHook(true);
           promises.push(
             (async () => {
               const allStored = await entryStore.getAll();
@@ -93,10 +96,12 @@ export default function PortfolioPage() {
               for (const s of allStored) {
                 try { cache[s.id] = await decrypt(s.encrypted_data); } catch { /* skip */ }
               }
-              const { updated } = await plaidRefreshBalances(itemIds, allStored, cache);
+              const { updated } = await provider.refresh(itemIds, allStored, cache, encrypt);
               if (updated > 0) { results.push(`${updated} balance${updated !== 1 ? 's' : ''}`); refetch(); }
             })().catch(() => results.push('balances failed'))
+              .finally(() => setBalanceRefreshingHook(false))
           );
+          }
         }
       }
 

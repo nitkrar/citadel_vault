@@ -14,7 +14,7 @@ const PAGE_BOTTOM = 270;
 const PAGE_TOP = 20;
 
 // Fields never printed as entry detail lines
-const SKIP_FIELDS = new Set(['row_id', 'linked_account_id', 'title', 'name', 'currency', 'value', 'current_value', 'face_value']);
+const SKIP_FIELDS = new Set(['row_id', 'linked_account_id', 'title', 'name', 'currency', 'value', 'current_value', 'face_value', 'integrations']);
 
 // Currency symbols
 const CURRENCY_SYMBOLS = { GBP: '£', USD: '$', EUR: '€', JPY: '¥', INR: '₹', CAD: 'C$', AUD: 'A$' };
