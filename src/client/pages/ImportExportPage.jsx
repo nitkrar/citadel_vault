@@ -4,12 +4,15 @@ import { useEncryption } from '../contexts/EncryptionContext';
 import { entryStore } from '../lib/entryStore';
 import { VALID_ENTRY_TYPES } from '../lib/defaults';
 import { apiData } from '../lib/checks';
+import { buildRateMap } from '../lib/portfolioAggregator';
 import { groupByType, assignRowIdsAndRemap } from '../lib/exportHelpers';
 import { exportJson } from '../lib/exportJson';
 import { exportCsvZip } from '../lib/exportCsvZip';
 import { exportXlsx } from '../lib/exportXlsx';
 import { exportPdf } from '../lib/exportPdf';
 import api from '../api/client';
+import useCurrencies from '../hooks/useCurrencies';
+import useAppConfig from '../hooks/useAppConfig';
 import ImportModal from '../components/ImportModal';
 
 const FORMAT_OPTIONS = ['json', 'csv', 'xlsx', 'pdf'];
@@ -20,6 +23,9 @@ const PDF_MODES = [
 
 export default function ImportExportPage() {
   const { isUnlocked, decrypt } = useEncryption();
+  const { currencies } = useCurrencies();
+  const { config } = useAppConfig();
+  const baseCurrency = config?.base_currency || 'GBP';
 
   // Import
   const [showImport, setShowImport] = useState(false);
@@ -86,7 +92,8 @@ export default function ImportExportPage() {
         await exportXlsx(grouped, dateSuffix);
       } else if (format === 'pdf') {
         const templates = await entryStore.getAllTemplates();
-        await exportPdf(grouped, templates, pdfMode, dateSuffix);
+        const rateMap = buildRateMap(currencies || []);
+        await exportPdf(grouped, templates, pdfMode, dateSuffix, rateMap, baseCurrency);
       }
 
       setExported(true);
