@@ -70,7 +70,8 @@ export function cleanEntry(entry) {
   const clean = {};
   for (const [k, v] of Object.entries(entry)) {
     if (k === '_dbId' || k === '_entryType') continue;
-    if (k === '_plaid' || k.startsWith('_plaid')) continue; // Strip Plaid integration data
+    if (k === '_plaid' || k.startsWith('_plaid')) continue; // Legacy integration data
+    if (k === 'integrations') continue; // Provider integration data
     if (v === undefined || v === null || v === '') continue;
     clean[k] = v;
   }

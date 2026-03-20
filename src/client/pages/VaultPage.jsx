@@ -14,8 +14,9 @@ import useTemplates from '../hooks/useTemplates';
 import useAppConfig from '../hooks/useAppConfig';
 import useExchanges from '../hooks/useExchanges';
 import ImportModal from '../components/ImportModal';
-import { usePlaidLink } from '../components/PlaidLink';
-import usePlaidRefresh from '../hooks/usePlaidRefresh';
+import { usePlaidLink } from '../integrations/providers/plaid/PlaidConnect';
+import { getIntegration, getIntegrationType, setIntegration, removeIntegration } from '../integrations/helpers';
+import { getProvider, getProviderDisplayInfo } from '../integrations/modules';
 import {
   Plus, Edit2, Trash2, Search, Eye, EyeOff, Copy, Check, Lock,
   KeyRound, AlertTriangle, Undo2, X, ChevronDown, Upload,
@@ -150,10 +151,10 @@ export default function VaultPage() {
   const [inlineEditSaving, setInlineEditSaving] = useState(false);
 
   // Plaid state
-  const [plaidMsg, setPlaidMsg] = useState('');
+  const [integrationMsg, setPlaidMsg] = useState('');
   const [plaidLinkEntryId, setPlaidLinkEntryId] = useState(null); // entry id for "Link to Plaid" flow
   const [plaidAccountPicker, setPlaidAccountPicker] = useState(null); // { accounts, itemId, metadata, entryId }
-  const { refreshBalances: plaidRefreshBalances, refreshing: plaidRefreshing } = usePlaidRefresh();
+  const [integrationRefreshing, setIntegrationRefreshing] = useState(false);
   const plaidEnabled = config?.plaid_enabled === 'true';
 
   // ── Plaid Connect Bank success handler ─────────────────────────────
@@ -200,12 +201,11 @@ export default function VaultPage() {
         }
         const isLiability = plaidType === 'credit' || plaidType === 'loan';
 
-        const acctForm = {
+        const acctForm = setIntegration({
           title: `${acct.name} (${institutionName})`,
           institution: institutionName,
           currency: acct.currency,
-          _plaid: plaidMeta,
-        };
+        }, 'plaid', plaidMeta);
         const acctBlob = await encrypt(acctForm);
         const { data: acctResp } = await api.post('/vault.php', {
           entry_type: 'account',
@@ -224,13 +224,12 @@ export default function VaultPage() {
         // Create linked Cash asset (negative value for credit/liability)
         const cashTpl = templates.find(t => t.template_key === 'asset' && t.subtype === 'cash' && !t.owner_id);
         const balanceValue = isLiability ? -Math.abs(acct.balance || 0) : (acct.balance || 0);
-        const cashForm = {
+        const cashForm = setIntegration({
           title: `${acct.name} — Balance`,
           linked_account_id: String(acctId),
           value: String(balanceValue),
           currency: acct.currency,
-          _plaid: plaidMeta,
-        };
+        }, 'plaid', plaidMeta);
         const cashBlob = await encrypt(cashForm);
         const { data: cashResp } = await api.post('/vault.php', {
           entry_type: 'asset',
@@ -278,7 +277,7 @@ export default function VaultPage() {
       last_refreshed: new Date().toISOString(),
     };
 
-    const updated = { ...d, _plaid: plaidMeta };
+    const updated = setIntegration({ ...d }, 'plaid', plaidMeta);
     try {
       const blob = await encrypt(updated);
       await api.put(`/vault.php?id=${entryId}`, { encrypted_data: blob });
@@ -295,7 +294,7 @@ export default function VaultPage() {
       for (const asset of linkedAssets) {
         const ad = decryptedCache[asset.id];
         if (ad) {
-          const updatedAsset = { ...ad, value: String(account.balance || 0), _plaid: plaidMeta };
+          const updatedAsset = setIntegration({ ...ad, value: String(account.balance || 0) }, 'plaid', plaidMeta);
           const assetBlob = await encrypt(updatedAsset);
           await api.put(`/vault.php?id=${asset.id}`, { encrypted_data: assetBlob });
           const updatedAssetEntry = { ...asset, encrypted_data: assetBlob, updated_at: new Date().toISOString() };
@@ -1126,7 +1125,10 @@ export default function VaultPage() {
           <button className="btn btn-secondary btn-sm" onClick={() => setShowImport(true)}><Upload size={14} /> Import</button>
           {(() => {
             const plaidItemIds = plaidEnabled ? [...new Set(
-              entries.map(e => decryptedCache[e.id]?._plaid?.item_id).filter(Boolean)
+              entries.map(e => {
+                const d = decryptedCache[e.id];
+                return getIntegration(d, getIntegrationType(d))?.item_id;
+              }).filter(Boolean)
             )] : [];
             const hasTickers = entries.some(e => {
               const d = decryptedCache[e.id];
@@ -1137,7 +1139,7 @@ export default function VaultPage() {
             return (
               <>
                 {canRefresh && (
-                  <button className="btn btn-secondary btn-sm" disabled={plaidRefreshing}
+                  <button className="btn btn-secondary btn-sm" disabled={integrationRefreshing}
                     onClick={async () => {
                       const results = [];
                       const promises = [];
@@ -1178,18 +1180,24 @@ export default function VaultPage() {
                       }
                       // Refresh balances
                       if (plaidItemIds.length > 0) {
+                        const provider = getProvider('plaid');
+                        if (!provider) { results.push('integration not available'); }
+                        else {
+                        setIntegrationRefreshing(true);
                         promises.push(
-                          plaidRefreshBalances(plaidItemIds, entries, decryptedCache,
+                          provider.refresh(plaidItemIds, entries, decryptedCache, encrypt,
                             (id, data) => setDecryptedCache(prev => ({ ...prev, [id]: data })))
                             .then(({ updated }) => { if (updated > 0) results.push(`${updated} balance${updated !== 1 ? 's' : ''}`); })
                             .catch(() => results.push('balances failed'))
+                            .finally(() => setIntegrationRefreshing(false))
                         );
+                        }
                       }
                       await Promise.all(promises);
                       setPlaidMsg(results.length > 0 ? `Refreshed ${results.join(', ')}` : 'Everything up to date');
                       setTimeout(() => setPlaidMsg(''), 3000);
                     }}>
-                    <RefreshCw size={14} className={plaidRefreshing ? 'spin' : ''} /> {plaidRefreshing ? 'Refreshing...' : 'Refresh All'}
+                    <RefreshCw size={14} className={integrationRefreshing ? 'spin' : ''} /> {integrationRefreshing ? 'Refreshing...' : 'Refresh All'}
                   </button>
                 )}
                 {plaidEnabled && (
@@ -1232,7 +1240,7 @@ export default function VaultPage() {
       </div>
 
       {/* Plaid messages */}
-      {plaidMsg && <div className="alert alert-success mb-3"><Check size={16} /><span>{plaidMsg}</span></div>}
+      {integrationMsg && <div className="alert alert-success mb-3"><Check size={16} /><span>{integrationMsg}</span></div>}
       {(plaidConnectError || plaidLinkError) && <div className="alert alert-danger mb-3"><AlertTriangle size={16} /><span>{plaidConnectError || plaidLinkError}</span></div>}
 
       {/* Content */}
@@ -1280,9 +1288,11 @@ export default function VaultPage() {
                     const detail = detailField ? d[detailField.key] : '';
                     const tpl = templates.find(t => t.id === entry.template_id) || entry.template;
                     const subtype = tpl?.subtype;
-                    const hasPlaid = !!d?._plaid;
+                    const integrationId = getIntegrationType(d);
+                    const hasIntegration = !!integrationId;
                     const hasTicker = (subtype === 'stock' && d?.ticker) || (subtype === 'crypto' && d?.coin);
-                    const canRefresh = hasPlaid || hasTicker;
+                    const canRefresh = hasIntegration || hasTicker;
+                    const integrationInfo = integrationId ? getProviderDisplayInfo(integrationId, getIntegration(d, integrationId)) : null;
                     return (
                       <tr key={entry.id} style={{ cursor: 'pointer' }} onClick={() => { setViewEntry(entry); }}>
                         <td><Icon size={16} style={{ color: meta.color }} /></td>
@@ -1290,9 +1300,9 @@ export default function VaultPage() {
                         <td>
                           <span className="text-muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                             {typeof detail === 'string' ? (detail.length > 40 ? detail.slice(0, 40) + '...' : detail) : ''}
-                            {(d?.linked_account_id || d?._plaid) && (
-                              <Link2 size={12} style={{ color: d?._plaid ? 'var(--color-primary, #2563eb)' : 'var(--color-success, #16a34a)', flexShrink: 0 }}
-                                title={d?._plaid ? 'Connected via Plaid' : 'Linked to account'} />
+                            {(d?.linked_account_id || hasIntegration) && (
+                              <Link2 size={12} style={{ color: integrationInfo ? 'var(--color-primary, #2563eb)' : (d?.linked_account_id ? 'var(--color-success, #16a34a)' : undefined), flexShrink: 0 }}
+                                title={integrationInfo ? 'Connected via ' + integrationInfo.label : 'Linked to account'} />
                             )}
                           </span>
                         </td>
@@ -1300,12 +1310,19 @@ export default function VaultPage() {
                         <td>
                           <div className="td-actions">
                             {canRefresh && (
-                              <button className="btn btn-ghost btn-sm" title={hasPlaid ? 'Refresh balance' : 'Refresh price'} onClick={async e => {
+                              <button className="btn btn-ghost btn-sm" title={hasIntegration ? 'Refresh balance' : 'Refresh price'} onClick={async e => {
                                 e.stopPropagation();
                                 try {
-                                  if (hasPlaid) {
-                                    await plaidRefreshBalances([d._plaid.item_id], entries, decryptedCache,
-                                      (id, data) => setDecryptedCache(prev => ({ ...prev, [id]: data })));
+                                  if (hasIntegration) {
+                                    const provider = getProvider(integrationId);
+                                    const meta = getIntegration(d, integrationId);
+                                    setIntegrationRefreshing(true);
+                                    try {
+                                      await provider.refresh([meta.item_id], entries, decryptedCache, encrypt,
+                                        (id, data) => setDecryptedCache(prev => ({ ...prev, [id]: data })));
+                                    } finally {
+                                      setIntegrationRefreshing(false);
+                                    }
                                   } else if (hasTicker) {
                                     const ticker = subtype === 'crypto' ? d.coin : d.ticker;
                                     const { data: resp } = await api.post('/prices.php', { tickers: [ticker] });
@@ -1631,67 +1648,75 @@ export default function VaultPage() {
             </div>
           );
         })()}
-        {/* Plaid connection status for account entries */}
+        {/* Integration connection status for account entries */}
         {viewEntry && viewEntry.entry_type === 'account' && (() => {
           const d = decryptedCache[viewEntry.id];
           if (!d) return null;
-          if (d._plaid) {
+          const integrationId = getIntegrationType(d);
+          if (integrationId) {
+            const meta = getIntegration(d, integrationId);
+            const integrationInfo = getProviderDisplayInfo(integrationId, meta);
             return (
               <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'var(--color-success-bg, #dcfce7)', borderRadius: 6, flexWrap: 'wrap' }}>
                   <Link2 size={14} style={{ color: 'var(--color-success, #16a34a)', flexShrink: 0 }} />
-                  <span style={{ fontSize: 13, color: 'var(--color-success, #16a34a)', fontWeight: 500 }}>Connected to Plaid</span>
+                  <span style={{ fontSize: 13, color: 'var(--color-success, #16a34a)', fontWeight: 500 }}>Connected to {integrationInfo?.label || integrationId}</span>
                   <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-                    {d._plaid.last_refreshed && (
+                    {meta?.last_refreshed && (
                       <span className="text-muted" style={{ fontSize: 11 }}>
-                        {new Date(d._plaid.last_refreshed).toLocaleString()}
+                        {new Date(meta.last_refreshed).toLocaleString()}
                       </span>
                     )}
                     <button
                       className="btn btn-ghost btn-sm"
                       style={{ fontSize: 11, padding: '2px 8px' }}
-                      disabled={plaidRefreshing}
+                      disabled={integrationRefreshing}
                       onClick={async () => {
+                        const provider = getProvider(integrationId);
+                        setIntegrationRefreshing(true);
                         try {
-                          await plaidRefreshBalances([d._plaid.item_id], entries, decryptedCache,
+                          await provider.refresh([meta.item_id], entries, decryptedCache, encrypt,
                             (id, data) => setDecryptedCache(prev => ({ ...prev, [id]: data })));
                           setPlaidMsg('Balance refreshed');
                           setTimeout(() => setPlaidMsg(''), 3000);
                         } catch {
                           setPlaidMsg('Refresh failed');
                           setTimeout(() => setPlaidMsg(''), 5000);
+                        } finally {
+                          setIntegrationRefreshing(false);
                         }
                       }}
                     >
-                      <RefreshCw size={12} className={plaidRefreshing ? 'spin' : ''} /> {plaidRefreshing ? 'Refreshing...' : 'Refresh'}
+                      <RefreshCw size={12} className={integrationRefreshing ? 'spin' : ''} /> {integrationRefreshing ? 'Refreshing...' : 'Refresh'}
                     </button>
                     <button
                       className="btn btn-ghost btn-sm text-danger"
                       style={{ fontSize: 11, padding: '2px 8px' }}
                       onClick={async () => {
-                        if (!confirm('Disconnect this account from Plaid? The entry will be kept but balance refresh will no longer work.')) return;
+                        if (!confirm(`Disconnect this account from ${integrationInfo?.label || integrationId}? The entry will be kept but balance refresh will no longer work.`)) return;
                         try {
-                          await api.delete(`/plaid.php?action=disconnect&item_id=${d._plaid.item_id}`);
-                          // Remove _plaid from this entry and linked assets
-                          const updatedData = { ...d };
-                          delete updatedData._plaid;
+                          const provider = getProvider(integrationId);
+                          await provider.disconnect(meta.item_id);
+                          // Remove integration from this entry and linked assets
+                          const updatedData = removeIntegration(d, integrationId);
                           const blob = await encrypt(updatedData);
                           await api.put(`/vault.php?id=${viewEntry.id}`, { encrypted_data: blob });
                           await entryStore.put({ ...viewEntry, encrypted_data: blob, updated_at: new Date().toISOString() });
                           setDecryptedCache(prev => ({ ...prev, [viewEntry.id]: updatedData }));
-                          // Also remove _plaid from linked assets
+                          setEntries(prev => prev.map(e => e.id === viewEntry.id ? { ...e, encrypted_data: blob, updated_at: new Date().toISOString() } : e));
+                          // Also remove integration from linked assets
                           for (const entry of entries) {
                             const ad = decryptedCache[entry.id];
-                            if (ad?._plaid?.item_id === d._plaid.item_id) {
-                              const cleanData = { ...ad };
-                              delete cleanData._plaid;
+                            if (getIntegration(ad, integrationId)?.item_id === meta.item_id) {
+                              const cleanData = removeIntegration(ad, integrationId);
                               const assetBlob = await encrypt(cleanData);
                               await api.put(`/vault.php?id=${entry.id}`, { encrypted_data: assetBlob });
                               await entryStore.put({ ...entry, encrypted_data: assetBlob, updated_at: new Date().toISOString() });
                               setDecryptedCache(prev => ({ ...prev, [entry.id]: cleanData }));
+                              setEntries(prev => prev.map(e2 => e2.id === entry.id ? { ...e2, encrypted_data: assetBlob, updated_at: new Date().toISOString() } : e2));
                             }
                           }
-                          setPlaidMsg('Disconnected from Plaid');
+                          setPlaidMsg(`Disconnected from ${integrationInfo?.label || integrationId}`);
                           setTimeout(() => setPlaidMsg(''), 3000);
                         } catch (err) {
                           setPlaidMsg(err.response?.data?.error || 'Disconnect failed');
