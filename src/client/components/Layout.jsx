@@ -233,7 +233,7 @@ export default function Layout() {
                 <span className="sidebar-subtitle">{appTagline}</span>
               </div>
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1" style={{ flexShrink: 0 }}>
               <button
                 className="icon-btn"
                 onClick={toggleDarkMode}

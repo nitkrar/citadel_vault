@@ -5,7 +5,7 @@ import Modal from '../components/Modal';
 import SearchableSelect from '../components/SearchableSelect';
 import { useAuth } from '../contexts/AuthContext';
 import { useEncryption } from '../contexts/EncryptionContext';
-import { entryStore } from '../lib/entryStore';
+import { useVaultEntries } from '../contexts/VaultDataContext';
 import { VALID_ENTRY_TYPES } from '../lib/defaults';
 import { apiData } from '../lib/checks';
 import useCountries from '../hooks/useCountries';
@@ -14,6 +14,7 @@ import useTemplates from '../hooks/useTemplates';
 import useAppConfig from '../hooks/useAppConfig';
 import useExchanges from '../hooks/useExchanges';
 import ImportModal from '../components/ImportModal';
+import { useHideAmounts } from '../components/Layout';
 import { usePlaidLink } from '../integrations/providers/plaid/PlaidConnect';
 import { getIntegration, getIntegrationType, setIntegration, removeIntegration } from '../integrations/helpers';
 import { getProvider, getProviderDisplayInfo } from '../integrations/modules';
@@ -35,9 +36,13 @@ const TYPE_META = {
 // Types that get country/currency selectors
 const TYPES_WITH_COUNTRY = ['account', 'asset', 'insurance', 'license'];
 
+const MASKED = '••••••';
+const MONETARY_KEYS = ['balance', 'value', 'current_value', 'purchase_price', 'face_value',
+  'premium_amount', 'coverage_amount', 'cash_value', 'credit_limit', 'price_per_share'];
+
 // Inline editable number field for linked asset values
-function InlineNumberField({ label, value, currency, isEditing, editValue, saving, onStartEdit, onChange, onSave, onCancel }) {
-  const displayValue = value ? `${currency ? currency + ' ' : ''}${Number(value).toLocaleString()}` : '—';
+function InlineNumberField({ label, value, currency, isEditing, editValue, saving, onStartEdit, onChange, onSave, onCancel, masked }) {
+  const displayValue = masked ? MASKED : (value ? `${currency ? currency + ' ' : ''}${Number(value).toLocaleString()}` : '—');
 
   if (isEditing) {
     return (
@@ -85,10 +90,9 @@ function InlineNumberField({ label, value, currency, isEditing, editValue, savin
 
 export default function VaultPage() {
   const { isUnlocked, encrypt, decrypt } = useEncryption();
+  const { hideAmounts } = useHideAmounts();
+  const { entries, decryptedCache, setDecryptedCache, loading, refetch, createEntry, updateEntry, deleteEntry, updateEntryLocal } = useVaultEntries();
 
-  const [entries, setEntries] = useState([]);
-  const [decryptedCache, setDecryptedCache] = useState({});
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const { preferences } = useAuth();
 
@@ -206,20 +210,8 @@ export default function VaultPage() {
           institution: institutionName,
           currency: acct.currency,
         }, 'plaid', plaidMeta);
-        const acctBlob = await encrypt(acctForm);
-        const { data: acctResp } = await api.post('/vault.php', {
-          entry_type: 'account',
-          template_id: acctTpl?.id || null,
-          encrypted_data: acctBlob,
-        });
-        const acctId = apiData({ data: acctResp })?.id;
-        const acctEntry = {
-          id: acctId, entry_type: 'account', template_id: acctTpl?.id || null,
-          encrypted_data: acctBlob, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
-        };
-        await entryStore.put(acctEntry);
-        setDecryptedCache(prev => ({ ...prev, [acctId]: acctForm }));
-        setEntries(prev => [acctEntry, ...prev]);
+        const acctEntry = await createEntry('account', acctTpl?.id || null, acctForm);
+        const acctId = acctEntry.id;
 
         // Create linked Cash asset (negative value for credit/liability)
         const cashTpl = templates.find(t => t.template_key === 'asset' && t.subtype === 'cash' && !t.owner_id);
@@ -230,20 +222,7 @@ export default function VaultPage() {
           value: String(balanceValue),
           currency: acct.currency,
         }, 'plaid', plaidMeta);
-        const cashBlob = await encrypt(cashForm);
-        const { data: cashResp } = await api.post('/vault.php', {
-          entry_type: 'asset',
-          template_id: cashTpl?.id || null,
-          encrypted_data: cashBlob,
-        });
-        const cashId = apiData({ data: cashResp })?.id;
-        const cashEntry = {
-          id: cashId, entry_type: 'asset', template_id: cashTpl?.id || null,
-          encrypted_data: cashBlob, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
-        };
-        await entryStore.put(cashEntry);
-        setDecryptedCache(prev => ({ ...prev, [cashId]: cashForm }));
-        setEntries(prev => [cashEntry, ...prev]);
+        await createEntry('asset', cashTpl?.id || null, cashForm);
         created += 2;
       } catch {
         // continue with next account
@@ -251,7 +230,7 @@ export default function VaultPage() {
     }
     setPlaidMsg(`Created ${created} entries from ${institutionName}`);
     setTimeout(() => setPlaidMsg(''), 5000);
-  }, [encrypt, templates]);
+  }, [createEntry, templates]);
 
   // ── Plaid Link Existing Entry handler ───────────────────────────────
   const handlePlaidLinkExisting = useCallback(async ({ itemId, accounts, metadata }) => {
@@ -279,12 +258,7 @@ export default function VaultPage() {
 
     const updated = setIntegration({ ...d }, 'plaid', plaidMeta);
     try {
-      const blob = await encrypt(updated);
-      await api.put(`/vault.php?id=${entryId}`, { encrypted_data: blob });
-      const updatedEntry = { ...entry, encrypted_data: blob, updated_at: new Date().toISOString() };
-      await entryStore.put(updatedEntry);
-      setDecryptedCache(prev => ({ ...prev, [entryId]: updated }));
-      setEntries(prev => prev.map(e => e.id === entryId ? updatedEntry : e));
+      await updateEntryLocal(entryId, updated);
 
       // Also update linked Cash asset balance if one exists
       const linkedAssets = entries.filter(e => {
@@ -295,12 +269,7 @@ export default function VaultPage() {
         const ad = decryptedCache[asset.id];
         if (ad) {
           const updatedAsset = setIntegration({ ...ad, value: String(account.balance || 0) }, 'plaid', plaidMeta);
-          const assetBlob = await encrypt(updatedAsset);
-          await api.put(`/vault.php?id=${asset.id}`, { encrypted_data: assetBlob });
-          const updatedAssetEntry = { ...asset, encrypted_data: assetBlob, updated_at: new Date().toISOString() };
-          await entryStore.put(updatedAssetEntry);
-          setDecryptedCache(prev => ({ ...prev, [asset.id]: updatedAsset }));
-          setEntries(prev => prev.map(e => e.id === asset.id ? updatedAssetEntry : e));
+          await updateEntryLocal(asset.id, updatedAsset);
         }
       }
 
@@ -310,7 +279,7 @@ export default function VaultPage() {
       alert(err.response?.data?.error || 'Failed to link to Plaid');
     }
     setPlaidAccountPicker(null);
-  }, [plaidAccountPicker, entries, decryptedCache, encrypt]);
+  }, [plaidAccountPicker, entries, decryptedCache, updateEntryLocal]);
 
   // Plaid hooks — one for connect, one for link existing
   const { open: openPlaidConnect, loading: plaidConnectLoading, error: plaidConnectError } =
@@ -367,46 +336,6 @@ export default function VaultPage() {
     [entries, decryptedCache]
   );
 
-  // ── Load data from IndexedDB ─────────────────────────────────────
-  const loadEntries = useCallback(async () => {
-    if (!isUnlocked) { setEntries([]); setDecryptedCache({}); setLoading(false); return; }
-    setLoading(true);
-    try {
-      const raw = await entryStore.getAll();
-
-      // Decrypt all entries
-      const cache = {};
-      for (const entry of raw) {
-        try {
-          cache[entry.id] = await decrypt(entry.encrypted_data);
-        } catch {
-          cache[entry.id] = null;
-        }
-      }
-      setEntries(raw);
-      setDecryptedCache(cache);
-    } catch (err) {
-      setError('Failed to load entries.');
-    } finally {
-      setLoading(false);
-    }
-  }, [isUnlocked, decrypt]);
-
-  useEffect(() => { loadEntries(); }, [loadEntries]);
-
-  // ── Refresh from server ──────────────────────────────────────────
-  const refetch = useCallback(async () => {
-    const { data: resp } = await api.get('/vault.php');
-    const raw = apiData({ data: resp }) || [];
-    await entryStore.putAll(raw);
-    const cache = {};
-    for (const entry of raw) {
-      try { cache[entry.id] = await decrypt(entry.encrypted_data); } catch { cache[entry.id] = null; }
-    }
-    setEntries(raw);
-    setDecryptedCache(cache);
-  }, [decrypt]);
-
   // ── Filtering ────────────────────────────────────────────────────
   const filtered = useMemo(() => {
     let list = entries;
@@ -436,12 +365,22 @@ export default function VaultPage() {
     return tpl?.fields || [];
   };
 
+
+  // Get the primary monetary amount for an entry
+  const getEntryAmount = (d, fields) => {
+    if (!d) return '';
+    const moneyField = fields.find(f => MONETARY_KEYS.includes(f.key) && d[f.key]);
+    if (!moneyField) return '';
+    if (hideAmounts) return MASKED;
+    const cur = currencies.find(c => c.code === d.currency);
+    const symbol = cur?.symbol || '';
+    return `${Number(d[moneyField.key]).toLocaleString()}${symbol ? symbol : ''}`;
+  };
+
   // ── Check if current form requires currency/country ─────────────
   const formRequiresCurrency = () => {
     if (!TYPES_WITH_COUNTRY.includes(formType)) return false;
     const fields = getFormFields();
-    const MONETARY_KEYS = ['balance', 'value', 'current_value', 'purchase_price', 'face_value',
-      'premium_amount', 'coverage_amount', 'cash_value', 'credit_limit', 'price_per_share'];
     return fields.some(f => MONETARY_KEYS.includes(f.key) || (f.type === 'number' && f.key !== 'year' && f.key !== 'seats' && f.key !== 'shares' && f.key !== 'quantity'));
   };
 
@@ -486,20 +425,10 @@ export default function VaultPage() {
 
     setSaving(true);
     try {
-      const blob = await encrypt(form);
-      const { data: resp } = await api.post('/vault.php', {
-        entry_type: formType,
-        template_id: formTemplateId,
-        encrypted_data: blob,
-      });
-      const newId = apiData({ data: resp })?.id;
-      // Add to local store
+      const newEntry = await createEntry(formType, formTemplateId, form);
+      const newId = newEntry.id;
       const savedForm = { ...form };
       const savedType = formType;
-      const newEntry = { id: newId, entry_type: formType, template_id: formTemplateId, encrypted_data: blob, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
-      await entryStore.put(newEntry);
-      setDecryptedCache(prev => ({ ...prev, [newId]: savedForm }));
-      setEntries(prev => [newEntry, ...prev]);
       setShowAdd(false);
       setForm({});
       // If inline balance was provided (Option B), auto-create Cash asset
@@ -562,25 +491,12 @@ export default function VaultPage() {
     setSaving(true);
     try {
       const blob = await encrypt(form);
-      const payload = { encrypted_data: blob };
-      // Send entry_type + template_id if they changed
-      if (formType !== editEntry.entry_type) payload.entry_type = formType;
-      if (formTemplateId !== editEntry.template_id) payload.template_id = formTemplateId;
-
-      await api.put(`/vault.php?id=${editEntry.id}`, payload);
-      // Update local
-      const savedForm = { ...form };
       const savedType = formType;
-      const updated = {
-        ...editEntry,
-        encrypted_data: blob,
-        entry_type: formType,
-        template_id: formTemplateId,
-        updated_at: new Date().toISOString(),
-      };
-      await entryStore.put(updated, { allowTemplateChange: true });
-      setDecryptedCache(prev => ({ ...prev, [editEntry.id]: savedForm }));
-      setEntries(prev => prev.map(e => e.id === editEntry.id ? updated : e));
+      const updated = await updateEntry(editEntry, blob, { ...form }, {
+        allowTemplateChange: true,
+        newEntryType: formType,
+        newTemplateId: formTemplateId,
+      });
       setEditEntry(null);
       setForm({});
       // Prompt to link/create assets after updating an account
@@ -597,9 +513,7 @@ export default function VaultPage() {
   const handleDelete = async (entry) => {
     if (!window.confirm(`Delete "${decryptedCache[entry.id]?.title || 'this entry'}"? It will be recoverable for 24 hours.`)) return;
     try {
-      await api.delete(`/vault.php?id=${entry.id}`);
-      await entryStore.delete(entry.id);
-      setEntries(prev => prev.filter(e => e.id !== entry.id));
+      await deleteEntry(entry);
     } catch (err) {
       alert(err.response?.data?.error || 'Delete failed.');
     }
@@ -649,12 +563,7 @@ export default function VaultPage() {
     if (!d) return;
     const updated = { ...d, linked_account_id: String(accountId) };
     try {
-      const blob = await encrypt(updated);
-      await api.put(`/vault.php?id=${assetEntry.id}`, { encrypted_data: blob });
-      const updatedEntry = { ...assetEntry, encrypted_data: blob, updated_at: new Date().toISOString() };
-      await entryStore.put(updatedEntry);
-      setDecryptedCache(prev => ({ ...prev, [assetEntry.id]: updated }));
-      setEntries(prev => prev.map(e => e.id === assetEntry.id ? updatedEntry : e));
+      await updateEntryLocal(assetEntry.id, updated);
     } catch (err) {
       alert(err.response?.data?.error || 'Failed to link asset.');
     }
@@ -704,24 +613,7 @@ export default function VaultPage() {
     if (acctData?.country) cashForm.country = acctData.country;
     if (acctData?.currency) cashForm.currency = acctData.currency;
 
-    const blob = await encrypt(cashForm);
-    const { data: resp } = await api.post('/vault.php', {
-      entry_type: 'asset',
-      template_id: cashTpl?.id || null,
-      encrypted_data: blob,
-    });
-    const cashId = apiData({ data: resp })?.id;
-    const cashEntry = {
-      id: cashId,
-      entry_type: 'asset',
-      template_id: cashTpl?.id || null,
-      encrypted_data: blob,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-    await entryStore.put(cashEntry);
-    setDecryptedCache(prev => ({ ...prev, [cashId]: cashForm }));
-    setEntries(prev => [cashEntry, ...prev]);
+    await createEntry('asset', cashTpl?.id || null, cashForm);
   };
 
   // ── Inline edit a linked asset field ────────────────────────────
@@ -731,12 +623,7 @@ export default function VaultPage() {
     const updated = { ...d, [fieldKey]: newValue };
     setInlineEditSaving(true);
     try {
-      const blob = await encrypt(updated);
-      await api.put(`/vault.php?id=${assetEntry.id}`, { encrypted_data: blob });
-      const updatedEntry = { ...assetEntry, encrypted_data: blob, updated_at: new Date().toISOString() };
-      await entryStore.put(updatedEntry);
-      setDecryptedCache(prev => ({ ...prev, [assetEntry.id]: updated }));
-      setEntries(prev => prev.map(e => e.id === assetEntry.id ? updatedEntry : e));
+      await updateEntryLocal(assetEntry.id, updated);
     } catch (err) {
       alert(err.response?.data?.error || 'Failed to update.');
     } finally {
@@ -771,6 +658,9 @@ export default function VaultPage() {
     setTickerVerified(false);
     setTickerResult(null);
     const newForm = { title: form.title || '' };
+    if (form.linked_account_id) newForm.linked_account_id = form.linked_account_id;
+    if (form.country) newForm.country = form.country;
+    if (form.currency) newForm.currency = form.currency;
     if (templateId) {
       const tpl = templates.find(t => t.id === templateId);
       if (tpl?.country_code) {
@@ -832,8 +722,6 @@ export default function VaultPage() {
     let augmentedFields = [...fields];
     if (TYPES_WITH_COUNTRY.includes(formType)) {
       // Check if template has monetary fields (balance, value, price, etc.)
-      const MONETARY_KEYS = ['balance', 'value', 'current_value', 'purchase_price', 'face_value',
-        'premium_amount', 'coverage_amount', 'cash_value', 'credit_limit', 'price_per_share'];
       const hasMonetaryField = augmentedFields.some(f => MONETARY_KEYS.includes(f.key) || (f.type === 'number' && f.key !== 'year' && f.key !== 'seats' && f.key !== 'shares' && f.key !== 'quantity'));
       const hasCurrency = augmentedFields.some(f => f.key === 'currency');
       const hasCountry = augmentedFields.some(f => f.key === 'country');
@@ -1166,10 +1054,7 @@ export default function VaultPage() {
                                   if (!ticker || !prices[ticker]) continue;
                                   const priceKey = tpl?.subtype === 'crypto' ? 'price_per_unit' : 'price_per_share';
                                   const updated = { ...d, [priceKey]: String(prices[ticker].price), currency: prices[ticker].currency };
-                                  const blob = await encrypt(updated);
-                                  await api.put(`/vault.php?id=${e.id}`, { encrypted_data: blob });
-                                  await entryStore.put({ ...e, encrypted_data: blob, updated_at: new Date().toISOString() });
-                                  setDecryptedCache(prev => ({ ...prev, [e.id]: updated }));
+                                  await updateEntryLocal(e.id, updated);
                                   priceCount++;
                                 }
                                 if (priceCount > 0) results.push(`${priceCount} price${priceCount !== 1 ? 's' : ''}`);
@@ -1273,8 +1158,10 @@ export default function VaultPage() {
                     <th style={{ width: 40 }}>Type</th>
                     <th>Title</th>
                     <th>Details</th>
+                    <th style={{ width: 120, textAlign: 'right' }}>Amount</th>
+                    <th style={{ width: 80 }}>Currency</th>
                     <th style={{ width: 140 }}>Updated</th>
-                    <th style={{ width: 120, textAlign: 'right' }}>Actions</th>
+                    <th style={{ width: 100, textAlign: 'right' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1284,8 +1171,10 @@ export default function VaultPage() {
                     const Icon = meta.icon;
                     const title = d?.title || '(encrypted)';
                     const fields = getTemplateFields(entry);
-                    const detailField = fields.find(f => f.key !== 'title' && f.key !== 'notes' && f.key !== 'linked_account_id' && f.type !== 'textarea' && f.type !== 'secret' && f.type !== 'account_link' && d?.[f.key]);
+                    const detailField = fields.find(f => f.key !== 'title' && f.key !== 'notes' && f.key !== 'linked_account_id' && f.key !== 'currency' && f.key !== 'country' && f.type !== 'textarea' && f.type !== 'secret' && f.type !== 'account_link' && f.type !== 'number' && d?.[f.key]);
                     const detail = detailField ? d[detailField.key] : '';
+                    const amount = getEntryAmount(d, fields);
+                    const cur = d?.currency || '';
                     const tpl = templates.find(t => t.id === entry.template_id) || entry.template;
                     const subtype = tpl?.subtype;
                     const integrationId = getIntegrationType(d);
@@ -1298,14 +1187,17 @@ export default function VaultPage() {
                         <td><Icon size={16} style={{ color: meta.color }} /></td>
                         <td><span className="font-medium">{title}</span></td>
                         <td>
-                          <span className="text-muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                            {typeof detail === 'string' ? (detail.length > 40 ? detail.slice(0, 40) + '...' : detail) : ''}
+                          <span className="text-muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                            {tpl?.name && <span className="badge badge-muted" style={{ fontSize: 11 }}>{tpl.name}</span>}
+                            {typeof detail === 'string' && detail ? (detail.length > 40 ? detail.slice(0, 40) + '...' : detail) : ''}
                             {(d?.linked_account_id || hasIntegration) && (
                               <Link2 size={12} style={{ color: integrationInfo ? 'var(--color-primary, #2563eb)' : (d?.linked_account_id ? 'var(--color-success, #16a34a)' : undefined), flexShrink: 0 }}
                                 title={integrationInfo ? 'Connected via ' + integrationInfo.label : 'Linked to account'} />
                             )}
                           </span>
                         </td>
+                        <td style={{ textAlign: 'right' }}><span className="font-medium" style={{ fontSize: 13 }}>{amount || '--'}</span></td>
+                        <td><span className="text-muted" style={{ fontSize: 13 }}>{cur || '--'}</span></td>
                         <td><span className="text-muted" style={{ fontSize: 13 }}>{entry.updated_at ? new Date(entry.updated_at).toLocaleDateString() : '--'}</span></td>
                         <td>
                           <div className="td-actions">
@@ -1331,10 +1223,7 @@ export default function VaultPage() {
                                     if (priceData) {
                                       const priceKey = subtype === 'crypto' ? 'price_per_unit' : 'price_per_share';
                                       const updated = { ...d, [priceKey]: String(priceData.price), currency: priceData.currency };
-                                      const blob = await encrypt(updated);
-                                      await api.put(`/vault.php?id=${entry.id}`, { encrypted_data: blob });
-                                      await entryStore.put({ ...entry, encrypted_data: blob, updated_at: new Date().toISOString() });
-                                      setDecryptedCache(prev => ({ ...prev, [entry.id]: updated }));
+                                      await updateEntryLocal(entry.id, updated);
                                     }
                                   }
                                 } catch { /* silent */ }
@@ -1360,8 +1249,10 @@ export default function VaultPage() {
               const Icon = meta.icon;
               const title = d?.title || '(encrypted)';
               const fields = getTemplateFields(entry);
-              const detailField = fields.find(f => f.key !== 'title' && f.key !== 'notes' && f.key !== 'linked_account_id' && f.type !== 'textarea' && f.type !== 'secret' && f.type !== 'account_link' && d?.[f.key]);
+              const detailField = fields.find(f => f.key !== 'title' && f.key !== 'notes' && f.key !== 'linked_account_id' && f.key !== 'currency' && f.key !== 'country' && f.type !== 'textarea' && f.type !== 'secret' && f.type !== 'account_link' && f.type !== 'number' && d?.[f.key]);
               const detail = detailField ? d[detailField.key] : '';
+              const amount = getEntryAmount(d, fields);
+              const tpl = templates.find(t => t.id === entry.template_id) || entry.template;
               return (
                 <div
                   key={entry.id}
@@ -1373,9 +1264,11 @@ export default function VaultPage() {
                   </div>
                   <div className="vault-entry-card-body">
                     <div className="vault-entry-card-title">{title}</div>
-                    {detail ? (
-                      <div className="vault-entry-card-detail">
-                        {typeof detail === 'string' ? (detail.length > 50 ? detail.slice(0, 50) + '...' : detail) : ''}
+                    {(tpl?.name || detail || amount) ? (
+                      <div className="vault-entry-card-detail" style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                        {tpl?.name && <span className="badge badge-muted" style={{ fontSize: 10 }}>{tpl.name}</span>}
+                        {detail ? (typeof detail === 'string' ? (detail.length > 50 ? detail.slice(0, 50) + '...' : detail) : '') : ''}
+                        {amount && <span className="font-medium">{amount}</span>}
                       </div>
                     ) : null}
                   </div>
@@ -1496,7 +1389,7 @@ export default function VaultPage() {
               );
             }
             return (
-              <FieldDisplay key={field.key} field={field} value={val} />
+              <FieldDisplay key={field.key} field={field} value={val} masked={hideAmounts && MONETARY_KEYS.includes(field.key)} />
             );
           });
         })()}
@@ -1584,6 +1477,7 @@ export default function VaultPage() {
                               label={valueField.label}
                               value={ad?.[valueField.key] || ''}
                               currency={ad?.currency}
+                              masked={hideAmounts}
                               isEditing={isEditing && inlineEditAsset?.field === valueField.key}
                               editValue={isEditing && inlineEditAsset?.field === valueField.key ? inlineEditAsset.value : ''}
                               saving={inlineEditSaving}
@@ -1597,6 +1491,7 @@ export default function VaultPage() {
                             <InlineNumberField
                               label={qtyField.label}
                               value={ad?.[qtyField.key] || ''}
+                              masked={hideAmounts}
                               isEditing={isEditing && inlineEditAsset?.field === qtyField.key}
                               editValue={isEditing && inlineEditAsset?.field === qtyField.key ? inlineEditAsset.value : ''}
                               saving={inlineEditSaving}
@@ -1611,6 +1506,7 @@ export default function VaultPage() {
                               label={priceField.label}
                               value={ad?.[priceField.key] || ''}
                               currency={ad?.currency}
+                              masked={hideAmounts}
                               isEditing={isEditing && inlineEditAsset?.field === priceField.key}
                               editValue={isEditing && inlineEditAsset?.field === priceField.key ? inlineEditAsset.value : ''}
                               saving={inlineEditSaving}
@@ -1699,21 +1595,13 @@ export default function VaultPage() {
                           await provider.disconnect(meta.item_id);
                           // Remove integration from this entry and linked assets
                           const updatedData = removeIntegration(d, integrationId);
-                          const blob = await encrypt(updatedData);
-                          await api.put(`/vault.php?id=${viewEntry.id}`, { encrypted_data: blob });
-                          await entryStore.put({ ...viewEntry, encrypted_data: blob, updated_at: new Date().toISOString() });
-                          setDecryptedCache(prev => ({ ...prev, [viewEntry.id]: updatedData }));
-                          setEntries(prev => prev.map(e => e.id === viewEntry.id ? { ...e, encrypted_data: blob, updated_at: new Date().toISOString() } : e));
+                          await updateEntryLocal(viewEntry.id, updatedData);
                           // Also remove integration from linked assets
                           for (const entry of entries) {
                             const ad = decryptedCache[entry.id];
                             if (getIntegration(ad, integrationId)?.item_id === meta.item_id) {
                               const cleanData = removeIntegration(ad, integrationId);
-                              const assetBlob = await encrypt(cleanData);
-                              await api.put(`/vault.php?id=${entry.id}`, { encrypted_data: assetBlob });
-                              await entryStore.put({ ...entry, encrypted_data: assetBlob, updated_at: new Date().toISOString() });
-                              setDecryptedCache(prev => ({ ...prev, [entry.id]: cleanData }));
-                              setEntries(prev => prev.map(e2 => e2.id === entry.id ? { ...e2, encrypted_data: assetBlob, updated_at: new Date().toISOString() } : e2));
+                              await updateEntryLocal(entry.id, cleanData);
                             }
                           }
                           setPlaidMsg(`Disconnected from ${integrationInfo?.label || integrationId}`);
@@ -1873,7 +1761,7 @@ export default function VaultPage() {
                     <div className="text-muted" style={{ fontSize: 12 }}>{acct.type} / {acct.subtype}</div>
                   </div>
                   <div style={{ textAlign: 'right' }}>
-                    <div className="font-medium">{acct.currency} {Number(acct.balance).toLocaleString()}</div>
+                    <div className="font-medium">{hideAmounts ? MASKED : `${acct.currency} ${Number(acct.balance).toLocaleString()}`}</div>
                   </div>
                 </button>
               ))}
@@ -1897,7 +1785,7 @@ export default function VaultPage() {
 }
 
 /** Display a single field value with copy support for secrets */
-function FieldDisplay({ field, value }) {
+function FieldDisplay({ field, value, masked }) {
   const [visible, setVisible] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -1919,7 +1807,7 @@ function FieldDisplay({ field, value }) {
           <a href={value} target="_blank" rel="noopener noreferrer" className="form-control-static" style={{ wordBreak: 'break-all' }}>{value}</a>
         ) : (
           <span className="form-control-static" style={{ flex: 1, fontFamily: isSecret ? 'monospace' : 'inherit' }}>
-            {isSecret && !visible ? '••••••••' : value}
+            {masked ? MASKED : (isSecret && !visible ? '••••••••' : value)}
           </span>
         )}
         {isSecret && (

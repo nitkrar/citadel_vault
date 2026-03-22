@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-route
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { EncryptionProvider } from './contexts/EncryptionContext';
 import { SyncProvider } from './contexts/SyncContext';
+import { VaultDataProvider } from './contexts/VaultDataContext';
 import Modal from './components/Modal';
 import Layout from './components/Layout';
 import api from './api/client';
@@ -224,7 +225,9 @@ function EncryptionWrapper({ children }) {
 
   return (
     <EncryptionProvider user={user}>
-      <SyncProvider>{children}</SyncProvider>
+      <VaultDataProvider>
+        <SyncProvider>{children}</SyncProvider>
+      </VaultDataProvider>
     </EncryptionProvider>
   );
 }

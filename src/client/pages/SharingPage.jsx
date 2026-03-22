@@ -5,13 +5,14 @@ import {
 import api from '../api/client';
 import Modal from '../components/Modal';
 import { useEncryption } from '../contexts/EncryptionContext';
-import { entryStore } from '../lib/entryStore';
+import { useVaultEntries } from '../contexts/VaultDataContext';
 import * as cryptoLib from '../lib/crypto';
 import useVaultData from '../hooks/useVaultData';
 import { apiData } from '../lib/checks';
 
 export default function SharingPage() {
-  const { isUnlocked, decrypt } = useEncryption();
+  const { isUnlocked } = useEncryption();
+  const { entries: myEntries, decryptedCache: decryptedEntries } = useVaultEntries();
   const [tab, setTab] = useState('with-me');
   const [showShareModal, setShowShareModal] = useState(false);
 
@@ -20,8 +21,6 @@ export default function SharingPage() {
   const [shareRecipient, setShareRecipient] = useState('');
   const [sharing, setSharing] = useState(false);
   const [shareError, setShareError] = useState('');
-  const [myEntries, setMyEntries] = useState([]);
-  const [decryptedEntries, setDecryptedEntries] = useState({});
 
   // ── Shared with me (decrypt with RSA) ────────────────────────────
   const fetchSharedWithMe = useCallback(async () => {
@@ -61,14 +60,7 @@ export default function SharingPage() {
   const { data: sharedByMe, loading: loadingByMe, refetch: refetchByMe } = useVaultData(fetchSharedByMe, []);
 
   // ── Open share modal ─────────────────────────────────────────────
-  const openShareModal = async () => {
-    const entries = await entryStore.getAll();
-    const cache = {};
-    for (const e of entries) {
-      try { cache[e.id] = await decrypt(e.encrypted_data); } catch { cache[e.id] = null; }
-    }
-    setMyEntries(entries);
-    setDecryptedEntries(cache);
+  const openShareModal = () => {
     setShareEntryId('');
     setShareRecipient('');
     setShareError('');
