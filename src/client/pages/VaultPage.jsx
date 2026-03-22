@@ -18,9 +18,10 @@ import { useHideAmounts } from '../components/Layout';
 import { usePlaidLink } from '../integrations/providers/plaid/PlaidConnect';
 import { getIntegration, getIntegrationType, setIntegration, removeIntegration } from '../integrations/helpers';
 import { getProvider, getProviderDisplayInfo } from '../integrations/modules';
+import { extractValue, buildRateMap, convertCurrency } from '../lib/portfolioAggregator';
 import {
   Plus, Edit2, Trash2, Search, Eye, EyeOff, Copy, Check, Lock,
-  KeyRound, AlertTriangle, Undo2, X, ChevronDown, Upload,
+  KeyRound, AlertTriangle, Undo2, X, ChevronDown, ChevronUp, Upload,
   Landmark, Briefcase, FileText, Shield, Layers, RefreshCw, Link2,
 } from 'lucide-react';
 
@@ -32,6 +33,9 @@ const TYPE_META = {
   insurance: { icon: Shield,    label: 'Insurance',   color: '#ec4899' },
   custom:    { icon: Layers,    label: 'Custom',      color: '#06b6d4' },
 };
+
+// Tab display order (different from VALID_ENTRY_TYPES validation order)
+const TAB_ORDER = ['account', 'asset', 'insurance', 'license', 'password', 'custom'];
 
 // Types that get country/currency selectors
 const TYPES_WITH_COUNTRY = ['account', 'asset', 'insurance', 'license'];
@@ -87,6 +91,25 @@ function InlineNumberField({ label, value, currency, isEditing, editValue, savin
   );
 }
 
+// Sortable table header
+function SortTh({ sortKey: key, current, dir, onSort, style, children }) {
+  const active = current === key;
+  return (
+    <th
+      style={{ ...style, cursor: 'pointer', userSelect: 'none' }}
+      onClick={() => onSort(key)}
+    >
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+        {children}
+        {active
+          ? (dir === 'asc' ? <ChevronUp size={13} /> : <ChevronDown size={13} />)
+          : <ChevronDown size={13} style={{ opacity: 0.25 }} />
+        }
+      </span>
+    </th>
+  );
+}
+
 
 export default function VaultPage() {
   const { isUnlocked, encrypt, decrypt } = useEncryption();
@@ -127,6 +150,17 @@ export default function VaultPage() {
     if (isValidTab(siteDefault)) { setActiveType(siteDefault); return; }
   }, [activeType, userPref, siteDefault]);
   const [search, setSearch] = useState('');
+  const [sortKey, setSortKey] = useState('updated_at');
+  const [sortDir, setSortDir] = useState('desc'); // 'asc' | 'desc'
+
+  const toggleSort = (key) => {
+    if (sortKey === key) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortKey(key);
+      setSortDir(key === 'title' ? 'asc' : 'desc');
+    }
+  };
 
   // Modals
   const [showAdd, setShowAdd] = useState(false);
@@ -336,7 +370,56 @@ export default function VaultPage() {
     [entries, decryptedCache]
   );
 
-  // ── Filtering ────────────────────────────────────────────────────
+  // ── Display currency + rate map for amount display ──────────────
+  const defaultCurrency = config?.base_currency || 'GBP';
+  const [displayCurrency, setDisplayCurrency] = useState(defaultCurrency);
+  useEffect(() => { if (defaultCurrency && !displayCurrency) setDisplayCurrency(defaultCurrency); }, [defaultCurrency]);
+  const baseCurrency = displayCurrency || defaultCurrency;
+  const rateMap = useMemo(() => buildRateMap(currencies), [currencies]);
+  const baseCurrencySymbol = useMemo(() => {
+    const c = currencies.find(cu => cu.code === baseCurrency);
+    return c?.symbol || '';
+  }, [currencies, baseCurrency]);
+
+  // ── Get template fields for an entry ─────────────────────────────
+  const getTemplateFields = (entry) => {
+    if (entry.template?.fields) return entry.template.fields;
+    const tpl = templates.find(t => t.id === entry.template_id);
+    return tpl?.fields || [];
+  };
+
+  // Raw numeric amount in base currency (used by sort + display)
+  const getEntryAmountRaw = (entry, d) => {
+    if (!d) return 0;
+    if (entry.entry_type === 'account') {
+      let total = 0;
+      for (const e of entries) {
+        if (e.entry_type !== 'asset') continue;
+        const ad = decryptedCache[e.id];
+        if (!ad || String(ad.linked_account_id) !== String(entry.id)) continue;
+        const f = getTemplateFields(e);
+        const p = typeof f === 'string' ? JSON.parse(f) : f;
+        const raw = extractValue(ad, p);
+        if (raw) total += convertCurrency(raw, ad.currency || baseCurrency, baseCurrency, rateMap);
+      }
+      return total;
+    }
+    const f = getTemplateFields(entry);
+    const p = typeof f === 'string' ? JSON.parse(f) : f;
+    const raw = extractValue(d, p);
+    return raw ? convertCurrency(raw, d.currency || baseCurrency, baseCurrency, rateMap) : 0;
+  };
+
+  // Formatted display string
+  const getEntryAmount = (entry, d) => {
+    if (!d) return '';
+    const val = getEntryAmountRaw(entry, d);
+    if (val === 0) return '';
+    if (hideAmounts) return MASKED;
+    return `${baseCurrencySymbol}${val.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  };
+
+  // ── Filtering + Sorting ─────────────────────────────────────────
   const filtered = useMemo(() => {
     let list = entries;
     if (activeType && activeType !== 'all') list = list.filter(e => e.entry_type === activeType);
@@ -348,8 +431,24 @@ export default function VaultPage() {
         return Object.values(d).some(v => typeof v === 'string' && v.toLowerCase().includes(q));
       });
     }
+    // Sort
+    const dir = sortDir === 'asc' ? 1 : -1;
+    list = [...list].sort((a, b) => {
+      const da = decryptedCache[a.id];
+      const db = decryptedCache[b.id];
+      let va, vb;
+      switch (sortKey) {
+        case 'title':    va = da?.title || ''; vb = db?.title || ''; break;
+        case 'amount':   va = getEntryAmountRaw(a, da); vb = getEntryAmountRaw(b, db); break;
+        case 'currency': va = da?.currency || ''; vb = db?.currency || ''; break;
+        default:         va = a.updated_at || ''; vb = b.updated_at || '';
+      }
+      if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
+      const sa = String(va).toLowerCase(), sb = String(vb).toLowerCase();
+      return sa < sb ? -dir : sa > sb ? dir : 0;
+    });
     return list;
-  }, [entries, activeType, search, decryptedCache]);
+  }, [entries, activeType, search, decryptedCache, sortKey, sortDir, baseCurrency, rateMap]);
 
   // ── Counts ───────────────────────────────────────────────────────
   const counts = useMemo(() => {
@@ -358,24 +457,7 @@ export default function VaultPage() {
     return c;
   }, [entries]);
 
-  // ── Get template fields for an entry ─────────────────────────────
-  const getTemplateFields = (entry) => {
-    if (entry.template?.fields) return entry.template.fields;
-    const tpl = templates.find(t => t.id === entry.template_id);
-    return tpl?.fields || [];
-  };
 
-
-  // Get the primary monetary amount for an entry
-  const getEntryAmount = (d, fields) => {
-    if (!d) return '';
-    const moneyField = fields.find(f => MONETARY_KEYS.includes(f.key) && d[f.key]);
-    if (!moneyField) return '';
-    if (hideAmounts) return MASKED;
-    const cur = currencies.find(c => c.code === d.currency);
-    const symbol = cur?.symbol || '';
-    return `${Number(d[moneyField.key]).toLocaleString()}${symbol ? symbol : ''}`;
-  };
 
   // ── Check if current form requires currency/country ─────────────
   const formRequiresCurrency = () => {
@@ -1103,7 +1185,7 @@ export default function VaultPage() {
           onClick={() => { setActiveType('all'); sessionStorage.setItem('pv_vault_last_tab', 'all'); }}>
           All <span className="badge badge-muted" style={{ marginLeft: 4 }}>{counts.all}</span>
         </button>
-        {VALID_ENTRY_TYPES.map(type => {
+        {TAB_ORDER.map(type => {
           const meta = TYPE_META[type];
           const Icon = meta?.icon || Layers;
           return (
@@ -1116,12 +1198,24 @@ export default function VaultPage() {
         })}
       </div>
 
-      {/* Search */}
-      <div className="flex gap-3 mb-4">
-        <div style={{ position: 'relative', flex: '1 1 auto' }}>
+      {/* Search + currency selector */}
+      <div className="flex gap-3 mb-4 items-center" style={{ flexWrap: 'wrap' }}>
+        <div style={{ position: 'relative', flex: '1 1 auto', minWidth: 200 }}>
           <Search size={16} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }} />
           <input className="form-control" style={{ paddingLeft: 36 }} placeholder="Search across all fields..." value={search} onChange={e => setSearch(e.target.value)} />
         </div>
+        {currencies.length > 0 && (
+          <select
+            className="form-control"
+            style={{ width: 'auto', minWidth: 90, padding: '4px 30px 4px 8px', fontSize: 13 }}
+            value={baseCurrency}
+            onChange={e => setDisplayCurrency(e.target.value)}
+          >
+            {currencies.filter(c => c.is_active === 1 || c.is_active === '1' || c.is_active === true).map(c => (
+              <option key={c.code} value={c.code}>{c.symbol} {c.code}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       {/* Plaid messages */}
@@ -1156,11 +1250,11 @@ export default function VaultPage() {
                 <thead>
                   <tr>
                     <th style={{ width: 40 }}>Type</th>
-                    <th>Title</th>
+                    <SortTh sortKey="title" current={sortKey} dir={sortDir} onSort={toggleSort}>Title</SortTh>
                     <th>Details</th>
-                    <th style={{ width: 120, textAlign: 'right' }}>Amount</th>
-                    <th style={{ width: 80 }}>Currency</th>
-                    <th style={{ width: 140 }}>Updated</th>
+                    <SortTh sortKey="amount" current={sortKey} dir={sortDir} onSort={toggleSort} style={{ width: 130, textAlign: 'right' }}>Amount ({baseCurrency})</SortTh>
+                    <SortTh sortKey="currency" current={sortKey} dir={sortDir} onSort={toggleSort} style={{ width: 70 }}>Currency</SortTh>
+                    <SortTh sortKey="updated_at" current={sortKey} dir={sortDir} onSort={toggleSort} style={{ width: 140 }}>Updated</SortTh>
                     <th style={{ width: 100, textAlign: 'right' }}>Actions</th>
                   </tr>
                 </thead>
@@ -1173,8 +1267,7 @@ export default function VaultPage() {
                     const fields = getTemplateFields(entry);
                     const detailField = fields.find(f => f.key !== 'title' && f.key !== 'notes' && f.key !== 'linked_account_id' && f.key !== 'currency' && f.key !== 'country' && f.type !== 'textarea' && f.type !== 'secret' && f.type !== 'account_link' && f.type !== 'number' && d?.[f.key]);
                     const detail = detailField ? d[detailField.key] : '';
-                    const amount = getEntryAmount(d, fields);
-                    const cur = d?.currency || '';
+                    const amount = getEntryAmount(entry, d);
                     const tpl = templates.find(t => t.id === entry.template_id) || entry.template;
                     const subtype = tpl?.subtype;
                     const integrationId = getIntegrationType(d);
@@ -1197,7 +1290,7 @@ export default function VaultPage() {
                           </span>
                         </td>
                         <td style={{ textAlign: 'right' }}><span className="font-medium" style={{ fontSize: 13 }}>{amount || '--'}</span></td>
-                        <td><span className="text-muted" style={{ fontSize: 13 }}>{cur || '--'}</span></td>
+                        <td><span className="text-muted" style={{ fontSize: 13 }}>{d?.currency || '--'}</span></td>
                         <td><span className="text-muted" style={{ fontSize: 13 }}>{entry.updated_at ? new Date(entry.updated_at).toLocaleDateString() : '--'}</span></td>
                         <td>
                           <div className="td-actions">
@@ -1251,7 +1344,7 @@ export default function VaultPage() {
               const fields = getTemplateFields(entry);
               const detailField = fields.find(f => f.key !== 'title' && f.key !== 'notes' && f.key !== 'linked_account_id' && f.key !== 'currency' && f.key !== 'country' && f.type !== 'textarea' && f.type !== 'secret' && f.type !== 'account_link' && f.type !== 'number' && d?.[f.key]);
               const detail = detailField ? d[detailField.key] : '';
-              const amount = getEntryAmount(d, fields);
+              const amount = getEntryAmount(entry, d);
               const tpl = templates.find(t => t.id === entry.template_id) || entry.template;
               return (
                 <div
