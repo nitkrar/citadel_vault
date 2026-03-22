@@ -1175,6 +1175,21 @@ export default function VaultPage() {
               </>
             );
           })()}
+          {currencies.length > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-muted" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>Display:</span>
+              <select
+                className="form-control"
+                style={{ width: 'auto', minWidth: 90, padding: '4px 30px 4px 8px', fontSize: 13 }}
+                value={baseCurrency}
+                onChange={e => setDisplayCurrency(e.target.value)}
+              >
+                {currencies.filter(c => c.is_active === 1 || c.is_active === '1' || c.is_active === true).map(c => (
+                  <option key={c.code} value={c.code}>{c.symbol} {c.code}</option>
+                ))}
+              </select>
+            </div>
+          )}
           <button className="btn btn-primary" onClick={() => openAdd(activeType !== 'all' ? activeType : 'password')}><Plus size={16} /> New Entry</button>
         </div>
       </div>
@@ -1198,24 +1213,12 @@ export default function VaultPage() {
         })}
       </div>
 
-      {/* Search + currency selector */}
-      <div className="flex gap-3 mb-4 items-center" style={{ flexWrap: 'wrap' }}>
-        <div style={{ position: 'relative', flex: '1 1 auto', minWidth: 200 }}>
+      {/* Search */}
+      <div className="flex gap-3 mb-4">
+        <div style={{ position: 'relative', flex: '1 1 auto' }}>
           <Search size={16} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }} />
           <input className="form-control" style={{ paddingLeft: 36 }} placeholder="Search across all fields..." value={search} onChange={e => setSearch(e.target.value)} />
         </div>
-        {currencies.length > 0 && (
-          <select
-            className="form-control"
-            style={{ width: 'auto', minWidth: 90, padding: '4px 30px 4px 8px', fontSize: 13 }}
-            value={baseCurrency}
-            onChange={e => setDisplayCurrency(e.target.value)}
-          >
-            {currencies.filter(c => c.is_active === 1 || c.is_active === '1' || c.is_active === true).map(c => (
-              <option key={c.code} value={c.code}>{c.symbol} {c.code}</option>
-            ))}
-          </select>
-        )}
       </div>
 
       {/* Plaid messages */}

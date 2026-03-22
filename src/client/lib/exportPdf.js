@@ -73,7 +73,7 @@ function buildNetWorthTiles(assets, rateMap, baseCurrency) {
   let tilesHtml = '';
   for (const [cur, total] of Object.entries(byCurrency)) {
     const rate = baseRate(cur);
-    const converted = rate > 0 ? total / rate : 0;
+    const converted = rate > 0 ? total * rate : 0;
     grandTotal += converted;
 
     if (cur === baseCurrency) {
@@ -88,7 +88,7 @@ function buildNetWorthTiles(assets, rateMap, baseCurrency) {
         <span class="nw-tile__amount">${esc(fmtVal(total, cur))}</span>
         <span class="nw-tile__converted">&asymp; ${esc(fmtVal(converted, baseCurrency))}</span>
       </div>`;
-      if (rate > 0) fxParts.push(`1 ${cur} = ${sym(baseCurrency)}${(1 / rate).toFixed(4)}`);
+      if (rate > 0) fxParts.push(`1 ${cur} = ${sym(baseCurrency)}${rate.toFixed(4)}`);
     }
   }
 
@@ -136,6 +136,18 @@ html, body { background:var(--bg-primary); color:var(--text-primary); font-famil
 .page { width:210mm; min-height:297mm; margin:0 auto; padding:15mm; }
 @media print { .page { margin:0; padding:15mm; width:210mm; } body { -webkit-print-color-adjust:exact; print-color-adjust:exact; } }
 .page-break { page-break-after:always; break-after:page; height:0; }
+.net-worth { background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:8px; padding:14px 16px; margin-bottom:14px; break-inside:avoid; }
+.net-worth__tiles { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; }
+.nw-tile { background:var(--bg-primary); border:1px solid var(--border-color); border-radius:6px; padding:10px 12px; display:flex; flex-direction:column; gap:2px; }
+.nw-tile--total { background:var(--text-primary); color:#fff; border-color:var(--text-primary); }
+.nw-tile--total .nw-tile__currency { color:rgba(255,255,255,0.7); }
+.nw-tile--total .nw-tile__converted { color:rgba(255,255,255,0.6); }
+.nw-tile__label { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; opacity:0.7; }
+.nw-tile__currency { font-size:11px; font-weight:600; color:var(--text-muted); }
+.nw-tile__amount { font-size:18px; font-weight:700; color:var(--color-success); }
+.nw-tile--total .nw-tile__amount { color:#fff; }
+.nw-tile__converted { font-size:11px; color:var(--text-faint); }
+.net-worth__footnote { margin-top:10px; font-size:11px; color:var(--text-faint); border-top:1px solid var(--border-color); padding-top:8px; }
 .doc-header { border-bottom:2px solid var(--border-color); padding-bottom:12px; margin-bottom:14px; }
 .doc-header__row { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
 .doc-header__title { font-size:20px; font-weight:700; letter-spacing:0.05em; }
