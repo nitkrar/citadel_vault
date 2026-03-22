@@ -1,9 +1,7 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { useEncryption } from '../contexts/EncryptionContext';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { entryStore } from '../lib/entryStore';
+import { useVaultEntries } from '../contexts/VaultDataContext';
 import * as workerDispatcher from '../lib/workerDispatcher';
-import useVaultData from './useVaultData';
 import useCurrencies from './useCurrencies';
 import useTemplates from './useTemplates';
 import useAppConfig from './useAppConfig';
@@ -28,14 +26,14 @@ function setCachedPrices(prices) {
 /**
  * usePortfolioData — React hook that wires aggregation to vault lifecycle.
  *
- * Loads entries from entryStore, templates + currencies from reference data,
- * base_currency from config endpoint, and runs aggregatePortfolio in useMemo.
+ * Consumes entries from VaultDataContext, templates + currencies from reference data,
+ * base_currency from config endpoint, and runs aggregatePortfolio via worker dispatcher.
  *
  * @returns {object} { portfolio, loading, error, refetch, displayCurrency, setDisplayCurrency, baseCurrency, ratesLastUpdated }
  */
 export default function usePortfolioData() {
-  const { isUnlocked, decrypt } = useEncryption();
   const { user } = useAuth();
+  const { entries: allEntries, decryptedCache, loading: entriesLoading, refetch } = useVaultEntries();
 
   // Display currency: initialized from user preference, overridable locally
   const [displayCurrencyOverride, setDisplayCurrencyOverride] = useState(null);
@@ -48,40 +46,33 @@ export default function usePortfolioData() {
   const baseCurrency = config?.base_currency || 'GBP';
   const displayCurrency = displayCurrencyOverride || user?.display_currency || baseCurrency;
 
-  // Fetch and decrypt entries
-  const fetchEntries = useCallback(async () => {
-    const entries = await entryStore.getAll();
-    const decrypted = [];
+  // Derive portfolio entries from context (replaces independent entryStore loading)
+  const decryptedEntries = useMemo(() => {
+    return allEntries
+      .filter(e => e.entry_type === 'asset' || e.entry_type === 'account')
+      .map(e => {
+        const d = decryptedCache[e.id];
+        if (!d) return null;
+        const tmpl = templates.find(t => t.id === e.template_id);
+        return {
+          id: e.id,
+          entry_type: e.entry_type,
+          template_id: e.template_id,
+          decrypted: d,
+          template: tmpl ? {
+            name: tmpl.name,
+            icon: tmpl.icon,
+            key: tmpl.template_key,
+            subtype: tmpl.subtype,
+            is_liability: tmpl.is_liability === 1 || tmpl.is_liability === '1' || tmpl.is_liability === true,
+            fields: tmpl.fields || [],
+          } : (e.template || null),
+        };
+      })
+      .filter(Boolean);
+  }, [allEntries, decryptedCache, templates]);
 
-    for (const entry of entries) {
-      if (entry.entry_type !== 'asset' && entry.entry_type !== 'account') continue;
-      try {
-        const d = await decrypt(entry.encrypted_data);
-        if (d) {
-          // Find the template for this entry
-          const tmpl = templates.find(t => t.id === entry.template_id);
-          decrypted.push({
-            id: entry.id,
-            entry_type: entry.entry_type,
-            template_id: entry.template_id,
-            decrypted: d,
-            template: tmpl ? {
-              name: tmpl.name,
-              icon: tmpl.icon,
-              key: tmpl.template_key,
-              subtype: tmpl.subtype,
-              is_liability: tmpl.is_liability === 1 || tmpl.is_liability === '1' || tmpl.is_liability === true,
-              fields: tmpl.fields || [],
-            } : (entry.template || null),
-          });
-        }
-      } catch { /* skip entries that fail to decrypt */ }
-    }
-
-    return decrypted;
-  }, [decrypt, templates]);
-
-  const { data: decryptedEntries, loading: entriesLoading, error, refetch } = useVaultData(fetchEntries, []);
+  const error = null; // Context handles errors internally
 
   // Run aggregation via worker dispatcher (async for worker path)
   const [portfolio, setPortfolio] = useState(null);

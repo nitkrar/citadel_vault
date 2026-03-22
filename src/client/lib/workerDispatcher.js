@@ -8,7 +8,7 @@
  * Worker is lazy-initialized on first use above threshold.
  * DEK raw bytes are cached and sent to worker on first init.
  */
-import { encryptEntry, decryptEntry } from './crypto';
+import { encryptEntry, decryptEntry, _getDekForContext } from './crypto';
 import { aggregatePortfolio } from './portfolioAggregator';
 
 // ── Configuration ────────────────────────────────────────────────────
@@ -176,11 +176,12 @@ export async function decryptBatch(entries, dek) {
  */
 export async function encryptBatch(items, dek) {
   if (!shouldUseWorker(items.length)) {
+    const key = dek || _getDekForContext();
     const start = performance.now();
     try {
       const results = [];
       for (const item of items) {
-        results.push(await encryptEntry(item, dek));
+        results.push(await encryptEntry(item, key));
       }
       recordTiming(performance.now() - start);
       return results;

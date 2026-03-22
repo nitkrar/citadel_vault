@@ -9,13 +9,13 @@ import {
   CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line,
 } from 'recharts';
 import { useEncryption } from '../contexts/EncryptionContext';
+import { useVaultEntries } from '../contexts/VaultDataContext';
 import { useHideAmounts } from '../components/Layout';
 import usePortfolioData from '../hooks/usePortfolioData';
 import useVaultData from '../hooks/useVaultData';
 import useSort from '../hooks/useSort';
 import SortableTh from '../components/SortableTh';
 import useAppConfig from '../hooks/useAppConfig';
-import { entryStore } from '../lib/entryStore';
 import api from '../api/client';
 import { fmtCurrency, MASKED, apiData } from '../lib/checks';
 import { buildRateMap, recalculateSnapshot } from '../lib/portfolioAggregator';
@@ -40,6 +40,7 @@ const TABS = [
 
 export default function PortfolioPage() {
   const { isUnlocked, decrypt, encrypt } = useEncryption();
+  const { entries: vaultEntries, decryptedCache } = useVaultEntries();
   const { hideAmounts } = useHideAmounts();
   const {
     portfolio, loading, error, refetch,
@@ -91,12 +92,7 @@ export default function PortfolioPage() {
           setBalanceRefreshingHook(true);
           promises.push(
             (async () => {
-              const allStored = await entryStore.getAll();
-              const cache = {};
-              for (const s of allStored) {
-                try { cache[s.id] = await decrypt(s.encrypted_data); } catch { /* skip */ }
-              }
-              const { updated } = await provider.refresh(itemIds, allStored, cache, encrypt);
+              const { updated } = await provider.refresh(itemIds, vaultEntries, decryptedCache, encrypt);
               if (updated > 0) { results.push(`${updated} balance${updated !== 1 ? 's' : ''}`); refetch(); }
             })().catch(() => results.push('balances failed'))
               .finally(() => setBalanceRefreshingHook(false))

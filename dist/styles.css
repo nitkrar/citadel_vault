@@ -191,6 +191,7 @@ img {
   width: 260px;
   min-width: 260px;
   background: var(--sidebar-bg);
+  color: var(--sidebar-text);
   border-right: 1px solid var(--sidebar-border);
   display: flex;
   flex-direction: column;
@@ -201,8 +202,7 @@ img {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-  padding: var(--space-md) var(--space-lg);
-  border-bottom: 1px solid var(--sidebar-border);
+  min-width: 0;
 }
 
 .sidebar-logo .logo-icon {

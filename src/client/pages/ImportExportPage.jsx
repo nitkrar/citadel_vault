@@ -1,16 +1,15 @@
 import { useState, useCallback } from 'react';
 import { FileDown, Upload, Lock, AlertTriangle, Check, CheckCircle } from 'lucide-react';
 import { useEncryption } from '../contexts/EncryptionContext';
+import { useVaultEntries } from '../contexts/VaultDataContext';
 import { entryStore } from '../lib/entryStore';
 import { VALID_ENTRY_TYPES } from '../lib/defaults';
-import { apiData } from '../lib/checks';
 import { buildRateMap } from '../lib/portfolioAggregator';
 import { groupByType, assignRowIdsAndRemap } from '../lib/exportHelpers';
 import { exportJson } from '../lib/exportJson';
 import { exportCsvZip } from '../lib/exportCsvZip';
 import { exportXlsx } from '../lib/exportXlsx';
 import { exportPdf } from '../lib/exportPdf';
-import api from '../api/client';
 import useCurrencies from '../hooks/useCurrencies';
 import useAppConfig from '../hooks/useAppConfig';
 import ImportModal from '../components/ImportModal';
@@ -22,7 +21,8 @@ const PDF_MODES = [
 ];
 
 export default function ImportExportPage() {
-  const { isUnlocked, decrypt } = useEncryption();
+  const { isUnlocked } = useEncryption();
+  const { entries: allEntries, decryptedCache, refetch } = useVaultEntries();
   const { currencies } = useCurrencies();
   const { config } = useAppConfig();
   const baseCurrency = config?.base_currency || 'GBP';
@@ -33,13 +33,11 @@ export default function ImportExportPage() {
 
   const handleImportComplete = useCallback(async () => {
     try {
-      const { data: resp } = await api.get('/vault.php');
-      const entries = apiData({ data: resp }) || [];
-      await entryStore.putAll(entries);
-    } catch { /* IndexedDB refresh failed — export will use stale data */ }
+      await refetch();
+    } catch { /* refresh failed — export will use stale data */ }
     setImportSuccess(true);
     setExported(false);
-  }, []);
+  }, [refetch]);
 
   // Export
   const [selectedTypes, setSelectedTypes] = useState(new Set(VALID_ENTRY_TYPES));
@@ -62,17 +60,15 @@ export default function ImportExportPage() {
     setExported(false);
 
     try {
-      const entries = await entryStore.getAll();
-      const filtered = entries.filter(e => selectedTypes.has(e.entry_type));
+      const filtered = allEntries.filter(e => selectedTypes.has(e.entry_type));
 
-      // Decrypt all entries, attaching internal metadata
-      const decrypted = [];
-      for (const entry of filtered) {
-        try {
-          const d = await decrypt(entry.encrypted_data);
-          if (d) decrypted.push({ _dbId: entry.id, _entryType: entry.entry_type, ...d });
-        } catch { /* skip undecryptable */ }
-      }
+      // Build decrypted list from context cache, attaching internal metadata
+      const decrypted = filtered
+        .map(e => {
+          const d = decryptedCache[e.id];
+          return d ? { _dbId: e.id, _entryType: e.entry_type, ...d } : null;
+        })
+        .filter(Boolean);
 
       if (decrypted.length === 0) {
         alert('No entries to export.');
