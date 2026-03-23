@@ -16,7 +16,7 @@ import ImportModal from '../components/ImportModal';
 
 const FORMAT_OPTIONS = ['json', 'csv', 'xlsx', 'pdf'];
 const PDF_MODES = [
-  { value: 'overview', label: 'Overview', desc: 'Compact one-liner per entry' },
+  { value: 'overview', label: 'Overview', desc: 'Details only — no amounts, secrets, or passwords' },
   { value: 'full', label: 'Full Detail', desc: 'Every field, secrets included' },
 ];
 
@@ -52,6 +52,18 @@ export default function ImportExportPage() {
       if (next.has(type)) next.delete(type); else next.add(type);
       return next;
     });
+  };
+
+  const handlePdfModeChange = (mode) => {
+    setPdfMode(mode);
+    if (mode === 'overview') {
+      setSelectedTypes(prev => {
+        const next = new Set(prev);
+        next.delete('password');
+        next.delete('license');
+        return next;
+      });
+    }
   };
 
   const handleExport = async () => {
@@ -178,7 +190,7 @@ export default function ImportExportPage() {
                   {PDF_MODES.map(m => (
                     <label key={m.value} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
                       <input type="radio" name="pdfMode" checked={pdfMode === m.value}
-                        onChange={() => setPdfMode(m.value)} />
+                        onChange={() => handlePdfModeChange(m.value)} />
                       <span><strong>{m.label}</strong> — {m.desc}</span>
                     </label>
                   ))}
