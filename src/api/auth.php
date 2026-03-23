@@ -592,6 +592,15 @@ if ($method === 'POST' && $action === 'force-change-password') {
         $stmt->execute([$hash, $userId]);
     }
 
+    // Reissue JWT with must_reset_password cleared
+    $stmt = $db->prepare("SELECT id, username, role, must_reset_password FROM users WHERE id = ?");
+    $stmt->execute([$userId]);
+    $updatedUser = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($updatedUser) {
+        $token = Auth::generateToken($updatedUser);
+        Auth::setAuthCookie($token);
+    }
+
     Response::success(['message' => 'Password changed successfully.']);
 }
 
