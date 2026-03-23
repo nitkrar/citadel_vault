@@ -119,8 +119,8 @@ describe('Sharing API (Redesigned)', () => {
       expect(data.public_key).toBeTruthy();
       expect(data).toHaveProperty('recipient_token');
       expect(data.recipient_token).toBeTruthy();
-      // is_ghost depends on whether regular user has vault keys set up
-      expect(typeof data.is_ghost).toBe('boolean');
+      // recipient-key no longer returns is_ghost
+      expect(data).not.toHaveProperty('is_ghost');
     });
 
     it('returns public_key + recipient_token for ghost (non-existent user)', async () => {
@@ -131,7 +131,7 @@ describe('Sharing API (Redesigned)', () => {
       const data = await extractData(resp);
       expect(data).toHaveProperty('public_key');
       expect(data.public_key).toBeTruthy();
-      expect(data).toHaveProperty('is_ghost', true);
+      expect(data).not.toHaveProperty('is_ghost');
       expect(data).toHaveProperty('recipient_token');
       expect(data.recipient_token).toBeTruthy();
     });
@@ -148,8 +148,9 @@ describe('Sharing API (Redesigned)', () => {
       const data2 = await extractData(resp2);
 
       expect(data1.public_key).toBe(data2.public_key);
-      expect(data1.is_ghost).toBe(true);
-      expect(data2.is_ghost).toBe(true);
+      // Both return same ghost public key
+      expect(data1).not.toHaveProperty('is_ghost');
+      expect(data2).not.toHaveProperty('is_ghost');
     });
 
     it('recipient_token field is present and non-empty', async () => {
@@ -259,7 +260,7 @@ describe('Sharing API (Redesigned)', () => {
       );
       expect(keyResp.status).toBe(200);
       const keyData = await extractData(keyResp);
-      expect(keyData.is_ghost).toBe(true);
+      expect(keyData).not.toHaveProperty('is_ghost');
       const token = keyData.recipient_token;
 
       // 2. Share with ghost token
@@ -432,7 +433,8 @@ describe('Sharing API (Redesigned)', () => {
       expect(share).toHaveProperty('recipient_id');
       expect(share).toHaveProperty('source_entry_id');
       expect(share).toHaveProperty('entry_type');
-      expect(share).toHaveProperty('is_ghost');
+      expect(share).toHaveProperty('status');
+      expect(['active', 'pending']).toContain(share.status);
       expect(share).toHaveProperty('created_at');
       expect(share).toHaveProperty('updated_at');
     });

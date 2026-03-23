@@ -88,7 +88,7 @@ export default function SharingPage() {
 
       await api.post('/sharing.php?action=share', {
         source_entry_id: parseInt(shareEntryId),
-        recipients: [{ recipient_token, encrypted_data: encryptedData }],
+        recipients: [{ recipient_token, encrypted_data: encryptedData, identifier: shareRecipient.trim() }],
       });
 
       setShowShareModal(false);
@@ -164,7 +164,7 @@ export default function SharingPage() {
               <tr key={item.id}>
                 <td>{item.recipient_identifier}</td>
                 <td><span className="badge">{item.entry_type}</span></td>
-                <td>{item.is_ghost ? <span className="badge badge-warning">Ghost</span> : <span className="badge badge-success">Active</span>}</td>
+                <td>{item.status === 'pending' ? <span className="badge badge-warning">Pending</span> : <span className="badge badge-success">Active</span>}</td>
                 <td style={{ fontSize: 13 }}>{new Date(item.created_at).toLocaleDateString()}</td>
                 <td><button className="btn btn-ghost btn-sm text-danger" onClick={() => handleRevoke(item)}><Trash2 size={14} /> Revoke</button></td>
               </tr>

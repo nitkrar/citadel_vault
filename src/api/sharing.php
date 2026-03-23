@@ -53,7 +53,6 @@ if ($method === 'GET' && $action === 'recipient-key') {
     if ($recipient && !empty($recipient['public_key'])) {
         Response::success([
             'public_key'      => $recipient['public_key'],
-            'is_ghost'        => false,
             'recipient_token' => SharingToken::generate((int)$recipient['id']),
         ]);
     }
@@ -64,7 +63,6 @@ if ($method === 'GET' && $action === 'recipient-key') {
     if ($ghostKeys && !empty($ghostKeys['public_key'])) {
         Response::success([
             'public_key'      => $ghostKeys['public_key'],
-            'is_ghost'        => true,
             'recipient_token' => SharingToken::generate(0),
         ]);
     }
@@ -92,7 +90,6 @@ if ($method === 'GET' && $action === 'recipient-key') {
 
     Response::success([
         'public_key'      => $derBase64,
-        'is_ghost'        => true,
         'recipient_token' => SharingToken::generate(0),
     ]);
 }
@@ -144,14 +141,16 @@ if ($method === 'POST' && $action === 'share') {
             continue;
         }
 
-        // Determine ghost status and get display identifier
-        $isGhost = ($recipientId === 0) ? 1 : 0;
-        $recipientIdentifier = 'unknown';
-        $stmt = $db->prepare("SELECT username FROM users WHERE id = ?");
-        $stmt->execute([$recipientId]);
-        $recipientUser = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($recipientUser) {
-            $recipientIdentifier = $recipientUser['username'];
+        // Determine display identifier
+        $recipientIdentifier = trim($r['identifier'] ?? '');
+        if ($recipientId !== 0) {
+            // For real users, always use their actual username (not sender-provided value)
+            $stmt = $db->prepare("SELECT username FROM users WHERE id = ?");
+            $stmt->execute([$recipientId]);
+            $recipientUser = $stmt->fetch(PDO::FETCH_ASSOC);
+            $recipientIdentifier = $recipientUser ? $recipientUser['username'] : ($recipientIdentifier ?: 'unknown');
+        } elseif (!$recipientIdentifier) {
+            $recipientIdentifier = 'unknown';
         }
 
         // Upsert: creates or updates share on same (sender, entry, recipient)
@@ -163,7 +162,6 @@ if ($method === 'POST' && $action === 'share') {
             'entry_type'           => $entry['entry_type'],
             'template_id'          => $entry['template_id'] ?? null,
             'encrypted_data'       => $encryptedData,
-            'is_ghost'             => $isGhost,
         ]);
         $created[] = $shareId;
     }
