@@ -4,6 +4,7 @@ import {
 } from 'lucide-react';
 import api from '../api/client';
 import Modal from '../components/Modal';
+import FieldDisplay from '../components/FieldDisplay';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { useVaultEntries } from '../contexts/VaultDataContext';
 import * as cryptoLib from '../lib/crypto';
@@ -15,6 +16,7 @@ export default function SharingPage() {
   const { entries: myEntries, decryptedCache: decryptedEntries } = useVaultEntries();
   const [tab, setTab] = useState('with-me');
   const [showShareModal, setShowShareModal] = useState(false);
+  const [viewItem, setViewItem] = useState(null);
 
   // Share form
   const [shareEntryId, setShareEntryId] = useState('');
@@ -142,7 +144,7 @@ export default function SharingPage() {
           <div className="card"><div className="table-wrapper"><table>
             <thead><tr><th>Title</th><th>From</th><th>Type</th><th>Shared</th></tr></thead>
             <tbody>{sharedWithMe.map(item => (
-              <tr key={item.id}>
+              <tr key={item.id} style={{ cursor: 'pointer' }} onClick={() => setViewItem(item)}>
                 <td className="font-medium">{item._decrypted?.title || '(encrypted)'}</td>
                 <td>{item.sender_username || 'Unknown'}</td>
                 <td><span className="badge">{item.entry_type}</span></td>
@@ -195,6 +197,45 @@ export default function SharingPage() {
             <button type="submit" className="btn btn-primary" disabled={sharing}>{sharing ? 'Sharing...' : 'Share'}</button>
           </div>
         </form>
+      </Modal>
+
+      <Modal isOpen={!!viewItem} onClose={() => setViewItem(null)} title={viewItem?._decrypted?.title || 'Shared Entry'}>
+        {viewItem && (() => {
+          const d = viewItem._decrypted;
+          if (!d) return <p className="text-muted">Unable to decrypt this entry.</p>;
+
+          const header = (
+            <div style={{ marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="badge">{viewItem.entry_type}</span>
+                <span className={`badge ${viewItem.status === 'pending' ? 'badge-warning' : 'badge-success'}`}>
+                  {viewItem.status === 'pending' ? 'Pending' : 'Active'}
+                </span>
+              </div>
+              <div className="text-muted" style={{ fontSize: 13 }}>
+                Shared by <strong>{viewItem.sender_username || 'Unknown'}</strong> on {new Date(viewItem.created_at).toLocaleDateString()}
+              </div>
+            </div>
+          );
+
+          const tplFields = viewItem.template?.fields;
+          const fields = !tplFields ? [] : (typeof tplFields === 'string' ? JSON.parse(tplFields) : tplFields);
+
+          if (fields.length === 0) {
+            return <>{header}{Object.entries(d).map(([k, v]) => (
+              <div key={k} className="form-group">
+                <label className="form-label" style={{ textTransform: 'capitalize' }}>{k.replace(/_/g, ' ')}</label>
+                <div className="form-control-static">{typeof v === 'string' ? v : JSON.stringify(v)}</div>
+              </div>
+            ))}</>;
+          }
+
+          return <>{header}{fields.map(field => {
+            const val = d[field.key];
+            if (val === undefined || val === null || val === '') return null;
+            return <FieldDisplay key={field.key} field={field} value={String(val)} />;
+          })}</>;
+        })()}
       </Modal>
     </div>
   );

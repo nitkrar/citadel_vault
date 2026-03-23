@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api from '../api/client';
 import Modal from '../components/Modal';
+import FieldDisplay from '../components/FieldDisplay';
 import SearchableSelect from '../components/SearchableSelect';
 import { useAuth } from '../contexts/AuthContext';
 import { useEncryption } from '../contexts/EncryptionContext';
@@ -13,16 +14,18 @@ import useCurrencies from '../hooks/useCurrencies';
 import useTemplates from '../hooks/useTemplates';
 import useAppConfig from '../hooks/useAppConfig';
 import useExchanges from '../hooks/useExchanges';
+import useShareData from '../hooks/useShareData';
 import ImportModal from '../components/ImportModal';
 import { useHideAmounts } from '../components/Layout';
 import { usePlaidLink } from '../integrations/providers/plaid/PlaidConnect';
 import { getIntegration, getIntegrationType, setIntegration, removeIntegration } from '../integrations/helpers';
 import { getProvider, getProviderDisplayInfo } from '../integrations/modules';
+import * as cryptoLib from '../lib/crypto';
 import { extractValue, buildRateMap, convertCurrency } from '../lib/portfolioAggregator';
 import {
   Plus, Edit2, Trash2, Search, Eye, EyeOff, Copy, Check, Lock,
   KeyRound, AlertTriangle, Undo2, X, ChevronDown, ChevronUp, Upload,
-  Landmark, Briefcase, FileText, Shield, Layers, RefreshCw, Link2,
+  Landmark, Briefcase, FileText, Shield, Layers, RefreshCw, Link2, Share2,
 } from 'lucide-react';
 
 const TYPE_META = {
@@ -124,6 +127,7 @@ export default function VaultPage() {
   const { templates } = useTemplates();
   const { config } = useAppConfig();
   const { exchanges } = useExchanges();
+  const { shareCounts, sharesByEntry, refetch: refetchShares } = useShareData();
 
   // Ticker verification state
   const [tickerVerified, setTickerVerified] = useState(false);
@@ -187,6 +191,10 @@ export default function VaultPage() {
   // Inline editing of linked asset values
   const [inlineEditAsset, setInlineEditAsset] = useState(null); // { id, field, value }
   const [inlineEditSaving, setInlineEditSaving] = useState(false);
+
+  // Re-encrypt prompt state
+  const [reEncryptEntry, setReEncryptEntry] = useState(null);
+  const [reEncrypting, setReEncrypting] = useState(false);
 
   // Plaid state
   const [integrationMsg, setPlaidMsg] = useState('');
@@ -585,10 +593,48 @@ export default function VaultPage() {
       if (savedType === 'account') {
         setPostSaveAccount(updated);
       }
+      // Prompt to re-encrypt shared copies
+      if (shareCounts[editEntry.id] > 0) {
+        setReEncryptEntry(updated);
+      }
     } catch (err) {
       setFormError(err.response?.data?.error || err.message || 'Failed to update.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleReEncrypt = async () => {
+    if (!reEncryptEntry) return;
+    setReEncrypting(true);
+    try {
+      const d = decryptedCache[reEncryptEntry.id];
+      const shares = sharesByEntry[reEncryptEntry.id] || [];
+      const updates = [];
+      for (const share of shares) {
+        if (share.status === 'pending') continue;
+        try {
+          const { data: keyResp } = await api.get(
+            `/sharing.php?action=recipient-key&identifier=${encodeURIComponent(share.recipient_identifier)}`
+          );
+          const { public_key } = apiData({ data: keyResp });
+          const recipientPubKey = await cryptoLib.importPublicKey(public_key);
+          const encryptedData = await cryptoLib.hybridEncrypt(JSON.stringify(d), recipientPubKey);
+          updates.push({ user_id: share.recipient_id, encrypted_data: encryptedData });
+        } catch { /* skip this recipient */ }
+      }
+      if (updates.length > 0) {
+        await api.post('/sharing.php?action=update', {
+          source_entry_id: reEncryptEntry.id,
+          recipients: updates,
+        });
+      }
+      setReEncryptEntry(null);
+      refetchShares();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to update shared copies.');
+    } finally {
+      setReEncrypting(false);
     }
   };
 
@@ -1225,6 +1271,22 @@ export default function VaultPage() {
       {integrationMsg && <div className="alert alert-success mb-3"><Check size={16} /><span>{integrationMsg}</span></div>}
       {(plaidConnectError || plaidLinkError) && <div className="alert alert-danger mb-3"><AlertTriangle size={16} /><span>{plaidConnectError || plaidLinkError}</span></div>}
 
+      {/* Re-encrypt shared copies prompt */}
+      {reEncryptEntry && (
+        <div className="alert alert-info mb-3" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+          <div className="flex items-center gap-2" style={{ flex: '1 1 auto' }}>
+            <Share2 size={16} style={{ flexShrink: 0 }} />
+            <span>This entry is shared with {shareCounts[reEncryptEntry.id]} {shareCounts[reEncryptEntry.id] === 1 ? 'person' : 'people'}. Update their copies?</span>
+          </div>
+          <div className="flex gap-2" style={{ flexShrink: 0 }}>
+            <button className="btn btn-sm btn-primary" onClick={handleReEncrypt} disabled={reEncrypting}>
+              {reEncrypting ? 'Updating...' : 'Update'}
+            </button>
+            <button className="btn btn-sm btn-ghost" onClick={() => setReEncryptEntry(null)}>Dismiss</button>
+          </div>
+        </div>
+      )}
+
       {/* Content */}
       {error ? (
         <div className="alert alert-danger mb-3"><AlertTriangle size={16} /><span>{error}</span></div>
@@ -1281,7 +1343,13 @@ export default function VaultPage() {
                     return (
                       <tr key={entry.id} style={{ cursor: 'pointer' }} onClick={() => { setViewEntry(entry); }}>
                         <td><Icon size={16} style={{ color: meta.color }} /></td>
-                        <td><span className="font-medium">{title}</span></td>
+                        <td>
+                          <span className="font-medium">{title}</span>
+                          {shareCounts[entry.id] > 0 && (
+                            <Share2 size={12} style={{ marginLeft: 4, color: 'var(--color-primary)', verticalAlign: -1 }}
+                              title={`Shared with ${shareCounts[entry.id]} ${shareCounts[entry.id] === 1 ? 'person' : 'people'}`} />
+                          )}
+                        </td>
                         <td>
                           <span className="text-muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
                             {tpl?.name && <span className="badge badge-muted" style={{ fontSize: 11 }}>{tpl.name}</span>}
@@ -1730,6 +1798,41 @@ export default function VaultPage() {
           }
           return null;
         })()}
+        {viewEntry && sharesByEntry[viewEntry.id]?.length > 0 && (
+          <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+            <label className="form-label" style={{ margin: 0, marginBottom: 8 }}>
+              <Share2 size={14} style={{ marginRight: 4, verticalAlign: -2 }} />
+              Shared with {sharesByEntry[viewEntry.id].length} {sharesByEntry[viewEntry.id].length === 1 ? 'person' : 'people'}
+            </label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {sharesByEntry[viewEntry.id].map(share => (
+                <div key={share.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 10px', borderRadius: 6, background: 'var(--hover-bg, #f5f5f5)' }}>
+                  <div>
+                    <span className="font-medium" style={{ fontSize: 13 }}>{share.recipient_identifier}</span>
+                    <span style={{ marginLeft: 8 }}>
+                      {share.status === 'pending'
+                        ? <span className="badge badge-warning" style={{ fontSize: 10 }}>Pending</span>
+                        : <span className="badge badge-success" style={{ fontSize: 10 }}>Active</span>}
+                    </span>
+                  </div>
+                  <button className="btn btn-ghost btn-sm text-danger" onClick={async (e) => {
+                    e.stopPropagation();
+                    if (!window.confirm(`Revoke share with ${share.recipient_identifier}?`)) return;
+                    try {
+                      await api.post('/sharing.php?action=revoke', {
+                        source_entry_id: viewEntry.id,
+                        user_ids: [share.recipient_id],
+                      });
+                      refetchShares();
+                    } catch (err) {
+                      alert(err.response?.data?.error || 'Revoke failed.');
+                    }
+                  }}><Trash2 size={13} /></button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {viewEntry && (
           <div className="flex gap-2 mt-4">
             <button className="btn btn-secondary" onClick={() => { openEdit(viewEntry); setViewEntry(null); }}><Edit2 size={14} /> Edit</button>
@@ -1880,41 +1983,3 @@ export default function VaultPage() {
   );
 }
 
-/** Display a single field value with copy support for secrets */
-function FieldDisplay({ field, value, masked }) {
-  const [visible, setVisible] = useState(false);
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = async () => {
-    try { await navigator.clipboard.writeText(value); } catch {
-      const t = document.createElement('textarea'); t.value = value; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t);
-    }
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
-
-  const isSecret = field.type === 'secret';
-
-  return (
-    <div className="form-group">
-      <label className="form-label">{field.label}</label>
-      <div className="flex items-center gap-2">
-        {field.type === 'url' ? (
-          <a href={value} target="_blank" rel="noopener noreferrer" className="form-control-static" style={{ wordBreak: 'break-all' }}>{value}</a>
-        ) : (
-          <span className="form-control-static" style={{ flex: 1, fontFamily: isSecret ? 'monospace' : 'inherit' }}>
-            {masked ? MASKED : (isSecret && !visible ? '••••••••' : value)}
-          </span>
-        )}
-        {isSecret && (
-          <button type="button" className="btn btn-ghost btn-icon" onClick={() => setVisible(!visible)} title={visible ? 'Hide' : 'Show'}>
-            {visible ? <EyeOff size={14} /> : <Eye size={14} />}
-          </button>
-        )}
-        <button type="button" className="btn btn-ghost btn-icon" onClick={handleCopy} title="Copy">
-          {copied ? <Check size={14} style={{ color: '#10b981' }} /> : <Copy size={14} />}
-        </button>
-      </div>
-    </div>
-  );
-}
