@@ -111,7 +111,14 @@ function buildNetWorthTiles(assets, rateMap, baseCurrency) {
 // Fields to skip in full detail field grids
 const SKIP_KEYS = new Set(['row_id', 'linked_account_id', 'title', 'name', 'currency', 'value', 'current_value', 'face_value', 'integrations', 'subtype']);
 
-function getExtraFields(clean, templateFields) {
+// Additional keys to skip in overview mode (monetary, quantity, secret-like)
+const OVERVIEW_SKIP_KEYS = new Set([
+  'balance', 'value', 'current_value', 'face_value', 'purchase_price', 'price_per_share',
+  'price_per_unit', 'premium_amount', 'coverage_amount', 'cash_value', 'credit_limit',
+  'cost_price', 'shares', 'quantity', 'interest_rate', 'employer_match', 'coupon_rate',
+]);
+
+function getExtraFields(clean, templateFields, { overview = false } = {}) {
   const meta = {};
   for (const f of templateFields) { const k = f.key ?? f.name; if (k) meta[k] = f; }
 
@@ -119,9 +126,11 @@ function getExtraFields(clean, templateFields) {
   for (const [k, v] of Object.entries(clean)) {
     if (SKIP_KEYS.has(k) || k.startsWith('_') || v === undefined || v === null || v === '') continue;
     const m = meta[k];
-    const label = m?.label ?? k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     const isSecret = m?.type === 'secret';
     const isCurrency = m?.type === 'number' && (m?.portfolio_role === 'value' || m?.portfolio_role === 'price');
+    // In overview mode, skip monetary fields, secrets, and password-like fields
+    if (overview && (isSecret || isCurrency || OVERVIEW_SKIP_KEYS.has(k) || m?.type === 'number')) continue;
+    const label = m?.label ?? k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     fields.push({ label, value: String(v), isSecret, isCurrency, currency: clean.currency });
   }
   return fields;
@@ -348,7 +357,7 @@ function buildFieldGrid(fields) {
   }).join('');
 }
 
-function buildFullAccountsAssets(accounts, assets, templates) {
+function buildFullAccountsAssets(accounts, assets, templates, { overview = false } = {}) {
   if (accounts.length === 0 && assets.length === 0) return '';
 
   const acctFields = parseFields(findTemplate(templates, 'account')?.fields);
@@ -360,7 +369,7 @@ function buildFullAccountsAssets(accounts, assets, templates) {
     const c = cleanEntry(acct);
     const title = esc(c.title ?? c.name ?? '(untitled)');
     const tags = [c.subtype, c.currency].filter(Boolean).map(t => `<span class="tag">${esc(t)}</span>`).join('');
-    const fields = getExtraFields(c, acctFields);
+    const fields = getExtraFields(c, acctFields, { overview });
     const fieldGridHtml = fields.length > 0 ? `<div class="field-grid">${buildFieldGrid(fields)}</div>` : '';
 
     const linked = assets.filter(a => String(a.linked_account_id) === String(acct.row_id));
@@ -369,8 +378,8 @@ function buildFullAccountsAssets(accounts, assets, templates) {
       const assetRows = linked.map(a => {
         linkedIds.add(a.row_id);
         const ac = cleanEntry(a);
-        const val = primaryValue(ac);
-        const aFields = getExtraFields(ac, assetFieldsDef);
+        const val = overview ? null : primaryValue(ac);
+        const aFields = getExtraFields(ac, assetFieldsDef, { overview });
         const chips = aFields.map(f => {
           const cls = f.isSecret ? 'chip__value--mono' : (f.isCurrency ? 'chip__value--currency' : 'chip__value');
           return `<span class="chip"><span class="chip__label">${esc(f.label)}:</span><span class="${cls}">${esc(f.value)}</span></span>`;
@@ -401,9 +410,8 @@ function buildFullAccountsAssets(accounts, assets, templates) {
   if (unlinked.length > 0) {
     const cards = unlinked.map((a, i) => {
       const ac = cleanEntry(a);
-      const val = primaryValue(ac);
       const tags = [ac.subtype, ac.currency].filter(Boolean).map(t => `<span class="tag">${esc(t)}</span>`).join('');
-      const fields = getExtraFields(ac, assetFieldsDef);
+      const fields = getExtraFields(ac, assetFieldsDef, { overview });
       const fieldGridHtml = fields.length > 0 ? `<div class="field-grid">${buildFieldGrid(fields)}</div>` : '';
       return `<div class="acct-card" style="border-left-color:var(--text-faint)">
         <div class="acct-card__head">
@@ -416,18 +424,21 @@ function buildFullAccountsAssets(accounts, assets, templates) {
     unlinkedHtml = `<div class="unlinked-panel"><div class="unlinked-label">Unlinked Assets</div>${cards}</div>`;
   }
 
-  const { subtotalStr } = computeSubtotals(assets);
+  const subtotalHtml = overview ? '' : (() => {
+    const { subtotalStr } = computeSubtotals(assets);
+    return subtotalStr ? `<span class="section__subtotal">${esc(subtotalStr)}</span>` : '';
+  })();
   return `<div class="section">
     <div class="section__header">
       <span class="section__title">Accounts &amp; Assets</span>
       <span class="count-badge">${accounts.length} account${accounts.length !== 1 ? 's' : ''} · ${assets.length} asset${assets.length !== 1 ? 's' : ''}</span>
-      ${subtotalStr ? `<span class="section__subtotal">${esc(subtotalStr)}</span>` : ''}
+      ${subtotalHtml}
     </div>
     ${cardsHtml}${unlinkedHtml}
   </div>`;
 }
 
-function buildFullEntryCards(type, entries, templates) {
+function buildFullEntryCards(type, entries, templates, { overview = false } = {}) {
   if (entries.length === 0) return '';
   const label = TYPE_LABELS[type] ?? type;
   const fieldsDef = parseFields(findTemplate(templates, type)?.fields);
@@ -436,7 +447,7 @@ function buildFullEntryCards(type, entries, templates) {
     const c = cleanEntry(e);
     const title = esc(c.title ?? c.name ?? '(untitled)');
     const tag = c.vendor || c.provider || c.institution || '';
-    const fields = getExtraFields(c, fieldsDef);
+    const fields = getExtraFields(c, fieldsDef, { overview });
     const fieldsHtml = fields.map(f => {
       const cls = f.isSecret ? 'mono' : '';
       return `<span class="entry-card__label">${esc(f.label)}</span><span class="entry-card__value ${cls}">${esc(f.value)}</span>`;
@@ -485,9 +496,10 @@ export async function exportPdf(grouped, templates, mode, dateSuffix, rateMap, b
   }
 
   if (mode === 'overview') {
-    body += buildOverviewAccountsAssets(accounts, assets);
+    // Overview uses the same card styling as full, but strips monetary/secret fields
+    body += buildFullAccountsAssets(accounts, assets, templates, { overview: true });
     for (const type of standardTypes) {
-      body += buildOverviewSimpleSection(type, grouped[type] ?? []);
+      body += buildFullEntryCards(type, grouped[type] ?? [], templates, { overview: true });
     }
   } else {
     body += buildFullAccountsAssets(accounts, assets, templates);
