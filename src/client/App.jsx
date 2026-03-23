@@ -57,7 +57,7 @@ function ProtectedRoute({ children, adminOnly = false }) {
 
 // --- ForceChangePasswordModal ---
 function ForceChangePasswordModal() {
-  const { user, mustChangePassword, clearMustChangePassword, adminActionMessage, logout } = useAuth();
+  const { user, mustChangePassword, clearMustChangePassword, refreshUser, adminActionMessage, logout } = useAuth();
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
@@ -84,6 +84,7 @@ function ForceChangePasswordModal() {
         new_password: newPassword,
       });
       clearMustChangePassword();
+      await refreshUser();
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to change password.');
     } finally {
