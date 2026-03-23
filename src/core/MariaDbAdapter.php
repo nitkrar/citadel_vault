@@ -251,7 +251,7 @@ class MariaDbAdapter implements StorageAdapter {
     public function getSharedByMe(int $userId): array {
         $stmt = $this->db->prepare(
             'SELECT si.id, si.recipient_identifier, si.recipient_id, si.source_entry_id,
-                    si.entry_type, si.template_id, si.is_ghost, si.created_at, si.updated_at,
+                    si.entry_type, si.template_id, si.recipient_id, si.created_at, si.updated_at,
                     u.username AS recipient_username,
                     et.template_key, et.name AS template_name, et.icon AS template_icon,
                     et.fields AS template_fields
@@ -272,7 +272,7 @@ class MariaDbAdapter implements StorageAdapter {
                 'source_entry_id'      => (int)$row['source_entry_id'],
                 'entry_type'           => $row['entry_type'],
                 'recipient_id'         => $row['recipient_id'] !== null ? (int)$row['recipient_id'] : null,
-                'is_ghost'             => (bool)$row['is_ghost'],
+                'status'               => ((int)$row['recipient_id'] === 0 || $row['recipient_id'] === null) ? 'pending' : 'active',
                 'template'             => $this->buildTemplateObject($row),
                 'created_at'           => $row['created_at'],
                 'updated_at'           => $row['updated_at'],
@@ -283,7 +283,7 @@ class MariaDbAdapter implements StorageAdapter {
     public function getSharedWithMe(int $userId): array {
         $stmt = $this->db->prepare(
             'SELECT si.id, si.sender_id, si.source_entry_id, si.entry_type, si.template_id,
-                    si.encrypted_data, si.is_ghost, si.created_at, si.updated_at,
+                    si.encrypted_data, si.recipient_id, si.created_at, si.updated_at,
                     u.username AS sender_username,
                     et.template_key, et.name AS template_name, et.icon AS template_icon,
                     et.fields AS template_fields
@@ -303,7 +303,7 @@ class MariaDbAdapter implements StorageAdapter {
                 'sender_username'  => $row['sender_username'],
                 'entry_type'       => $row['entry_type'],
                 'encrypted_data'   => $row['encrypted_data'],
-                'is_ghost'         => (bool)$row['is_ghost'],
+                'status'           => ((int)$row['recipient_id'] === 0 || $row['recipient_id'] === null) ? 'pending' : 'active',
                 'template'         => $this->buildTemplateObject($row),
                 'created_at'       => $row['created_at'],
                 'updated_at'       => $row['updated_at'],
@@ -314,8 +314,8 @@ class MariaDbAdapter implements StorageAdapter {
     public function createShare(array $shareData): int {
         $stmt = $this->db->prepare(
             'INSERT INTO shared_items (sender_id, recipient_identifier, recipient_id, source_entry_id,
-                                       entry_type, template_id, encrypted_data, is_ghost)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+                                       entry_type, template_id, encrypted_data)
+             VALUES (?, ?, ?, ?, ?, ?, ?)'
         );
         $stmt->execute([
             $shareData['sender_id'],
@@ -325,7 +325,6 @@ class MariaDbAdapter implements StorageAdapter {
             $shareData['entry_type'],
             $shareData['template_id'] ?? null,
             $shareData['encrypted_data'],
-            $shareData['is_ghost'] ?? 0,
         ]);
         return (int)$this->db->lastInsertId();
     }
@@ -333,8 +332,8 @@ class MariaDbAdapter implements StorageAdapter {
     public function upsertShare(array $shareData): int {
         $stmt = $this->db->prepare(
             'INSERT INTO shared_items (sender_id, recipient_identifier, recipient_id, source_entry_id,
-                                       entry_type, template_id, encrypted_data, is_ghost)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                       entry_type, template_id, encrypted_data)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE encrypted_data = VALUES(encrypted_data),
                                       updated_at = CURRENT_TIMESTAMP'
         );
@@ -346,7 +345,6 @@ class MariaDbAdapter implements StorageAdapter {
             $shareData['entry_type'],
             $shareData['template_id'] ?? null,
             $shareData['encrypted_data'],
-            $shareData['is_ghost'] ?? 0,
         ]);
         // lastInsertId returns 0 on UPDATE — query for the existing ID
         $id = (int)$this->db->lastInsertId();

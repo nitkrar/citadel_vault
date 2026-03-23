@@ -165,7 +165,6 @@ CREATE TABLE `shared_items` (
     `entry_type`                VARCHAR(50) NOT NULL,
     `template_id`               INT UNSIGNED NULL,
     `encrypted_data`            TEXT NOT NULL,
-    `is_ghost`                  TINYINT(1) NOT NULL DEFAULT 0,
     `created_at`                TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updated_at`                TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
