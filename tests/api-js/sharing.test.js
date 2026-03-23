@@ -233,14 +233,19 @@ describe('Sharing API (Redesigned)', () => {
       const token = keyData.recipient_token;
       expect(token).toBeTruthy();
 
-      // 2. Share the entry using the token
+      // 2. Share the entry using the token (includes new sharing fields)
       const shareResp = await api.post('/sharing.php?action=share', {
         json: {
           source_entry_id: testEntryId,
           recipients: [{
             recipient_token: token,
             encrypted_data: 'c2hhcmVkLWJsb2ItZm9yLXJlZ3VsYXI=',
+            identifier: 'test_regular_user',
           }],
+          sync_mode: 'snapshot',
+          source_type: 'account',
+          label: 'Test share',
+          expires_at: null,
         },
       });
       expect(shareResp.status).toBe(200);
@@ -437,6 +442,195 @@ describe('Sharing API (Redesigned)', () => {
       expect(['active', 'pending']).toContain(share.status);
       expect(share).toHaveProperty('created_at');
       expect(share).toHaveProperty('updated_at');
+      // New sharing fields
+      expect(share).toHaveProperty('sync_mode');
+      expect(share).toHaveProperty('source_type');
+      expect(share).toHaveProperty('label');
+      expect(share).toHaveProperty('expires_at');
+    });
+  });
+
+  // ── new sharing fields (sync_mode, source_type, label, expires_at) ─────
+  describe('new sharing fields', () => {
+    let fieldTestEntryId = null;
+
+    beforeAll(async () => {
+      const resp = await api.post('/vault.php', {
+        json: {
+          entry_type: 'password',
+          template_id: 1,
+          encrypted_data: 'bmV3LWZpZWxkcy10ZXN0',
+        },
+      });
+      if (resp.status === 201) {
+        const data = await extractData(resp);
+        fieldTestEntryId = data.id;
+      }
+    });
+
+    afterAll(async () => {
+      if (fieldTestEntryId) {
+        await api.post('/sharing.php?action=revoke', {
+          json: { source_entry_id: fieldTestEntryId },
+        });
+        await api.delete(`/vault.php?id=${fieldTestEntryId}`);
+      }
+    });
+
+    it('accepts sync_mode and source_type in share request', async () => {
+      expect(fieldTestEntryId).toBeTruthy();
+
+      const keyResp = await api.get('/sharing.php?action=recipient-key&identifier=test_regular_user');
+      expect(keyResp.status).toBe(200);
+      const keyData = await extractData(keyResp);
+
+      const resp = await api.post('/sharing.php?action=share', {
+        json: {
+          source_entry_id: fieldTestEntryId,
+          sync_mode: 'continuous',
+          source_type: 'asset',
+          label: 'For review',
+          recipients: [{
+            recipient_token: keyData.recipient_token,
+            encrypted_data: 'c3luYy1tb2RlLXRlc3Q=',
+            identifier: 'test_regular_user',
+          }],
+        },
+      });
+      expect(resp.status).toBe(200);
+      const data = await extractData(resp);
+      expect(data.count).toBe(1);
+    });
+
+    it('stores and returns label in shared-by-me', async () => {
+      const resp = await api.get('/sharing.php?action=shared-by-me');
+      expect(resp.status).toBe(200);
+      const data = await extractData(resp);
+
+      const labeled = data.find(s => s.label === 'For review');
+      expect(labeled).toBeTruthy();
+      expect(labeled.sync_mode).toBe('continuous');
+      expect(labeled.source_type).toBe('asset');
+    });
+
+    it('defaults sync_mode to snapshot when not provided', async () => {
+      const resp = await api.get('/sharing.php?action=shared-by-me');
+      expect(resp.status).toBe(200);
+      const data = await extractData(resp);
+
+      // The first share test created a share with explicit sync_mode='snapshot'
+      const share = data.find(s => s.label === 'Test share');
+      if (share) {
+        expect(share.sync_mode).toBe('snapshot');
+      }
+    });
+
+    it('accepts expires_at in share request', async () => {
+      // Create a separate entry to avoid upsert conflicts
+      const entryResp = await api.post('/vault.php', {
+        json: {
+          entry_type: 'password',
+          template_id: 1,
+          encrypted_data: 'ZXhwaXJ5LXRlc3QtZW50cnk=',
+        },
+      });
+      expect(entryResp.status).toBe(201);
+      const entryData = await extractData(entryResp);
+      const expiryEntryId = entryData.id;
+
+      const keyResp = await api.get('/sharing.php?action=recipient-key&identifier=test_regular_user');
+      expect(keyResp.status).toBe(200);
+      const keyData = await extractData(keyResp);
+
+      const futureDate = new Date(Date.now() + 86400000).toISOString();
+      const resp = await api.post('/sharing.php?action=share', {
+        json: {
+          source_entry_id: expiryEntryId,
+          expires_at: futureDate,
+          recipients: [{
+            recipient_token: keyData.recipient_token,
+            encrypted_data: 'ZXhwaXJ5LXRlc3Q=',
+            identifier: 'test_regular_user',
+          }],
+        },
+      });
+      expect(resp.status).toBe(200);
+      const data = await extractData(resp);
+      expect(data.count).toBe(1);
+
+      // Verify expires_at is returned in shared-by-me
+      const byMeResp = await api.get('/sharing.php?action=shared-by-me');
+      const byMeData = await extractData(byMeResp);
+      const expiringShare = byMeData.find(s => Number(s.source_entry_id) === Number(expiryEntryId));
+      expect(expiringShare).toBeDefined();
+      expect(expiringShare.expires_at).toBeTruthy();
+
+      // Cleanup
+      await api.post('/sharing.php?action=revoke', {
+        json: { source_entry_id: expiryEntryId },
+      });
+      await api.delete(`/vault.php?id=${expiryEntryId}`);
+    });
+
+    it('returns new fields in shared-with-me', async () => {
+      // Regular user should see the share we created with sync_mode=continuous
+      const resp = await apiRequest('GET', '/sharing.php?action=shared-with-me', { role: 'regular' });
+      expect(resp.status).toBe(200);
+      const data = await extractData(resp);
+      expect(Array.isArray(data)).toBe(true);
+
+      const ourShare = data.find(s => Number(s.source_entry_id) === Number(fieldTestEntryId));
+      if (ourShare) {
+        expect(ourShare).toHaveProperty('sync_mode');
+        expect(ourShare).toHaveProperty('source_type');
+        expect(ourShare).toHaveProperty('label');
+        expect(ourShare).toHaveProperty('expires_at');
+        expect(ourShare.sync_mode).toBe('continuous');
+        expect(ourShare.source_type).toBe('asset');
+        expect(ourShare.label).toBe('For review');
+      }
+    });
+
+    it('invalid sync_mode defaults to snapshot', async () => {
+      const entryResp = await api.post('/vault.php', {
+        json: {
+          entry_type: 'password',
+          template_id: 1,
+          encrypted_data: 'aW52YWxpZC1zeW5jLW1vZGU=',
+        },
+      });
+      expect(entryResp.status).toBe(201);
+      const entryData = await extractData(entryResp);
+      const invalidSyncEntryId = entryData.id;
+
+      const keyResp = await api.get('/sharing.php?action=recipient-key&identifier=test_regular_user');
+      const keyData = await extractData(keyResp);
+
+      const resp = await api.post('/sharing.php?action=share', {
+        json: {
+          source_entry_id: invalidSyncEntryId,
+          sync_mode: 'bogus_mode',
+          recipients: [{
+            recipient_token: keyData.recipient_token,
+            encrypted_data: 'aW52YWxpZC1zeW5j',
+            identifier: 'test_regular_user',
+          }],
+        },
+      });
+      expect(resp.status).toBe(200);
+
+      // Verify it defaulted to snapshot
+      const byMeResp = await api.get('/sharing.php?action=shared-by-me');
+      const byMeData = await extractData(byMeResp);
+      const share = byMeData.find(s => Number(s.source_entry_id) === Number(invalidSyncEntryId));
+      expect(share).toBeDefined();
+      expect(share.sync_mode).toBe('snapshot');
+
+      // Cleanup
+      await api.post('/sharing.php?action=revoke', {
+        json: { source_entry_id: invalidSyncEntryId },
+      });
+      await api.delete(`/vault.php?id=${invalidSyncEntryId}`);
     });
   });
 
@@ -487,6 +681,42 @@ describe('Sharing API (Redesigned)', () => {
       expect(ourShare).toHaveProperty('encrypted_data');
       expect(ourShare).toHaveProperty('entry_type');
     });
+
+    it('excludes expired shares from shared-with-me', async () => {
+      // Create a dedicated entry for this test
+      const entryResp = await api.post('/vault.php', {
+        json: { entry_type: 'password', template_id: 1, encrypted_data: 'ZXhwaXJ5LWV4Y2x1c2lvbg==' },
+      });
+      expect(entryResp.status).toBe(201);
+      const entryId = (await extractData(entryResp)).id;
+
+      // Get recipient token for regular user
+      const keyResp = await api.get('/sharing.php?action=recipient-key&identifier=test_regular_user');
+      const keyData = await extractData(keyResp);
+
+      // Share with expires_at 2 seconds from now
+      const expiresAt = new Date(Date.now() + 2000).toISOString();
+      await api.post('/sharing.php?action=share', {
+        json: {
+          source_entry_id: entryId,
+          expires_at: expiresAt,
+          recipients: [{ recipient_token: keyData.recipient_token, encrypted_data: 'ZXhwaXJ5LXRlc3Q=', identifier: 'test_regular_user' }],
+        },
+      });
+
+      // Wait for expiry
+      await new Promise(r => setTimeout(r, 3000));
+
+      // Check shared-with-me — should NOT contain the expired share
+      const resp = await apiRequest('GET', '/sharing.php?action=shared-with-me', { role: 'regular' });
+      const data = await extractData(resp);
+      const expiredShare = data.find(s => Number(s.source_entry_id) === Number(entryId));
+      expect(expiredShare).toBeUndefined();
+
+      // Cleanup
+      await api.post('/sharing.php?action=revoke', { json: { source_entry_id: entryId } });
+      await api.delete(`/vault.php?id=${entryId}`);
+    }, 10000);
   });
 
   // ── update (re-encrypt) ─────────────────────────────────────────────────

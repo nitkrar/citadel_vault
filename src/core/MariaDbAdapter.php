@@ -251,7 +251,9 @@ class MariaDbAdapter implements StorageAdapter {
     public function getSharedByMe(int $userId): array {
         $stmt = $this->db->prepare(
             'SELECT si.id, si.recipient_identifier, si.recipient_id, si.source_entry_id,
-                    si.entry_type, si.template_id, si.recipient_id, si.created_at, si.updated_at,
+                    si.entry_type, si.source_type, si.template_id, si.recipient_id,
+                    si.sync_mode, si.label, si.expires_at,
+                    si.created_at, si.updated_at,
                     u.username AS recipient_username,
                     et.template_key, et.name AS template_name, et.icon AS template_icon,
                     et.fields AS template_fields
@@ -271,8 +273,12 @@ class MariaDbAdapter implements StorageAdapter {
                 'recipient_username'   => $row['recipient_username'],
                 'source_entry_id'      => (int)$row['source_entry_id'],
                 'entry_type'           => $row['entry_type'],
+                'source_type'          => $row['source_type'] ?? 'entry',
                 'recipient_id'         => $row['recipient_id'] !== null ? (int)$row['recipient_id'] : null,
                 'status'               => ((int)$row['recipient_id'] === 0 || $row['recipient_id'] === null) ? 'pending' : 'active',
+                'sync_mode'            => $row['sync_mode'] ?? 'snapshot',
+                'label'                => $row['label'] ?? null,
+                'expires_at'           => $row['expires_at'] ?? null,
                 'template'             => $this->buildTemplateObject($row),
                 'created_at'           => $row['created_at'],
                 'updated_at'           => $row['updated_at'],
@@ -282,8 +288,10 @@ class MariaDbAdapter implements StorageAdapter {
 
     public function getSharedWithMe(int $userId): array {
         $stmt = $this->db->prepare(
-            'SELECT si.id, si.sender_id, si.source_entry_id, si.entry_type, si.template_id,
-                    si.encrypted_data, si.recipient_id, si.created_at, si.updated_at,
+            'SELECT si.id, si.sender_id, si.source_entry_id, si.entry_type, si.source_type,
+                    si.template_id, si.encrypted_data, si.recipient_id,
+                    si.sync_mode, si.label, si.expires_at,
+                    si.created_at, si.updated_at,
                     u.username AS sender_username,
                     et.template_key, et.name AS template_name, et.icon AS template_icon,
                     et.fields AS template_fields
@@ -291,6 +299,7 @@ class MariaDbAdapter implements StorageAdapter {
              LEFT JOIN users u ON si.sender_id = u.id
              LEFT JOIN entry_templates et ON si.template_id = et.id
              WHERE si.recipient_id = ?
+               AND (si.expires_at IS NULL OR si.expires_at > NOW())
              ORDER BY si.created_at DESC'
         );
         $stmt->execute([$userId]);
@@ -302,8 +311,12 @@ class MariaDbAdapter implements StorageAdapter {
                 'source_entry_id'  => (int)$row['source_entry_id'],
                 'sender_username'  => $row['sender_username'],
                 'entry_type'       => $row['entry_type'],
+                'source_type'      => $row['source_type'] ?? 'entry',
                 'encrypted_data'   => $row['encrypted_data'],
                 'status'           => ((int)$row['recipient_id'] === 0 || $row['recipient_id'] === null) ? 'pending' : 'active',
+                'sync_mode'        => $row['sync_mode'] ?? 'snapshot',
+                'label'            => $row['label'] ?? null,
+                'expires_at'       => $row['expires_at'] ?? null,
                 'template'         => $this->buildTemplateObject($row),
                 'created_at'       => $row['created_at'],
                 'updated_at'       => $row['updated_at'],
@@ -314,8 +327,9 @@ class MariaDbAdapter implements StorageAdapter {
     public function createShare(array $shareData): int {
         $stmt = $this->db->prepare(
             'INSERT INTO shared_items (sender_id, recipient_identifier, recipient_id, source_entry_id,
-                                       entry_type, template_id, encrypted_data)
-             VALUES (?, ?, ?, ?, ?, ?, ?)'
+                                       entry_type, source_type, template_id, encrypted_data,
+                                       sync_mode, label, expires_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $stmt->execute([
             $shareData['sender_id'],
@@ -323,8 +337,12 @@ class MariaDbAdapter implements StorageAdapter {
             $shareData['recipient_id'] ?? null,
             $shareData['source_entry_id'],
             $shareData['entry_type'],
+            $shareData['source_type'] ?? 'entry',
             $shareData['template_id'] ?? null,
             $shareData['encrypted_data'],
+            $shareData['sync_mode'] ?? 'snapshot',
+            $shareData['label'] ?? null,
+            $shareData['expires_at'] ?? null,
         ]);
         return (int)$this->db->lastInsertId();
     }
@@ -332,9 +350,14 @@ class MariaDbAdapter implements StorageAdapter {
     public function upsertShare(array $shareData): int {
         $stmt = $this->db->prepare(
             'INSERT INTO shared_items (sender_id, recipient_identifier, recipient_id, source_entry_id,
-                                       entry_type, template_id, encrypted_data)
-             VALUES (?, ?, ?, ?, ?, ?, ?)
+                                       entry_type, source_type, template_id, encrypted_data,
+                                       sync_mode, label, expires_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE encrypted_data = VALUES(encrypted_data),
+                                      sync_mode = VALUES(sync_mode),
+                                      source_type = VALUES(source_type),
+                                      label = VALUES(label),
+                                      expires_at = VALUES(expires_at),
                                       updated_at = CURRENT_TIMESTAMP'
         );
         $stmt->execute([
@@ -343,8 +366,12 @@ class MariaDbAdapter implements StorageAdapter {
             $shareData['recipient_id'] ?? null,
             $shareData['source_entry_id'],
             $shareData['entry_type'],
+            $shareData['source_type'] ?? 'entry',
             $shareData['template_id'] ?? null,
             $shareData['encrypted_data'],
+            $shareData['sync_mode'] ?? 'snapshot',
+            $shareData['label'] ?? null,
+            $shareData['expires_at'] ?? null,
         ]);
         // lastInsertId returns 0 on UPDATE — query for the existing ID
         $id = (int)$this->db->lastInsertId();
