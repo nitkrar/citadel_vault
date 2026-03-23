@@ -104,6 +104,17 @@ if ($method === 'POST' && $action === 'share') {
     $sourceEntryId = (int)($body['source_entry_id'] ?? 0);
     $recipients = $body['recipients'] ?? [];
 
+    // New share fields (top-level, apply to all recipients in this batch)
+    $syncMode   = $body['sync_mode'] ?? 'snapshot';
+    $sourceType = $body['source_type'] ?? 'entry';
+    $label      = isset($body['label']) && $body['label'] !== '' ? $body['label'] : null;
+    $expiresAt  = isset($body['expires_at']) && $body['expires_at'] !== '' ? $body['expires_at'] : null;
+
+    // Validate sync_mode
+    if (!in_array($syncMode, ['snapshot', 'continuous'], true)) {
+        $syncMode = 'snapshot';
+    }
+
     if (!$sourceEntryId) {
         Response::error('source_entry_id is required.', 400);
     }
@@ -160,8 +171,12 @@ if ($method === 'POST' && $action === 'share') {
             'recipient_id'         => $recipientId,
             'source_entry_id'      => $sourceEntryId,
             'entry_type'           => $entry['entry_type'],
+            'source_type'          => $sourceType,
             'template_id'          => $entry['template_id'] ?? null,
             'encrypted_data'       => $encryptedData,
+            'sync_mode'            => $syncMode,
+            'label'                => $label,
+            'expires_at'           => $expiresAt,
         ]);
         $created[] = $shareId;
     }

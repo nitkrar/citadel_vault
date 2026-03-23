@@ -206,7 +206,11 @@ class InMemoryAdapter implements StorageAdapter {
                 'recipient_username'   => null,
                 'source_entry_id'      => $s['source_entry_id'],
                 'entry_type'           => $s['entry_type'],
+                'source_type'          => $s['source_type'] ?? 'entry',
                 'status'               => ((int)($s['recipient_id'] ?? 0) === 0 || $s['recipient_id'] === null) ? 'pending' : 'active',
+                'sync_mode'            => $s['sync_mode'] ?? 'snapshot',
+                'label'                => $s['label'] ?? null,
+                'expires_at'           => $s['expires_at'] ?? null,
                 'template'             => $this->findTemplate($s['template_id'] ?? null),
                 'created_at'           => $s['created_at'],
                 'updated_at'           => $s['updated_at'],
@@ -215,8 +219,12 @@ class InMemoryAdapter implements StorageAdapter {
     }
 
     public function getSharedWithMe(int $userId): array {
-        $results = array_filter($this->sharedItems, function ($s) use ($userId) {
-            return $s['recipient_id'] === $userId;
+        $now = date('Y-m-d H:i:s');
+        $results = array_filter($this->sharedItems, function ($s) use ($userId, $now) {
+            if ($s['recipient_id'] !== $userId) return false;
+            // Filter expired shares
+            if (!empty($s['expires_at']) && $s['expires_at'] <= $now) return false;
+            return true;
         });
 
         usort($results, function ($a, $b) {
@@ -226,10 +234,15 @@ class InMemoryAdapter implements StorageAdapter {
         return array_map(function ($s) {
             return [
                 'id'              => $s['id'],
+                'source_entry_id' => $s['source_entry_id'],
                 'sender_username' => null,
                 'entry_type'      => $s['entry_type'],
+                'source_type'     => $s['source_type'] ?? 'entry',
                 'encrypted_data'  => $s['encrypted_data'],
                 'status'          => ((int)($s['recipient_id'] ?? 0) === 0 || $s['recipient_id'] === null) ? 'pending' : 'active',
+                'sync_mode'       => $s['sync_mode'] ?? 'snapshot',
+                'label'           => $s['label'] ?? null,
+                'expires_at'      => $s['expires_at'] ?? null,
                 'template'        => $this->findTemplate($s['template_id'] ?? null),
                 'created_at'      => $s['created_at'],
                 'updated_at'      => $s['updated_at'],
@@ -247,8 +260,12 @@ class InMemoryAdapter implements StorageAdapter {
             'recipient_id'         => $shareData['recipient_id'] ?? null,
             'source_entry_id'      => $shareData['source_entry_id'],
             'entry_type'           => $shareData['entry_type'],
+            'source_type'          => $shareData['source_type'] ?? 'entry',
             'template_id'          => $shareData['template_id'] ?? null,
             'encrypted_data'       => $shareData['encrypted_data'],
+            'sync_mode'            => $shareData['sync_mode'] ?? 'snapshot',
+            'label'                => $shareData['label'] ?? null,
+            'expires_at'           => $shareData['expires_at'] ?? null,
             'created_at'           => $now,
             'updated_at'           => $now,
         ];
@@ -261,8 +278,12 @@ class InMemoryAdapter implements StorageAdapter {
             if ($item['sender_id'] === $shareData['sender_id']
                 && $item['source_entry_id'] === $shareData['source_entry_id']
                 && $item['recipient_id'] === $shareData['recipient_id']) {
-                // Update existing
+                // Update existing — mirror MariaDB ON DUPLICATE KEY UPDATE VALUES() behavior
                 $this->sharedItems[$id]['encrypted_data'] = $shareData['encrypted_data'];
+                $this->sharedItems[$id]['sync_mode'] = $shareData['sync_mode'] ?? 'snapshot';
+                $this->sharedItems[$id]['source_type'] = $shareData['source_type'] ?? 'entry';
+                $this->sharedItems[$id]['label'] = $shareData['label'] ?? null;
+                $this->sharedItems[$id]['expires_at'] = $shareData['expires_at'] ?? null;
                 $this->sharedItems[$id]['updated_at'] = date('Y-m-d H:i:s');
                 return $id;
             }

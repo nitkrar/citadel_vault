@@ -16,6 +16,7 @@ import useAppConfig from '../hooks/useAppConfig';
 import useExchanges from '../hooks/useExchanges';
 import useShareData from '../hooks/useShareData';
 import ImportModal from '../components/ImportModal';
+import SortTh from '../components/SortableTh';
 import { useHideAmounts } from '../components/Layout';
 import { usePlaidLink } from '../integrations/providers/plaid/PlaidConnect';
 import { getIntegration, getIntegrationType, setIntegration, removeIntegration } from '../integrations/helpers';
@@ -24,7 +25,7 @@ import * as cryptoLib from '../lib/crypto';
 import { extractValue, buildRateMap, convertCurrency } from '../lib/portfolioAggregator';
 import {
   Plus, Edit2, Trash2, Search, Eye, EyeOff, Copy, Check, Lock,
-  KeyRound, AlertTriangle, Undo2, X, ChevronDown, ChevronUp, Upload,
+  KeyRound, AlertTriangle, Undo2, X, Upload,
   Landmark, Briefcase, FileText, Shield, Layers, RefreshCw, Link2, Share2,
 } from 'lucide-react';
 
@@ -94,24 +95,6 @@ function InlineNumberField({ label, value, currency, isEditing, editValue, savin
   );
 }
 
-// Sortable table header
-function SortTh({ sortKey: key, current, dir, onSort, style, children }) {
-  const active = current === key;
-  return (
-    <th
-      style={{ ...style, cursor: 'pointer', userSelect: 'none' }}
-      onClick={() => onSort(key)}
-    >
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-        {children}
-        {active
-          ? (dir === 'asc' ? <ChevronUp size={13} /> : <ChevronDown size={13} />)
-          : <ChevronDown size={13} style={{ opacity: 0.25 }} />
-        }
-      </span>
-    </th>
-  );
-}
 
 
 export default function VaultPage() {
@@ -593,8 +576,9 @@ export default function VaultPage() {
       if (savedType === 'account') {
         setPostSaveAccount(updated);
       }
-      // Prompt to re-encrypt shared copies
-      if (shareCounts[editEntry.id] > 0) {
+      // Prompt to re-encrypt shared copies (continuous shares only)
+      const continuousShares = (sharesByEntry[editEntry.id] || []).filter(s => s.sync_mode === 'continuous');
+      if (continuousShares.length > 0) {
         setReEncryptEntry(updated);
       }
     } catch (err) {
@@ -609,7 +593,7 @@ export default function VaultPage() {
     setReEncrypting(true);
     try {
       const d = decryptedCache[reEncryptEntry.id];
-      const shares = sharesByEntry[reEncryptEntry.id] || [];
+      const shares = (sharesByEntry[reEncryptEntry.id] || []).filter(s => s.sync_mode === 'continuous');
       const updates = [];
       for (const share of shares) {
         if (share.status === 'pending') continue;
@@ -1271,21 +1255,24 @@ export default function VaultPage() {
       {integrationMsg && <div className="alert alert-success mb-3"><Check size={16} /><span>{integrationMsg}</span></div>}
       {(plaidConnectError || plaidLinkError) && <div className="alert alert-danger mb-3"><AlertTriangle size={16} /><span>{plaidConnectError || plaidLinkError}</span></div>}
 
-      {/* Re-encrypt shared copies prompt */}
-      {reEncryptEntry && (
-        <div className="alert alert-info mb-3" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-          <div className="flex items-center gap-2" style={{ flex: '1 1 auto' }}>
-            <Share2 size={16} style={{ flexShrink: 0 }} />
-            <span>This entry is shared with {shareCounts[reEncryptEntry.id]} {shareCounts[reEncryptEntry.id] === 1 ? 'person' : 'people'}. Update their copies?</span>
+      {/* Re-encrypt shared copies prompt (continuous shares only) */}
+      {reEncryptEntry && (() => {
+        const continuousCount = (sharesByEntry[reEncryptEntry.id] || []).filter(s => s.sync_mode === 'continuous').length;
+        return continuousCount > 0 ? (
+          <div className="alert alert-info mb-3" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+            <div className="flex items-center gap-2" style={{ flex: '1 1 auto' }}>
+              <Share2 size={16} style={{ flexShrink: 0 }} />
+              <span>This entry has {continuousCount} continuous {continuousCount === 1 ? 'share' : 'shares'}. Update {continuousCount === 1 ? 'the recipient\'s copy' : 'their copies'}?</span>
+            </div>
+            <div className="flex gap-2" style={{ flexShrink: 0 }}>
+              <button className="btn btn-sm btn-primary" onClick={handleReEncrypt} disabled={reEncrypting}>
+                {reEncrypting ? 'Updating...' : 'Update'}
+              </button>
+              <button className="btn btn-sm btn-ghost" onClick={() => setReEncryptEntry(null)}>Dismiss</button>
+            </div>
           </div>
-          <div className="flex gap-2" style={{ flexShrink: 0 }}>
-            <button className="btn btn-sm btn-primary" onClick={handleReEncrypt} disabled={reEncrypting}>
-              {reEncrypting ? 'Updating...' : 'Update'}
-            </button>
-            <button className="btn btn-sm btn-ghost" onClick={() => setReEncryptEntry(null)}>Dismiss</button>
-          </div>
-        </div>
-      )}
+        ) : null;
+      })()}
 
       {/* Content */}
       {error ? (
