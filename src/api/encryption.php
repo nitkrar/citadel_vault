@@ -237,6 +237,12 @@ if ($method === 'POST' && $action === 'setup-rsa') {
         Response::error('public_key and encrypted_private_key are required.', 400);
     }
 
+    // Idempotency guard — reject if RSA keys already exist
+    $existing = $storage->getVaultKeys($userId);
+    if ($existing && !empty($existing['public_key'])) {
+        Response::error('RSA keys already configured.', 400);
+    }
+
     $storage->setVaultKeys($userId, [
         'public_key'             => $body['public_key'],
         'encrypted_private_key'  => $body['encrypted_private_key'],

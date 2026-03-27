@@ -32,6 +32,13 @@ class Response {
         }
 
         header('Content-Type: application/json; charset=utf-8');
+
+        // Security headers — defense-in-depth (also set via .htaccess)
+        header('X-Content-Type-Options: nosniff');
+        header('X-Frame-Options: DENY');
+        header('Referrer-Policy: strict-origin-when-cross-origin');
+        header('Permissions-Policy: camera=(), microphone=(), geolocation=()');
+        header('Cache-Control: no-store');
     }
 
     /**

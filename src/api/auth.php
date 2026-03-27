@@ -431,6 +431,7 @@ if ($method === 'PUT' && $action === 'profile') {
 if ($method === 'PUT' && $action === 'password') {
     $payload = Auth::requireAuth();
     $userId = Auth::userId($payload);
+    $ipHash = Auth::enforceIpRateLimit($db, 'password_change', RATE_LIMIT_LOGIN_IP, RATE_LIMIT_LOGIN_IP_WINDOW);
     $body = Response::getBody();
 
     $currentPassword = $body['current_password'] ?? '';
@@ -448,6 +449,7 @@ if ($method === 'PUT' && $action === 'password') {
     $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if (!$user || !Auth::verifyPassword($currentPassword, $user['password_hash'])) {
+        Auth::recordRateLimit($db, 'password_change', $ipHash);
         Response::error('Current password is incorrect.', 401);
     }
 
