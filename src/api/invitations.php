@@ -21,7 +21,7 @@ $db = Database::getConnection();
 // ---------------------------------------------------------------------------
 if ($method === 'POST' && $action === 'create') {
     $payload = Auth::requireAuth();
-    $userId = $payload['sub'];
+    $userId = Auth::userId($payload);
     $body = Response::getBody();
 
     $email = Response::sanitize($body['email'] ?? '');
@@ -135,7 +135,7 @@ if ($method === 'GET' && $action === 'validate') {
 // ---------------------------------------------------------------------------
 if ($method === 'GET' && $action === 'list') {
     $payload = Auth::requireAuth();
-    $userId = $payload['sub'];
+    $userId = Auth::userId($payload);
     $isSiteAdmin = $payload['role'] === 'admin';
 
     if ($isSiteAdmin) {
@@ -177,7 +177,7 @@ if ($method === 'GET' && $action === 'list') {
 // ---------------------------------------------------------------------------
 if ($method === 'DELETE' && $action === 'revoke') {
     $payload = Auth::requireAuth();
-    $userId = $payload['sub'];
+    $userId = Auth::userId($payload);
     $isSiteAdmin = $payload['role'] === 'admin';
     $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 

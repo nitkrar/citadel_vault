@@ -15,7 +15,7 @@ require_once __DIR__ . '/../core/Encryption.php';
 Response::setCors();
 
 $payload = Auth::requireAuth();
-$userId = $payload['sub'];
+$userId = Auth::userId($payload);
 $isSiteAdmin = $payload['role'] === 'admin';
 $method = $_SERVER['REQUEST_METHOD'];
 $storage = Storage::adapter();
@@ -59,7 +59,7 @@ if ($method === 'PUT') {
     }
 
     // Audit log
-    $ipHash = Encryption::hashIp($_SERVER['REMOTE_ADDR'] ?? null);
+    $ipHash = Auth::clientIpHash();
     $storage->logAction($userId, 'system_setting_changed', null, null, $ipHash);
 
     Response::success(['message' => "Updated {$updated} setting(s)."]);

@@ -67,20 +67,7 @@ if ($method === 'POST' && $action === 'login') {
 
     // --- Account lockout check (before password verification) ---
     if ($user) {
-        try {
-            $stmt = $db->prepare("SELECT failed_login_attempts, locked_until FROM users WHERE id = ?");
-            $stmt->execute([$user['id']]);
-            $lockRow = $stmt->fetch(PDO::FETCH_ASSOC);
-            if ($lockRow && $lockRow['locked_until']) {
-                $lockedUntil = strtotime($lockRow['locked_until']);
-                if ($lockedUntil > time()) {
-                    $remaining = ceil(($lockedUntil - time()) / 60);
-                    Response::error("Account is locked. Try again in $remaining minute(s).", 429);
-                }
-            }
-        } catch (Exception $e) {
-            // Columns may not exist — skip lockout check
-        }
+        Auth::enforceAccountLockout($db, (int)$user['id']);
     }
 
     // --- Verify credentials ---
@@ -95,7 +82,7 @@ if ($method === 'POST' && $action === 'login') {
                 $stmt->execute([$user['id']]);
                 $failRow = $stmt->fetch(PDO::FETCH_ASSOC);
                 $attempts = (int)($failRow['failed_login_attempts'] ?? 0);
-                $ip = $_SERVER['REMOTE_ADDR'] ?? null;
+                $ip = Auth::getClientIp();
 
                 // Tier 1: 3 attempts → 15 min lock
                 if ($attempts === LOCKOUT_TIER1_ATTEMPTS) {
@@ -261,9 +248,7 @@ if ($method === 'POST' && $action === 'register') {
         Response::error('Invalid email address.');
     }
 
-    if (strlen($password) < 8) {
-        Response::error('Password must be at least 8 characters.');
-    }
+    Auth::validatePassword($password);
 
     // Always assign role = 'user'
     $role = 'user';
@@ -378,7 +363,7 @@ if ($method === 'GET' && $action === 'verify-email') {
 // ---------------------------------------------------------------------------
 if ($method === 'GET' && $action === 'me') {
     $payload = Auth::requireAuth(allowMustResetPassword: true);
-    $userId = $payload['sub'];
+    $userId = Auth::userId($payload);
 
     $stmt = $db->prepare(
         "SELECT id, username, display_name, email, role, must_reset_password, created_at
@@ -441,7 +426,7 @@ if ($method === 'GET' && $action === 'me') {
 // ---------------------------------------------------------------------------
 if ($method === 'PUT' && $action === 'profile') {
     $payload = Auth::requireAuth();
-    $userId = $payload['sub'];
+    $userId = Auth::userId($payload);
     $body = Response::getBody();
 
     $username     = Response::sanitize($body['username'] ?? '');
@@ -499,7 +484,7 @@ if ($method === 'PUT' && $action === 'profile') {
 // ---------------------------------------------------------------------------
 if ($method === 'PUT' && $action === 'password') {
     $payload = Auth::requireAuth();
-    $userId = $payload['sub'];
+    $userId = Auth::userId($payload);
     $body = Response::getBody();
 
     $currentPassword = $body['current_password'] ?? '';
@@ -509,9 +494,7 @@ if ($method === 'PUT' && $action === 'password') {
         Response::error('Current password and new password are required.');
     }
 
-    if (strlen($newPassword) < 8) {
-        Response::error('New password must be at least 8 characters.');
-    }
+    Auth::validatePassword($newPassword);
 
     // Verify current password
     $stmt = $db->prepare("SELECT password_hash FROM users WHERE id = ?");
@@ -541,14 +524,12 @@ if ($method === 'PUT' && $action === 'password') {
 // ---------------------------------------------------------------------------
 if ($method === 'POST' && $action === 'force-change-password') {
     $payload = Auth::requireAuth(allowMustResetPassword: true);
-    $userId = $payload['sub'];
+    $userId = Auth::userId($payload);
     $body = Response::getBody();
 
     $newPassword = $body['new_password'] ?? '';
 
-    if (strlen($newPassword) < 8) {
-        Response::error('Password must be at least 8 characters.');
-    }
+    Auth::validatePassword($newPassword);
 
     // Verify must_reset_password flag is set
     $stmt = $db->prepare("SELECT must_reset_password FROM users WHERE id = ?");
@@ -599,7 +580,7 @@ if ($method === 'POST' && $action === 'force-change-password') {
 // ---------------------------------------------------------------------------
 if ($method === 'DELETE' && $action === 'self-delete') {
     $payload = Auth::requireAuth();
-    $userId = $payload['sub'];
+    $userId = Auth::userId($payload);
     $body = Response::getBody();
 
     $password = $body['password'] ?? '';
@@ -696,9 +677,7 @@ if ($method === 'POST' && $action === 'forgot-password') {
     if (!$username) {
         Response::error('Username or email is required.');
     }
-    if (strlen($newPassword) < 8) {
-        Response::error('Password must be at least 8 characters.');
-    }
+    Auth::validatePassword($newPassword);
     if ($newPassword !== $confirmPassword) {
         Response::error('Passwords do not match.');
     }
@@ -755,7 +734,7 @@ if ($method === 'POST' && $action === 'forgot-password') {
     Auth::savePasswordToHistory($db, $userId, $hash);
 
     // Audit log
-    $auditIpHash = Encryption::hashIp($ip);
+    $auditIpHash = Auth::clientIpHash();
     try {
         $storage = Storage::adapter();
         $storage->logAction($userId, 'recovery_key_password_reset', 'users', null, $auditIpHash);

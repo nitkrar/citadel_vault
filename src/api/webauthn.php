@@ -19,7 +19,7 @@ $db = Database::getConnection();
 // ---------------------------------------------------------------------------
 if ($method === 'POST' && $action === 'register-options') {
     $payload = Auth::requireAuth();
-    $userId  = (int)$payload['sub'];
+    $userId  = Auth::userId($payload);
 
     // Fetch username for the registration options
     $stmt = $db->prepare("SELECT username FROM users WHERE id = ?");
@@ -43,7 +43,7 @@ if ($method === 'POST' && $action === 'register-options') {
 // ---------------------------------------------------------------------------
 if ($method === 'POST' && $action === 'register-verify') {
     $payload = Auth::requireAuth();
-    $userId  = (int)$payload['sub'];
+    $userId  = Auth::userId($payload);
     $body    = Response::getBody();
 
     $clientDataJSON    = $body['clientDataJSON'] ?? '';
@@ -138,16 +138,7 @@ if ($method === 'POST' && $action === 'auth-verify') {
     }
 
     // Check account lockout before issuing JWT
-    try {
-        $stmt = $db->prepare("SELECT locked_until FROM users WHERE id = ?");
-        $stmt->execute([$result['user']['id']]);
-        $lockRow = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($lockRow && $lockRow['locked_until'] && strtotime($lockRow['locked_until']) > time()) {
-            Response::error('Account is temporarily locked. Try again later.', 403);
-        }
-    } catch (Exception $e) {
-        // Column may not exist yet — skip lockout check
-    }
+    Auth::enforceAccountLockout($db, (int)$result['user']['id']);
 
     // Check must_change_password
     $mustChangePassword = false;
@@ -176,7 +167,7 @@ if ($method === 'POST' && $action === 'auth-verify') {
 // ---------------------------------------------------------------------------
 if ($method === 'GET' && $action === 'list') {
     $payload = Auth::requireAuth();
-    $userId  = (int)$payload['sub'];
+    $userId  = Auth::userId($payload);
 
     $stmt = $db->prepare(
         "SELECT id, credential_id, name, transports, created_at, last_used_at
@@ -202,7 +193,7 @@ if ($method === 'GET' && $action === 'list') {
 // ---------------------------------------------------------------------------
 if ($method === 'POST' && $action === 'rename') {
     $payload = Auth::requireAuth();
-    $userId  = (int)$payload['sub'];
+    $userId  = Auth::userId($payload);
     $body    = Response::getBody();
 
     $id   = (int)($body['id'] ?? 0);
@@ -234,7 +225,7 @@ if ($method === 'POST' && $action === 'rename') {
 // ---------------------------------------------------------------------------
 if ($method === 'POST' && $action === 'delete') {
     $payload = Auth::requireAuth();
-    $userId  = (int)$payload['sub'];
+    $userId  = Auth::userId($payload);
     $body    = Response::getBody();
 
     $id = (int)($body['id'] ?? 0);

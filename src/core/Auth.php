@@ -138,7 +138,7 @@ class Auth {
         }
 
         $stmt = $db->prepare("SELECT is_active, role, must_reset_password FROM users WHERE id = ?");
-        $stmt->execute([$payload['sub']]);
+        $stmt->execute([self::userId($payload)]);
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$user || !$user['is_active']) {
@@ -306,6 +306,57 @@ class Auth {
     }
 
     /**
+     * Extract and cast user ID from JWT payload.
+     */
+    public static function userId(array $payload): int {
+        return (int)$payload['sub'];
+    }
+
+    /**
+     * Get the client IP address.
+     */
+    public static function getClientIp(): string {
+        return $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+    }
+
+    /**
+     * Get the client IP as an HMAC hash for audit storage.
+     */
+    public static function clientIpHash(): ?string {
+        $ip = $_SERVER['REMOTE_ADDR'] ?? null;
+        return Encryption::hashIp($ip);
+    }
+
+    /**
+     * Check if an account is locked — 429s with remaining time if so.
+     */
+    public static function enforceAccountLockout(PDO $db, int $userId): void {
+        try {
+            $stmt = $db->prepare("SELECT locked_until FROM users WHERE id = ?");
+            $stmt->execute([$userId]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($row && $row['locked_until']) {
+                $lockedUntil = strtotime($row['locked_until']);
+                if ($lockedUntil > time()) {
+                    $remaining = ceil(($lockedUntil - time()) / 60);
+                    Response::error("Account is locked. Try again in $remaining minute(s).", 429);
+                }
+            }
+        } catch (Exception $e) {
+            // Column may not exist — skip lockout check
+        }
+    }
+
+    /**
+     * Validate password strength — 400s if too weak.
+     */
+    public static function validatePassword(string $password): void {
+        if (strlen($password) < 8) {
+            Response::error('Password must be at least 8 characters.', 400);
+        }
+    }
+
+    /**
      * Enforce rate limit on any identifier — 429s and exits if exceeded.
      */
     public static function enforceRateLimit(PDO $db, string $action, string $identifier, int $limit, int $window): void {
@@ -319,8 +370,7 @@ class Auth {
      * Returns the hashed identifier for use with recordRateLimit().
      */
     public static function enforceIpRateLimit(PDO $db, string $action, int $limit, int $window): string {
-        $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-        $ipHash = self::hashForRateLimit($action . '_ip', $ip);
+        $ipHash = self::hashForRateLimit($action . '_ip', self::getClientIp());
         self::enforceRateLimit($db, $action, $ipHash, $limit, $window);
         return $ipHash;
     }

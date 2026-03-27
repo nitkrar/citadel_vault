@@ -11,7 +11,7 @@ require_once __DIR__ . '/../core/Mailer.php';
 
 Response::setCors();
 $payload = Auth::requireAuth();
-$userId = $payload['sub'];
+$userId = Auth::userId($payload);
 $isSiteAdmin = $payload['role'] === 'admin';
 $method = $_SERVER['REQUEST_METHOD'];
 $id = isset($_GET['id']) ? (int)$_GET['id'] : null;
@@ -68,9 +68,7 @@ if ($method === 'POST') {
     if (!$username || !$email || !$password) {
         Response::error('username, email, and password are required.', 400);
     }
-    if (strlen($password) < 8) {
-        Response::error('Password must be at least 8 characters.', 400);
-    }
+    Auth::validatePassword($password);
     if (!in_array($role, ['admin', 'user'], true)) {
         Response::error('Invalid role.', 400);
     }
@@ -117,7 +115,7 @@ if ($method === 'PUT') {
         $body = Response::getBody();
         $newPassword = $body['password'] ?? '';
         $message = $body['message'] ?? null;
-        if (strlen($newPassword) < 8) { Response::error('Password must be at least 8 characters.', 400); }
+        Auth::validatePassword($newPassword);
 
         $stmt = $db->prepare("UPDATE users SET password_hash = ?, must_reset_password = 1 WHERE id = ?");
         $stmt->execute([Auth::hashPassword($newPassword), $id]);
@@ -164,7 +162,7 @@ if ($method === 'PUT') {
     if (isset($body['email'])) { $setClauses[] = "email = ?"; $params[] = Response::sanitize($body['email']); }
 
     if (isset($body['password'])) {
-        if (strlen($body['password']) < 8) { Response::error('Password must be at least 8 characters.', 400); }
+        Auth::validatePassword($body['password']);
         $setClauses[] = "password_hash = ?";
         $params[] = Auth::hashPassword($body['password']);
     }

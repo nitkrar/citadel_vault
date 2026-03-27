@@ -10,7 +10,7 @@ require_once __DIR__ . '/../core/Auth.php';
 
 Response::setCors();
 $payload = Auth::requireAuth();
-$userId = $payload['sub'];
+$userId = Auth::userId($payload);
 $db = Database::getInstance();
 
 $since = $_GET['since'] ?? null;
