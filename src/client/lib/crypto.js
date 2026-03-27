@@ -514,6 +514,36 @@ export async function recoverWithRecoveryKey(recoveryBlobs, recoveryKey, newVaul
 }
 
 /**
+ * Verify a recovery key and generate rotated recovery blobs.
+ * Used by forgot-password flow: proves identity via recovery key without
+ * unlocking the vault or setting the DEK in module state.
+ *
+ * @param {object} recoveryBlobs - { recovery_key_salt, encrypted_dek_recovery }
+ * @param {string} recoveryKey - user-provided recovery key
+ * @returns {object} { newRecoveryKey, recovery_key_salt, encrypted_dek_recovery, recovery_key_encrypted }
+ * @throws if recovery key is incorrect
+ */
+export async function verifyRecoveryKeyAndRotate(recoveryBlobs, recoveryKey) {
+    const recoveryWrappingKey = await deriveWrappingKey(recoveryKey, recoveryBlobs.recovery_key_salt);
+    const dek = await unwrapDek(recoveryBlobs.encrypted_dek_recovery, recoveryWrappingKey);
+    if (!dek) throw new Error('Recovery key is incorrect');
+
+    // Generate new recovery key + blobs (rotate)
+    const newRecoveryKey = generateRecoveryKey();
+    const newRecoverySalt = generateSalt();
+    const newRecoveryWrappingKey = await deriveWrappingKey(newRecoveryKey, newRecoverySalt);
+    const newEncryptedDekRecovery = await wrapDek(dek, newRecoveryWrappingKey);
+    const newRecoveryKeyEncrypted = await encrypt(newRecoveryKey, dek);
+
+    return {
+        newRecoveryKey,
+        recovery_key_salt: newRecoverySalt,
+        encrypted_dek_recovery: newEncryptedDekRecovery,
+        recovery_key_encrypted: newRecoveryKeyEncrypted,
+    };
+}
+
+/**
  * View the recovery key (requires vault to be unlocked).
  * Decrypts the recovery_key_encrypted blob stored on server.
  */

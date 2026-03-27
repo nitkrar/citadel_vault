@@ -212,7 +212,7 @@ if ($method === 'DELETE' && $action === 'revoke') {
 // ---------------------------------------------------------------------------
 if ($method === 'POST' && $action === 'request') {
     // Check if invite requests are enabled (admin toggle)
-    $requestsEnabled = $storage->getSystemSetting('invite_requests_enabled');
+    $requestsEnabled = Storage::adapter()->getSystemSetting('invite_requests_enabled');
     if ($requestsEnabled !== 'true') {
         Response::error('Invite requests are currently disabled.', 403);
     }

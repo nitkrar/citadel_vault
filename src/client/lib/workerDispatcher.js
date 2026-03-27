@@ -138,6 +138,10 @@ export async function setKey(cryptoKey) {
     cachedRawKey = await crypto.subtle.exportKey('raw', cryptoKey);
   } else {
     cachedRawKey = null;
+    // Clear DEK inside the worker too (H4 fix)
+    if (worker) {
+      worker.postMessage({ id: `msg_${++msgCounter}`, type: 'clearKey', payload: null });
+    }
   }
   workerKeyInitialized = false;
 }

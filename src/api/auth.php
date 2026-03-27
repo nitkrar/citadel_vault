@@ -298,11 +298,12 @@ if ($method === 'POST' && $action === 'register') {
         $emailVerifyToken = bin2hex(random_bytes(32));
     }
 
+    $emailVerifyExpires = ($emailVerifyToken) ? date('Y-m-d H:i:s', time() + 86400) : null; // 24 hours
     $stmt = $db->prepare(
-        "INSERT INTO users (username, email, password_hash, role, is_active, email_verified, email_verify_token)
-         VALUES (?, ?, ?, ?, 1, ?, ?)"
+        "INSERT INTO users (username, email, password_hash, role, is_active, email_verified, email_verify_token, email_verify_expires)
+         VALUES (?, ?, ?, ?, 1, ?, ?, ?)"
     );
-    $stmt->execute([$username, $email, $hash, $role, $emailVerified, $emailVerifyToken]);
+    $stmt->execute([$username, $email, $hash, $role, $emailVerified, $emailVerifyToken, $emailVerifyExpires]);
     $newId = (int)$db->lastInsertId();
 
     // Mark invite as used
@@ -313,7 +314,7 @@ if ($method === 'POST' && $action === 'register') {
 
     // If email verification is required and not coming from an invite, send verification email
     if ($requireEmailVerification && !$inviteRow) {
-        $verifyUrl = (defined('APP_URL') ? APP_URL : WEBAUTHN_ORIGIN) . "/verify-email?token=" . $emailVerificationToken;
+        $verifyUrl = (defined('APP_URL') ? APP_URL : WEBAUTHN_ORIGIN) . "/verify-email?token=" . $emailVerifyToken;
         $emailResult = ['success' => false];
         if (defined('SMTP_ENABLED') && SMTP_ENABLED) {
             $emailResult = Mailer::sendVerification($email, $verifyUrl, $username);
@@ -358,8 +359,8 @@ if ($method === 'GET' && $action === 'verify-email') {
 
     try {
         $stmt = $db->prepare(
-            "SELECT id, email_verification_expires FROM users
-             WHERE email_verification_token = ? AND email_verified = 0 LIMIT 1"
+            "SELECT id, email_verify_expires FROM users
+             WHERE email_verify_token = ? AND email_verified = 0 LIMIT 1"
         );
         $stmt->execute([$token]);
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -368,12 +369,12 @@ if ($method === 'GET' && $action === 'verify-email') {
             Response::error('Invalid or expired verification token.', 400);
         }
 
-        if ($user['email_verification_expires'] && strtotime($user['email_verification_expires']) < time()) {
+        if ($user['email_verify_expires'] && strtotime($user['email_verify_expires']) < time()) {
             Response::error('Verification token has expired. Please register again.', 400);
         }
 
         $stmt = $db->prepare(
-            "UPDATE users SET email_verified = 1, email_verification_token = NULL, email_verification_expires = NULL WHERE id = ?"
+            "UPDATE users SET email_verified = 1, email_verify_token = NULL, email_verify_expires = NULL WHERE id = ?"
         );
         $stmt->execute([$user['id']]);
 
@@ -648,14 +649,61 @@ if ($method === 'DELETE' && $action === 'self-delete') {
 // ---------------------------------------------------------------------------
 // POST ?action=forgot-password — Reset password using recovery key
 // ---------------------------------------------------------------------------
+// POST ?action=forgot-password-material — Return recovery blobs for client-side verification (unauthenticated)
+// ---------------------------------------------------------------------------
+if ($method === 'POST' && $action === 'forgot-password-material') {
+    $body = Response::getBody();
+    $username = Response::sanitize($body['username'] ?? '');
+
+    // Rate limiting — 5 attempts per hour per IP
+    $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+    $ipHash = Auth::hashForRateLimit('forgot_password_ip', $ip);
+    if (Auth::isRateLimited($db, 'forgot_password', $ipHash, RATE_LIMIT_FORGOT_PW, RATE_LIMIT_FORGOT_PW_WINDOW)) {
+        Response::error('Too many password reset attempts. Please try again later.', 429);
+    }
+    Auth::recordRateLimit($db, 'forgot_password', $ipHash);
+
+    if (!$username) {
+        Response::error('Username or email is required.');
+    }
+
+    // Look up user
+    $stmt = $db->prepare(
+        "SELECT u.id, u.is_active, v.recovery_key_salt, v.encrypted_dek_recovery
+         FROM users u
+         LEFT JOIN user_vault_keys v ON v.user_id = u.id
+         WHERE (u.username = ? OR u.email = ?) LIMIT 1"
+    );
+    $stmt->execute([$username, $username]);
+    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    // Generic error to avoid user enumeration
+    if (!$user || !$user['is_active'] || empty($user['recovery_key_salt'])) {
+        Response::error('Invalid credentials.', 401);
+    }
+
+    // Return recovery material for client-side PBKDF2 + unwrap verification
+    Response::success([
+        'recovery_key_salt'      => $user['recovery_key_salt'],
+        'encrypted_dek_recovery' => $user['encrypted_dek_recovery'],
+    ]);
+}
+
+// ---------------------------------------------------------------------------
+// POST ?action=forgot-password — Reset password after client-side recovery key verification
+// ---------------------------------------------------------------------------
 if ($method === 'POST' && $action === 'forgot-password') {
     $body = Response::getBody();
     $username    = Response::sanitize($body['username'] ?? '');
-    $recoveryKey = $body['recovery_key'] ?? '';
     $newPassword = $body['new_password'] ?? '';
     $confirmPassword = $body['confirm_password'] ?? '';
 
-    // Rate limiting — 5 attempts per hour per IP
+    // New recovery blobs (computed client-side after verifying the old recovery key)
+    $newRecoverySalt          = $body['recovery_key_salt'] ?? '';
+    $newEncryptedDekRecovery  = $body['encrypted_dek_recovery'] ?? '';
+    $newRecoveryKeyEncrypted  = $body['recovery_key_encrypted'] ?? '';
+
+    // Rate limiting — same bucket as material fetch
     $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
     $ipHash = Auth::hashForRateLimit('forgot_password_ip', $ip);
     if (Auth::isRateLimited($db, 'forgot_password', $ipHash, RATE_LIMIT_FORGOT_PW, RATE_LIMIT_FORGOT_PW_WINDOW)) {
@@ -667,22 +715,20 @@ if ($method === 'POST' && $action === 'forgot-password') {
     if (!$username) {
         Response::error('Username or email is required.');
     }
-    if (!$recoveryKey) {
-        Response::error('Recovery key is required.');
-    }
     if (strlen($newPassword) < 8) {
         Response::error('Password must be at least 8 characters.');
     }
     if ($newPassword !== $confirmPassword) {
         Response::error('Passwords do not match.');
     }
+    if (!$newRecoverySalt || !$newEncryptedDekRecovery || !$newRecoveryKeyEncrypted) {
+        Response::error('Recovery key material is required.', 400);
+    }
 
-    // Look up user by username or email
-    // With client-side encryption, recovery is handled entirely in the browser.
-    // This endpoint only resets the login password — vault recovery is separate.
+    // Look up user
     $stmt = $db->prepare(
-        "SELECT id, username, email, role, is_active
-         FROM users WHERE (username = ? OR email = ?) LIMIT 1"
+        "SELECT id, username, email, role, is_active FROM users
+         WHERE (username = ? OR email = ?) LIMIT 1"
     );
     $stmt->execute([$username, $username]);
     $user = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -694,76 +740,62 @@ if ($method === 'POST' && $action === 'forgot-password') {
         Response::error('Account has been deactivated.', 403);
     }
 
-    // Safety: set SQL_MODE for ghost user id=0
-    $db->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'");
-
     $userId = (int)$user['id'];
 
-    // Verify recovery key: derive wrapping key from recovery_key + recovery_key_salt, then unwrap DEK
-    $recoveryWrappingKey = Encryption::deriveWrappingKey($recoveryKey, $user['recovery_key_salt']);
-    $dek = Encryption::unwrapDek($user['encrypted_dek_recovery'], $recoveryWrappingKey);
-
-    if ($dek === null) {
-        Response::error('Invalid recovery key.', 401);
-    }
-
-    // Update password hash
+    // Update login password
     $hash = Auth::hashPassword($newPassword);
-
-    // Generate new recovery key and re-wrap DEK
-    $newRecoveryKey = bin2hex(random_bytes(16));
-    $newRecoverySalt = Encryption::generateSalt();
-    $newRecoveryWrappingKey = Encryption::deriveWrappingKey($newRecoveryKey, $newRecoverySalt);
-    $newEncryptedDekRecovery = Encryption::wrapDek($dek, $newRecoveryWrappingKey);
-    $newRecoveryKeyEncrypted = Encryption::encryptRecoveryKey($newRecoveryKey, $dek);
-
-    // Update user record
     $stmt = $db->prepare(
         "UPDATE users SET
             password_hash = ?,
-            recovery_key_salt = ?,
-            encrypted_dek_recovery = ?,
-            recovery_key_encrypted = ?,
             failed_login_attempts = 0,
             locked_until = NULL,
-            last_failed_login_at = NULL
+            last_failed_login_at = NULL,
+            must_reset_password = 0
          WHERE id = ?"
     );
+    $stmt->execute([$hash, $userId]);
+
+    // Update recovery blobs on user_vault_keys
+    $stmt = $db->prepare(
+        "UPDATE user_vault_keys SET
+            recovery_key_salt = ?,
+            encrypted_dek_recovery = ?,
+            recovery_key_encrypted = ?
+         WHERE user_id = ?"
+    );
     $stmt->execute([
-        $hash,
         $newRecoverySalt,
         $newEncryptedDekRecovery,
         $newRecoveryKeyEncrypted,
         $userId,
     ]);
 
-    // Audit log
-    try {
-        $db->prepare(
-            "INSERT INTO audit_log (user_id, action, resource_type, ip_address) VALUES (?, 'recovery_key_password_reset', 'users', ?)"
-        )->execute([$userId, $_SERVER['REMOTE_ADDR'] ?? null]);
-    } catch (Exception $e) {
-        // audit_log table may not exist — non-fatal
-    }
+    // Save to password history
+    Auth::savePasswordToHistory($db, $userId, $hash);
 
-    // Generate JWT
-    $tokenUser = [
+    // Audit log
+    $auditIpHash = Encryption::hashIp($ip);
+    try {
+        $storage = Storage::adapter();
+        $storage->logAction($userId, 'recovery_key_password_reset', 'users', null, $auditIpHash);
+    } catch (Exception $e) {}
+
+    // Generate JWT and set cookie
+    $token = Auth::generateToken([
         'id'       => $userId,
         'username' => $user['username'],
         'email'    => $user['email'],
         'role'     => $user['role'],
-    ];
-    $token = Auth::generateToken($tokenUser);
+    ]);
     Auth::setAuthCookie($token);
 
     Response::success([
-        'user'         => [
+        'user' => [
             'id'       => $userId,
             'username' => $user['username'],
             'email'    => $user['email'],
             'role'     => $user['role'],
         ],
-        'recovery_key' => $newRecoveryKey,
     ]);
 }
 
