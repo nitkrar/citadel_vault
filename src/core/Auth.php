@@ -328,6 +328,71 @@ class Auth {
     }
 
     /**
+     * Record a failed login attempt and escalate lockout tiers.
+     * Tier 1: LOCKOUT_TIER1_ATTEMPTS → lock for LOCKOUT_TIER1_DURATION
+     * Tier 2: LOCKOUT_TIER2_ATTEMPTS → lock for LOCKOUT_TIER2_DURATION
+     * Tier 3: LOCKOUT_TIER3_ATTEMPTS+ (every 3rd) → permanent lock + force password change
+     */
+    public static function recordFailedLogin(PDO $db, int $userId, string $username): void {
+        try {
+            $db->prepare("UPDATE users SET failed_login_attempts = failed_login_attempts + 1, last_failed_login_at = NOW() WHERE id = ?")
+               ->execute([$userId]);
+
+            $stmt = $db->prepare("SELECT failed_login_attempts, email FROM users WHERE id = ?");
+            $stmt->execute([$userId]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$row) return;
+
+            $attempts = (int)($row['failed_login_attempts'] ?? 0);
+            $lockUntil = null;
+            $auditAction = null;
+            $lockLabel = null;
+
+            if ($attempts === LOCKOUT_TIER1_ATTEMPTS) {
+                $lockUntil = date('Y-m-d H:i:s', time() + LOCKOUT_TIER1_DURATION);
+                $auditAction = 'account_locked_tier1';
+                $lockLabel = '15 minutes';
+            } elseif ($attempts === LOCKOUT_TIER2_ATTEMPTS) {
+                $lockUntil = date('Y-m-d H:i:s', time() + LOCKOUT_TIER2_DURATION);
+                $auditAction = 'account_locked_tier2';
+                $lockLabel = '1 hour';
+            } elseif ($attempts >= LOCKOUT_TIER3_ATTEMPTS && $attempts % 3 === 0) {
+                $tier3Duration = 86400 * 90;
+                try {
+                    $setting = Storage::adapter()->getSystemSetting('lockout_tier3_duration');
+                    if ($setting !== null) $tier3Duration = (int)$setting;
+                } catch (Exception $e) {}
+                $lockUntil = date('Y-m-d H:i:s', time() + $tier3Duration);
+                $auditAction = 'account_locked_permanent';
+                $lockLabel = null;
+                $db->prepare("UPDATE users SET must_reset_password = 1 WHERE id = ?")->execute([$userId]);
+            }
+
+            if ($lockUntil) {
+                $db->prepare("UPDATE users SET locked_until = ? WHERE id = ?")->execute([$lockUntil, $userId]);
+                try { Storage::adapter()->logAction($userId, $auditAction, 'users', null, self::clientIpHash()); } catch (Exception $e) {}
+                if (defined('SMTP_ENABLED') && SMTP_ENABLED && $row['email']) {
+                    Mailer::sendLockoutNotification($row['email'], $username, $attempts, self::getClientIp(), $lockLabel);
+                }
+            }
+        } catch (Exception $e) {
+            // Lockout columns may not exist — non-fatal
+        }
+    }
+
+    /**
+     * Reset lockout counters after successful login.
+     */
+    public static function resetLoginLockout(PDO $db, int $userId): void {
+        try {
+            $db->prepare("UPDATE users SET failed_login_attempts = 0, locked_until = NULL, last_failed_login_at = NULL WHERE id = ?")
+               ->execute([$userId]);
+        } catch (Exception $e) {
+            // Columns may not exist — non-fatal
+        }
+    }
+
+    /**
      * Check if an account is locked — 429s with remaining time if so.
      */
     public static function enforceAccountLockout(PDO $db, int $userId): void {
