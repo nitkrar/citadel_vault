@@ -72,58 +72,9 @@ if ($method === 'POST' && $action === 'login') {
 
     // --- Verify credentials ---
     if (!$user || !Auth::verifyPassword($password, $user['password_hash'])) {
-        // Track failed attempt if user exists
         if ($user) {
-            try {
-                $db->prepare("UPDATE users SET failed_login_attempts = failed_login_attempts + 1, last_failed_login_at = NOW() WHERE id = ?")
-                   ->execute([$user['id']]);
-
-                $stmt = $db->prepare("SELECT failed_login_attempts, email FROM users WHERE id = ?");
-                $stmt->execute([$user['id']]);
-                $failRow = $stmt->fetch(PDO::FETCH_ASSOC);
-                $attempts = (int)($failRow['failed_login_attempts'] ?? 0);
-                $ip = Auth::getClientIp();
-
-                // Tier 1: 3 attempts → 15 min lock
-                if ($attempts === LOCKOUT_TIER1_ATTEMPTS) {
-                    $lockUntil = date('Y-m-d H:i:s', time() + LOCKOUT_TIER1_DURATION);
-                    $db->prepare("UPDATE users SET locked_until = ? WHERE id = ?")->execute([$lockUntil, $user['id']]);
-                    // Audit log (no IP stored)
-                    try { $db->prepare("INSERT INTO audit_log (user_id, action, resource_type) VALUES (?, 'account_locked_tier1', 'users')")->execute([$user['id']]); } catch (Exception $e) {}
-                    // Send email notification (IP in email only, not stored)
-                    if (defined('SMTP_ENABLED') && SMTP_ENABLED && $failRow['email']) {
-                        Mailer::sendLockoutNotification($failRow['email'], $user['username'], $attempts, $ip, '15 minutes');
-                    }
-                }
-                // Tier 2: 6 attempts → 1 hour lock
-                elseif ($attempts === LOCKOUT_TIER2_ATTEMPTS) {
-                    $lockUntil = date('Y-m-d H:i:s', time() + LOCKOUT_TIER2_DURATION);
-                    $db->prepare("UPDATE users SET locked_until = ? WHERE id = ?")->execute([$lockUntil, $user['id']]);
-                    try { $db->prepare("INSERT INTO audit_log (user_id, action, resource_type) VALUES (?, 'account_locked_tier2', 'users')")->execute([$user['id']]); } catch (Exception $e) {}
-                    if (defined('SMTP_ENABLED') && SMTP_ENABLED && $failRow['email']) {
-                        Mailer::sendLockoutNotification($failRow['email'], $user['username'], $attempts, $ip, '1 hour');
-                    }
-                }
-                // Tier 3: 9+ attempts → full lock + force password change
-                elseif ($attempts >= LOCKOUT_TIER3_ATTEMPTS && $attempts % 3 === 0) {
-                    // Lock far into the future — only password change unlocks
-                    $tier3Duration = 86400 * 90;
-                    try {
-                        $setting = Storage::adapter()->getSystemSetting('lockout_tier3_duration');
-                        if ($setting !== null) $tier3Duration = (int)$setting;
-                    } catch (Exception $e) {}
-                    $lockUntil = date('Y-m-d H:i:s', time() + $tier3Duration);
-                    $db->prepare("UPDATE users SET locked_until = ?, must_reset_password = 1 WHERE id = ?")->execute([$lockUntil, $user['id']]);
-                    try { $db->prepare("INSERT INTO audit_log (user_id, action, resource_type) VALUES (?, 'account_locked_permanent', 'users')")->execute([$user['id']]); } catch (Exception $e) {}
-                    if (defined('SMTP_ENABLED') && SMTP_ENABLED && $failRow['email']) {
-                        Mailer::sendLockoutNotification($failRow['email'], $user['username'], $attempts, $ip, null);
-                    }
-                }
-            } catch (Exception $e) {
-                // Lockout columns may not exist — non-fatal
-            }
+            Auth::recordFailedLogin($db, (int)$user['id'], $user['username']);
         }
-        // Record failed attempt against IP (cross-account)
         Auth::recordRateLimit($db, 'login', $loginIpHash);
         Response::error('Invalid credentials.', 401);
     }
@@ -133,12 +84,7 @@ if ($method === 'POST' && $action === 'login') {
     }
 
     // --- Successful login: reset lockout counters ---
-    try {
-        $db->prepare("UPDATE users SET failed_login_attempts = 0, locked_until = NULL, last_failed_login_at = NULL WHERE id = ?")
-           ->execute([$user['id']]);
-    } catch (Exception $e) {
-        // Columns may not exist — non-fatal
-    }
+    Auth::resetLoginLockout($db, (int)$user['id']);
 
     // Check email verification (DB migration resilience)
     if ($requireEmailVerification) {
