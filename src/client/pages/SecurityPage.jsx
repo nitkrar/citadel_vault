@@ -1,9 +1,10 @@
 import { useState, useCallback } from 'react';
 import {
-  Shield, Key, Eye, EyeOff, Lock, Clock,
-  Copy, Check, Download, KeyRound, Plus,
+  Shield, Key, Eye, EyeOff, Lock,
+  Check, Download, KeyRound, Plus,
 } from 'lucide-react';
 import api from '../api/client';
+import RecoveryKeyCopyBlock from '../components/RecoveryKeyCopyBlock';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { useAuth } from '../contexts/AuthContext';
 import useVaultData from '../hooks/useVaultData';
@@ -133,7 +134,6 @@ export default function SecurityPage() {
   const [recoveryKey, setRecoveryKey] = useState('');
   const [showRecovery, setShowRecovery] = useState(false);
   const [loadingRecovery, setLoadingRecovery] = useState(false);
-  const [copiedRecovery, setCopiedRecovery] = useState(false);
 
   const handleViewRecovery = async () => {
     setLoadingRecovery(true);
@@ -146,12 +146,6 @@ export default function SecurityPage() {
     } finally {
       setLoadingRecovery(false);
     }
-  };
-
-  const handleCopyRecovery = async () => {
-    try { await navigator.clipboard.writeText(recoveryKey); } catch {}
-    setCopiedRecovery(true);
-    setTimeout(() => setCopiedRecovery(false), 2000);
   };
 
   // ── Local prefs (shared by auto-lock & privacy) ─────────────────
@@ -398,10 +392,7 @@ export default function SecurityPage() {
         </p>
         {showRecovery ? (
           <div>
-            <div style={{ fontFamily: 'monospace', fontSize: 16, background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 8, padding: '12px 16px', marginBottom: 12, wordBreak: 'break-all', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ flex: 1 }}>{recoveryKey}</span>
-              <button className="btn btn-ghost btn-icon" onClick={handleCopyRecovery}>{copiedRecovery ? <Check size={16} style={{ color: '#10b981' }} /> : <Copy size={16} />}</button>
-            </div>
+            <RecoveryKeyCopyBlock recoveryKey={recoveryKey} />
             <button className="btn btn-ghost btn-sm" onClick={() => { setShowRecovery(false); setRecoveryKey(''); }}>Hide</button>
           </div>
         ) : (

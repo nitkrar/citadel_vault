@@ -62,7 +62,7 @@ export function fromBase64(base64) {
 
 /**
  * Generate a new Data Encryption Key (DEK).
- * CRITICAL: extractable = false — even XSS cannot export this key.
+ * Note: extractable = true — required for wrapKey/unwrapKey and re-wrapping on key change.
  */
 export async function generateDek() {
     return crypto.subtle.generateKey(
@@ -373,7 +373,7 @@ function generateSalt() {
  * First-time vault setup. Generates all crypto material.
  *
  * Flow:
- * 1. Generate DEK (non-extractable)
+ * 1. Generate DEK (extractable for wrap/unwrap)
  * 2. Derive wrapping key from vault key + salt → wrap DEK
  * 3. Generate recovery key + salt → wrap same DEK
  * 4. Encrypt recovery key with DEK (for later viewing)

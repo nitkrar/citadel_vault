@@ -172,12 +172,14 @@ if ($method === 'PUT') {
     if (isset($body['role'])) {
         if (!$isSiteAdmin) { Response::error('Only admins can change roles.', 403); }
         if (!in_array($body['role'], ['admin', 'user'], true)) { Response::error('Invalid role.', 400); }
+        if ($id === $userId && $body['role'] !== 'admin') { Response::error('Cannot demote your own admin account.', 400); }
         $setClauses[] = "role = ?";
         $params[] = $body['role'];
     }
 
     if (array_key_exists('is_active', $body)) {
         if (!$isSiteAdmin) { Response::error('Only admins can change active status.', 403); }
+        if ($id === $userId && !$body['is_active']) { Response::error('Cannot deactivate your own account.', 400); }
         $setClauses[] = "is_active = ?";
         $params[] = (int)$body['is_active'];
     }
