@@ -874,6 +874,119 @@ describe('Sharing API (Redesigned)', () => {
     });
   });
 
+  // ── portfolio sharing (null source_entry_id) ────────────────────────────
+  describe('portfolio sharing', () => {
+    let portfolioShareId = null;
+
+    it('allows portfolio share with null source_entry_id', async () => {
+      const keyResp = await api.get('/sharing.php?action=recipient-key&identifier=test_regular_user');
+      expect(keyResp.status).toBe(200);
+      const keyData = await extractData(keyResp);
+
+      const resp = await api.post('/sharing.php?action=share', {
+        json: {
+          source_entry_id: null,
+          source_type: 'portfolio',
+          entry_type: 'portfolio',
+          sync_mode: 'snapshot',
+          label: 'Portfolio summary',
+          recipients: [{
+            recipient_token: keyData.recipient_token,
+            encrypted_data: 'cG9ydGZvbGlvLWRhdGE=',
+            identifier: 'test_regular_user',
+          }],
+        },
+      });
+      expect(resp.status).toBe(200);
+      const data = await extractData(resp);
+      expect(data.count).toBe(1);
+      expect(data.skipped).toBe(0);
+      portfolioShareId = data.share_ids[0];
+    });
+
+    it('portfolio share appears in shared-by-me with source_type=portfolio', async () => {
+      const resp = await api.get('/sharing.php?action=shared-by-me');
+      expect(resp.status).toBe(200);
+      const data = await extractData(resp);
+
+      const portfolioShare = data.find(s => s.source_type === 'portfolio' && s.label === 'Portfolio summary');
+      expect(portfolioShare).toBeDefined();
+      expect(portfolioShare.source_entry_id).toBeFalsy(); // null or 0
+      expect(portfolioShare.entry_type).toBe('portfolio');
+    });
+
+    it('portfolio share visible in shared-with-me for recipient', async () => {
+      const resp = await apiRequest('GET', '/sharing.php?action=shared-with-me', { role: 'regular' });
+      expect(resp.status).toBe(200);
+      const data = await extractData(resp);
+
+      const portfolioShare = data.find(s => s.source_type === 'portfolio');
+      expect(portfolioShare).toBeDefined();
+      expect(portfolioShare).toHaveProperty('encrypted_data');
+    });
+
+    it('upserts portfolio share on re-share to same recipient', async () => {
+      const keyResp = await api.get('/sharing.php?action=recipient-key&identifier=test_regular_user');
+      const keyData = await extractData(keyResp);
+
+      // Count before
+      const beforeResp = await api.get('/sharing.php?action=shared-by-me');
+      const beforeData = await extractData(beforeResp);
+      const beforeCount = beforeData.filter(s => s.source_type === 'portfolio').length;
+
+      // Re-share portfolio
+      const resp = await api.post('/sharing.php?action=share', {
+        json: {
+          source_entry_id: null,
+          source_type: 'portfolio',
+          entry_type: 'portfolio',
+          label: 'Updated portfolio',
+          recipients: [{
+            recipient_token: keyData.recipient_token,
+            encrypted_data: 'dXBkYXRlZC1wb3J0Zm9saW8=',
+            identifier: 'test_regular_user',
+          }],
+        },
+      });
+      expect(resp.status).toBe(200);
+
+      // Count after — should not increase (upsert, not duplicate)
+      const afterResp = await api.get('/sharing.php?action=shared-by-me');
+      const afterData = await extractData(afterResp);
+      const afterCount = afterData.filter(s => s.source_type === 'portfolio').length;
+      expect(afterCount).toBe(beforeCount);
+
+      // Label should be updated
+      const updated = afterData.find(s => s.source_type === 'portfolio');
+      expect(updated.label).toBe('Updated portfolio');
+    });
+
+    it('still requires source_entry_id for non-portfolio shares', async () => {
+      const resp = await api.post('/sharing.php?action=share', {
+        json: {
+          source_type: 'entry',
+          recipients: [{ recipient_token: 'tok', encrypted_data: 'blob' }],
+        },
+      });
+      expect(resp.status).toBe(400);
+    });
+
+    it('revokes portfolio shares', async () => {
+      const resp = await api.post('/sharing.php?action=revoke', {
+        json: { source_type: 'portfolio' },
+      });
+      expect(resp.status).toBe(200);
+      const data = await extractData(resp);
+      expect(data.revoked).toBeGreaterThanOrEqual(1);
+
+      // Verify gone from shared-by-me
+      const byMeResp = await api.get('/sharing.php?action=shared-by-me');
+      const byMeData = await extractData(byMeResp);
+      const remaining = byMeData.filter(s => s.source_type === 'portfolio');
+      expect(remaining.length).toBe(0);
+    });
+  });
+
   // ── cross-user isolation ────────────────────────────────────────────────
   describe('cross-user isolation', () => {
     it('regular user cannot see admin shares in shared-by-me', async () => {

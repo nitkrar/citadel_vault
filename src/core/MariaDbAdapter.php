@@ -348,6 +348,37 @@ class MariaDbAdapter implements StorageAdapter {
     }
 
     public function upsertShare(array $shareData): int {
+        $sourceEntryId = $shareData['source_entry_id'] ?? null;
+        $recipientId = $shareData['recipient_id'] ?? null;
+
+        // NULL source_entry_id (portfolio shares): unique key won't dedup NULLs,
+        // so check for existing share explicitly before inserting.
+        if ($sourceEntryId === null) {
+            $stmt = $this->db->prepare(
+                "SELECT id FROM shared_items
+                 WHERE sender_id = ? AND source_entry_id IS NULL AND source_type = ? AND recipient_id = ?"
+            );
+            $stmt->execute([$shareData['sender_id'], $shareData['source_type'] ?? 'entry', $recipientId]);
+            $existing = $stmt->fetch();
+            if ($existing) {
+                $stmt = $this->db->prepare(
+                    'UPDATE shared_items SET encrypted_data = ?, sync_mode = ?, source_type = ?,
+                            label = ?, expires_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+                );
+                $stmt->execute([
+                    $shareData['encrypted_data'],
+                    $shareData['sync_mode'] ?? 'snapshot',
+                    $shareData['source_type'] ?? 'entry',
+                    $shareData['label'] ?? null,
+                    $shareData['expires_at'] ?? null,
+                    (int)$existing['id'],
+                ]);
+                return (int)$existing['id'];
+            }
+            return $this->createShare($shareData);
+        }
+
+        // Non-null source_entry_id: rely on unique key for ON DUPLICATE KEY UPDATE
         $stmt = $this->db->prepare(
             'INSERT INTO shared_items (sender_id, recipient_identifier, recipient_id, source_entry_id,
                                        entry_type, source_type, template_id, encrypted_data,
@@ -363,8 +394,8 @@ class MariaDbAdapter implements StorageAdapter {
         $stmt->execute([
             $shareData['sender_id'],
             $shareData['recipient_identifier'],
-            $shareData['recipient_id'] ?? null,
-            $shareData['source_entry_id'],
+            $recipientId,
+            $sourceEntryId,
             $shareData['entry_type'],
             $shareData['source_type'] ?? 'entry',
             $shareData['template_id'] ?? null,
@@ -379,7 +410,7 @@ class MariaDbAdapter implements StorageAdapter {
             $stmt = $this->db->prepare(
                 'SELECT id FROM shared_items WHERE sender_id = ? AND source_entry_id = ? AND recipient_id = ?'
             );
-            $stmt->execute([$shareData['sender_id'], $shareData['source_entry_id'], $shareData['recipient_id']]);
+            $stmt->execute([$shareData['sender_id'], $sourceEntryId, $recipientId]);
             $row = $stmt->fetch();
             $id = $row ? (int)$row['id'] : 0;
         }

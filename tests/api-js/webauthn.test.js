@@ -221,6 +221,38 @@ describe('WebAuthn API', () => {
     });
   });
 
+  // ── rate limiting (shared login bucket) ────────────────────────
+  describe('rate limiting', () => {
+    it('auth-options does not crash under rate limit check', async () => {
+      // auth-options shares the login rate limit bucket — verify it still
+      // returns 200 (not 500) when the rate limit check runs
+      const resp = await fetch(`${BASE_URL}/webauthn.php?action=auth-options`, {
+        method: 'POST',
+      });
+      // 200 = normal, 429 = rate limited (both valid — depends on prior test runs)
+      expect([200, 429]).toContain(resp.status);
+    });
+
+    it('auth-verify with all fields returns 401 not 500 (rate limit + lockout path)', async () => {
+      // Provide all required fields so we pass validation (400) and hit the
+      // actual auth verification path, which should fail gracefully (401)
+      // after recording a rate limit attempt
+      const resp = await fetch(`${BASE_URL}/webauthn.php?action=auth-verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientDataJSON: 'ZmFrZQ==',
+          authenticatorData: 'ZmFrZQ==',
+          signature: 'ZmFrZQ==',
+          challengeId: 999999,
+          credentialId: 'nonexistent-credential',
+        }),
+      });
+      // 401 = auth failed (expected), 429 = rate limited (also valid)
+      expect([401, 429]).toContain(resp.status);
+    });
+  });
+
   // ── invalid endpoint ───────────────────────────────────────────
   describe('invalid endpoint', () => {
     it('returns 404 for unknown action', async () => {
