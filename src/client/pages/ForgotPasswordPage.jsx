@@ -46,21 +46,39 @@ export default function ForgotPasswordPage() {
 
     setSubmitting(true);
     try {
-      const res = await api.post('/auth.php?action=forgot-password', {
+      // Step 1: Fetch recovery material from server (unauthenticated)
+      const matRes = await api.post('/auth.php?action=forgot-password-material', {
         username: username.trim(),
-        recovery_key: recoveryKey.trim(),
+      });
+      const material = matRes.data?.data || matRes.data;
+
+      // Step 2: Verify recovery key client-side (PBKDF2 + AES-KW unwrap)
+      // and generate rotated recovery blobs
+      const { verifyRecoveryKeyAndRotate } = await import('../lib/crypto');
+      const result = await verifyRecoveryKeyAndRotate(
+        {
+          recovery_key_salt: material.recovery_key_salt,
+          encrypted_dek_recovery: material.encrypted_dek_recovery,
+        },
+        recoveryKey.trim()
+      );
+
+      // Step 3: Send new password + new recovery blobs to server
+      await api.post('/auth.php?action=forgot-password', {
+        username: username.trim(),
         new_password: newPassword,
         confirm_password: confirmPassword,
+        recovery_key_salt: result.recovery_key_salt,
+        encrypted_dek_recovery: result.encrypted_dek_recovery,
+        recovery_key_encrypted: result.recovery_key_encrypted,
       });
 
-      const data = res.data?.data || res.data;
-
       // Auth cookie set server-side — show new recovery key
-      setNewRecoveryKey(data.recovery_key);
+      setNewRecoveryKey(result.newRecoveryKey);
     } catch (err) {
       setError(
         err.response?.data?.error ||
-          err.response?.data?.message ||
+          err.message ||
           'Password reset failed. Please check your recovery key.'
       );
     } finally {

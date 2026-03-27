@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import api from '../api/client';
 import { authenticateWithPasskey } from '../components/WebAuthnLogin';
+import * as vaultSession from '../lib/vaultSession';
 
 const AuthContext = createContext(null);
 
@@ -71,12 +72,13 @@ export function AuthProvider({ children }) {
   };
 
   const logout = () => {
-    // Clear form drafts from localStorage
-    Object.keys(localStorage).forEach(key => {
-      if (key.startsWith('pv_draft_')) localStorage.removeItem(key);
-    });
-    // Clear auth cookie via server
+    // 1. Full vault teardown (crypto, worker, storage, IndexedDB)
+    vaultSession.destroy();
+
+    // 2. Clear auth cookie via server
     api.post('/auth.php?action=logout').catch(() => {});
+
+    // 3. Reset all React state
     setUser(null);
     setMustChangePassword(false);
     setMustChangeVaultKey(false);

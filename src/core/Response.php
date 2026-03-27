@@ -17,13 +17,13 @@ class Response {
             $allowedList = array_map('trim', explode(',', $allowed));
             if (in_array($origin, $allowedList, true)) {
                 header("Access-Control-Allow-Origin: $origin");
+                header('Access-Control-Allow-Credentials: true');
                 header('Vary: Origin');
             }
         }
 
         header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
         header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Data-Token');
-        header('Access-Control-Allow-Credentials: true');
         header('Access-Control-Max-Age: 86400');
 
         if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {

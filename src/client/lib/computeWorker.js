@@ -71,6 +71,10 @@ self.onmessage = async (e) => {
       case 'aggregate':
         result = handleAggregate(payload);
         break;
+      case 'clearKey':
+        cachedKey = null;
+        result = { cleared: true };
+        break;
       default:
         throw new Error(`Unknown message type: ${type}`);
     }

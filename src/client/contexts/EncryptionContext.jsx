@@ -7,6 +7,7 @@ import { getUserPreference, PREFERENCE_DEFAULTS } from '../lib/defaults';
 import { useAuth } from './AuthContext';
 import * as workerDispatcher from '../lib/workerDispatcher';
 import * as cachePolicy from '../lib/cachePolicy';
+import * as vaultSession from '../lib/vaultSession';
 
 const EncryptionContext = createContext(null);
 
@@ -21,13 +22,13 @@ export function EncryptionProvider({ children, user }) {
   const activityTimerRef = useRef(null);
   const prevUserIdRef = useRef(user?.id);
 
-  // Clear IndexedDB on logout or user switch (security: don't leak entries across users)
+  // Full teardown on user switch (security: don't leak entries across users)
   useEffect(() => {
     const prevId = prevUserIdRef.current;
     prevUserIdRef.current = user?.id;
     if (prevId && prevId !== user?.id) {
-      cachePolicy.clearAll();
-      workerDispatcher.terminate();
+      vaultSession.destroy();
+      setIsUnlocked(false);
     }
   }, [user?.id]);
 
@@ -47,14 +48,8 @@ export function EncryptionProvider({ children, user }) {
     if (mode !== 'timed') return;
 
     const timeout = parseInt(getUserPreference(prefs, 'auto_lock_timeout'), 10) || 3600;
-    autoLockTimerRef.current = setTimeout(() => {
-      // Auto-lock fires
-      crypto.lockVault();
-      workerDispatcher.setKey(null);
-      cachePolicy.onVaultLock();
-      setIsUnlocked(false);
-    }, timeout * 1000);
-  }, [clearAutoLock]);
+    autoLockTimerRef.current = setTimeout(() => lock(), timeout * 1000);
+  }, [clearAutoLock, lock]);
 
   // Reset auto-lock on user activity
   const resetAutoLock = useCallback(() => {
@@ -96,25 +91,15 @@ export function EncryptionProvider({ children, user }) {
     } catch {}
   }, []);
 
-  const clearSession = useCallback(() => {
-    sessionStorage.removeItem('pv_session_dek');
-  }, []);
-
-  const hasSession = useCallback(() => {
-    return !!sessionStorage.getItem('pv_session_dek');
-  }, []);
 
   // ------------------------------------------------------------------
   // Lock vault
   // ------------------------------------------------------------------
   const lock = useCallback(async () => {
-    crypto.lockVault();
-    workerDispatcher.setKey(null);
-    await cachePolicy.onVaultLock();
+    await vaultSession.lock();
     clearAutoLock();
-    clearSession();
     setIsUnlocked(false);
-  }, [clearAutoLock, clearSession]);
+  }, [clearAutoLock]);
 
   // ------------------------------------------------------------------
   // Unlock vault
@@ -348,7 +333,7 @@ export function EncryptionProvider({ children, user }) {
             }
           } catch {
             // Session restore failed — clear stale session, user must re-enter vault key
-            clearSession();
+            vaultSession.lock();
           }
         }
       } catch {
@@ -371,7 +356,7 @@ export function EncryptionProvider({ children, user }) {
   useEffect(() => {
     return () => {
       clearAutoLock();
-      workerDispatcher.terminate();
+      vaultSession.lock();
     };
   }, [clearAutoLock]);
 

@@ -44,6 +44,7 @@ CREATE TABLE `users` (
     `is_active`             TINYINT(1) NOT NULL DEFAULT 1,
     `email_verified`        TINYINT(1) NOT NULL DEFAULT 0,
     `email_verify_token`    VARCHAR(255) DEFAULT NULL,
+    `email_verify_expires`  DATETIME DEFAULT NULL,
     `password_reset_token`  VARCHAR(255) DEFAULT NULL,
     `password_reset_expires` DATETIME DEFAULT NULL,
     `must_reset_password`   TINYINT(1) NOT NULL DEFAULT 0,
