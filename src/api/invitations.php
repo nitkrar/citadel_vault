@@ -226,11 +226,7 @@ if ($method === 'POST' && $action === 'request') {
     }
 
     // Rate limiting — per IP
-    $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-    $ipHash = Encryption::hashIp($ip);
-    if (Auth::isRateLimited($db, 'invite_request', $ipHash, RATE_LIMIT_INVITE_REQ, RATE_LIMIT_INVITE_REQ_WINDOW)) {
-        Response::error('Too many invite requests. Please try again later.', 429);
-    }
+    $ipHash = Auth::enforceIpRateLimit($db, 'invite_request', RATE_LIMIT_INVITE_REQ, RATE_LIMIT_INVITE_REQ_WINDOW);
     Auth::recordRateLimit($db, 'invite_request', $ipHash);
 
     // Check if this email already requested (UNIQUE constraint on invite_requests.email)

@@ -306,6 +306,26 @@ class Auth {
     }
 
     /**
+     * Enforce rate limit on any identifier — 429s and exits if exceeded.
+     */
+    public static function enforceRateLimit(PDO $db, string $action, string $identifier, int $limit, int $window): void {
+        if (self::isRateLimited($db, $action, $identifier, $limit, $window)) {
+            Response::error('Too many attempts. Please try again later.', 429);
+        }
+    }
+
+    /**
+     * Enforce IP-based rate limit — 429s and exits if exceeded.
+     * Returns the hashed identifier for use with recordRateLimit().
+     */
+    public static function enforceIpRateLimit(PDO $db, string $action, int $limit, int $window): string {
+        $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+        $ipHash = self::hashForRateLimit($action . '_ip', $ip);
+        self::enforceRateLimit($db, $action, $ipHash, $limit, $window);
+        return $ipHash;
+    }
+
+    /**
      * Rate limiting — check if an action+identifier has exceeded the limit.
      * Identifier should be a hashed value (e.g., SHA-256 of IP or email).
      *

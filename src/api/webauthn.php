@@ -98,6 +98,9 @@ if ($method === 'POST' && $action === 'register-verify') {
 // POST ?action=auth-options — Get authentication options (NO auth required)
 // ---------------------------------------------------------------------------
 if ($method === 'POST' && $action === 'auth-options') {
+    // Shared login rate limit bucket (passkey + password attempts combined)
+    Auth::enforceIpRateLimit($db, 'login', RATE_LIMIT_LOGIN_IP, RATE_LIMIT_LOGIN_IP_WINDOW);
+
     try {
         $options = webauthnAuthOptions($db);
         Response::success($options);
@@ -110,6 +113,9 @@ if ($method === 'POST' && $action === 'auth-options') {
 // POST ?action=auth-verify — Verify authentication assertion (NO auth)
 // ---------------------------------------------------------------------------
 if ($method === 'POST' && $action === 'auth-verify') {
+    // Shared login rate limit bucket — record on failure below
+    $loginIpHash = Auth::enforceIpRateLimit($db, 'login', RATE_LIMIT_LOGIN_IP, RATE_LIMIT_LOGIN_IP_WINDOW);
+
     $body = Response::getBody();
 
     $clientDataJSON    = $body['clientDataJSON'] ?? '';
@@ -127,7 +133,20 @@ if ($method === 'POST' && $action === 'auth-verify') {
             $db, $clientDataJSON, $authenticatorData, $signature, $challengeId, $credentialId
         );
     } catch (Exception $e) {
+        Auth::recordRateLimit($db, 'login', $loginIpHash);
         Response::error('Authentication failed: ' . $e->getMessage(), 401);
+    }
+
+    // Check account lockout before issuing JWT
+    try {
+        $stmt = $db->prepare("SELECT locked_until FROM users WHERE id = ?");
+        $stmt->execute([$result['user']['id']]);
+        $lockRow = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($lockRow && $lockRow['locked_until'] && strtotime($lockRow['locked_until']) > time()) {
+            Response::error('Account is temporarily locked. Try again later.', 403);
+        }
+    } catch (Exception $e) {
+        // Column may not exist yet — skip lockout check
     }
 
     // Check must_change_password
