@@ -56,11 +56,7 @@ if ($method === 'POST' && $action === 'login') {
     }
 
     // --- IP-based rate limiting (cross-account credential stuffing protection) ---
-    $loginIp = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-    $loginIpHash = Auth::hashForRateLimit('login_ip', $loginIp);
-    if (Auth::isRateLimited($db, 'login', $loginIpHash, RATE_LIMIT_LOGIN_IP, RATE_LIMIT_LOGIN_IP_WINDOW)) {
-        Response::error('Too many login attempts. Please try again later.', 429);
-    }
+    $loginIpHash = Auth::enforceIpRateLimit($db, 'login', RATE_LIMIT_LOGIN_IP, RATE_LIMIT_LOGIN_IP_WINDOW);
 
     $stmt = $db->prepare(
         "SELECT id, username, display_name, email, password_hash, role, is_active, must_reset_password
@@ -222,20 +218,13 @@ if ($method === 'POST' && $action === 'register') {
     $password = $body['password'] ?? '';
 
     // Rate limiting — 5 attempts per hour per IP, 5 per hour per email
-    $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-    $ipHash = Auth::hashForRateLimit('register_ip', $ip);
-    $emailHash = $email ? Auth::hashForRateLimit('register_email', strtolower(trim($email))) : '';
-
-    if (Auth::isRateLimited($db, 'register', $ipHash, RATE_LIMIT_REGISTER, RATE_LIMIT_REGISTER_WINDOW)) {
-        Response::error('Too many registration attempts. Please try again later.', 429);
-    }
-    if ($emailHash && Auth::isRateLimited($db, 'register', $emailHash, RATE_LIMIT_REGISTER, RATE_LIMIT_REGISTER_WINDOW)) {
-        Response::error('Too many registration attempts for this email. Please try again later.', 429);
-    }
-
-    // Record attempts (both IP and email)
+    $ipHash = Auth::enforceIpRateLimit($db, 'register', RATE_LIMIT_REGISTER, RATE_LIMIT_REGISTER_WINDOW);
     Auth::recordRateLimit($db, 'register', $ipHash);
-    if ($emailHash) Auth::recordRateLimit($db, 'register', $emailHash);
+    if ($email) {
+        $emailHash = Auth::hashForRateLimit('register_email', strtolower(trim($email)));
+        Auth::enforceRateLimit($db, 'register', $emailHash, RATE_LIMIT_REGISTER, RATE_LIMIT_REGISTER_WINDOW);
+        Auth::recordRateLimit($db, 'register', $emailHash);
+    }
 
     // Gate: either self-registration is enabled OR a valid invite token is provided
     $inviteRow = null;
@@ -656,11 +645,7 @@ if ($method === 'POST' && $action === 'forgot-password-material') {
     $username = Response::sanitize($body['username'] ?? '');
 
     // Rate limiting — 5 attempts per hour per IP
-    $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-    $ipHash = Auth::hashForRateLimit('forgot_password_ip', $ip);
-    if (Auth::isRateLimited($db, 'forgot_password', $ipHash, RATE_LIMIT_FORGOT_PW, RATE_LIMIT_FORGOT_PW_WINDOW)) {
-        Response::error('Too many password reset attempts. Please try again later.', 429);
-    }
+    $ipHash = Auth::enforceIpRateLimit($db, 'forgot_password', RATE_LIMIT_FORGOT_PW, RATE_LIMIT_FORGOT_PW_WINDOW);
     Auth::recordRateLimit($db, 'forgot_password', $ipHash);
 
     if (!$username) {
@@ -704,11 +689,7 @@ if ($method === 'POST' && $action === 'forgot-password') {
     $newRecoveryKeyEncrypted  = $body['recovery_key_encrypted'] ?? '';
 
     // Rate limiting — same bucket as material fetch
-    $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-    $ipHash = Auth::hashForRateLimit('forgot_password_ip', $ip);
-    if (Auth::isRateLimited($db, 'forgot_password', $ipHash, RATE_LIMIT_FORGOT_PW, RATE_LIMIT_FORGOT_PW_WINDOW)) {
-        Response::error('Too many password reset attempts. Please try again later.', 429);
-    }
+    $ipHash = Auth::enforceIpRateLimit($db, 'forgot_password', RATE_LIMIT_FORGOT_PW, RATE_LIMIT_FORGOT_PW_WINDOW);
     Auth::recordRateLimit($db, 'forgot_password', $ipHash);
 
     // Validate inputs
