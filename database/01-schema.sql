@@ -162,7 +162,7 @@ CREATE TABLE `shared_items` (
     `sender_id`                 INT UNSIGNED NOT NULL,
     `recipient_identifier`      VARCHAR(255) NOT NULL,
     `recipient_id`              INT UNSIGNED NULL,
-    `source_entry_id`           INT UNSIGNED NOT NULL,
+    `source_entry_id`           INT UNSIGNED NULL,
     `entry_type`                VARCHAR(50) NOT NULL,
     `source_type`               VARCHAR(50) NOT NULL DEFAULT 'entry',
     `template_id`               INT UNSIGNED NULL,

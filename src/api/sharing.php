@@ -101,12 +101,13 @@ if ($method === 'GET' && $action === 'recipient-key') {
 // ---------------------------------------------------------------------------
 if ($method === 'POST' && $action === 'share') {
     $body = Response::getBody();
-    $sourceEntryId = (int)($body['source_entry_id'] ?? 0);
+    $sourceType = $body['source_type'] ?? 'entry';
+    $isPortfolio = $sourceType === 'portfolio';
+    $sourceEntryId = $isPortfolio ? null : (int)($body['source_entry_id'] ?? 0);
     $recipients = $body['recipients'] ?? [];
 
     // New share fields (top-level, apply to all recipients in this batch)
     $syncMode   = $body['sync_mode'] ?? 'snapshot';
-    $sourceType = $body['source_type'] ?? 'entry';
     $label      = isset($body['label']) && $body['label'] !== '' ? $body['label'] : null;
     $expiresAt  = isset($body['expires_at']) && $body['expires_at'] !== '' ? $body['expires_at'] : null;
 
@@ -115,17 +116,19 @@ if ($method === 'POST' && $action === 'share') {
         $syncMode = 'snapshot';
     }
 
-    if (!$sourceEntryId) {
+    if (!$isPortfolio && !$sourceEntryId) {
         Response::error('source_entry_id is required.', 400);
     }
     if (!is_array($recipients) || empty($recipients)) {
         Response::error('recipients array is required.', 400);
     }
 
-    // Verify sender owns the entry
-    $entry = $storage->getEntry($userId, $sourceEntryId);
-    if (!$entry) {
-        Response::error('Entry not found.', 404);
+    // Verify sender owns the entry (skip for portfolio — no backing entry)
+    if (!$isPortfolio) {
+        $entry = $storage->getEntry($userId, $sourceEntryId);
+        if (!$entry) {
+            Response::error('Entry not found.', 404);
+        }
     }
 
     $created = [];
@@ -170,9 +173,9 @@ if ($method === 'POST' && $action === 'share') {
             'recipient_identifier' => $recipientIdentifier,
             'recipient_id'         => $recipientId,
             'source_entry_id'      => $sourceEntryId,
-            'entry_type'           => $entry['entry_type'],
+            'entry_type'           => $isPortfolio ? 'portfolio' : $entry['entry_type'],
             'source_type'          => $sourceType,
-            'template_id'          => $entry['template_id'] ?? null,
+            'template_id'          => $isPortfolio ? null : ($entry['template_id'] ?? null),
             'encrypted_data'       => $encryptedData,
             'sync_mode'            => $syncMode,
             'label'                => $label,
@@ -233,19 +236,25 @@ if ($method === 'POST' && $action === 'update') {
 // ---------------------------------------------------------------------------
 if ($method === 'POST' && $action === 'revoke') {
     $body = Response::getBody();
-    $sourceEntryId = (int)($body['source_entry_id'] ?? 0);
+    $sourceType = $body['source_type'] ?? 'entry';
+    $isPortfolio = $sourceType === 'portfolio';
+    $sourceEntryId = $isPortfolio ? null : (int)($body['source_entry_id'] ?? 0);
     $userIds = $body['user_ids'] ?? [];
 
-    if (!$sourceEntryId) {
+    if (!$isPortfolio && !$sourceEntryId) {
         Response::error('source_entry_id is required.', 400);
     }
 
+    // Build WHERE clause for source matching (NULL-safe for portfolio)
+    $sourceWhere = $isPortfolio
+        ? "sender_id = ? AND source_entry_id IS NULL AND source_type = 'portfolio'"
+        : "sender_id = ? AND source_entry_id = ?";
+    $sourceParams = $isPortfolio ? [$userId] : [$userId, $sourceEntryId];
+
     if (empty($userIds)) {
-        // Revoke all shares for this entry
-        $stmt = $db->prepare(
-            "SELECT id FROM shared_items WHERE sender_id = ? AND source_entry_id = ?"
-        );
-        $stmt->execute([$userId, $sourceEntryId]);
+        // Revoke all shares for this source
+        $stmt = $db->prepare("SELECT id FROM shared_items WHERE $sourceWhere");
+        $stmt->execute($sourceParams);
         $shares = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         $revoked = 0;
@@ -257,11 +266,8 @@ if ($method === 'POST' && $action === 'revoke') {
         // Revoke specific recipients
         $revoked = 0;
         foreach ($userIds as $recipientId) {
-            $stmt = $db->prepare(
-                "SELECT id FROM shared_items
-                 WHERE sender_id = ? AND source_entry_id = ? AND recipient_id = ?"
-            );
-            $stmt->execute([$userId, $sourceEntryId, (int)$recipientId]);
+            $stmt = $db->prepare("SELECT id FROM shared_items WHERE $sourceWhere AND recipient_id = ?");
+            $stmt->execute(array_merge($sourceParams, [(int)$recipientId]));
             $share = $stmt->fetch(PDO::FETCH_ASSOC);
             if ($share) {
                 $storage->deleteShare($userId, (int)$share['id']);
@@ -271,7 +277,7 @@ if ($method === 'POST' && $action === 'revoke') {
     }
 
     $ipHash = Auth::clientIpHash();
-    $storage->logAction($userId, 'share_revoked', 'vault_entry', $sourceEntryId, $ipHash);
+    $storage->logAction($userId, 'share_revoked', $isPortfolio ? 'portfolio' : 'vault_entry', $sourceEntryId, $ipHash);
 
     Response::success(['revoked' => $revoked]);
 }

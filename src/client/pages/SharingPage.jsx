@@ -346,7 +346,7 @@ export default function SharingPage() {
         const encryptedData = await cryptoLib.hybridEncrypt(JSON.stringify(dataToShare), recipientPubKey);
 
         await api.post('/sharing.php?action=share', {
-          source_entry_id: 0,
+          source_entry_id: null,
           source_type: 'portfolio',
           entry_type: 'portfolio',
           sync_mode: form.sync_mode,
