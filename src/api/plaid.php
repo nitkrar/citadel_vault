@@ -17,7 +17,7 @@ require_once __DIR__ . '/../core/Storage.php';
 
 Response::setCors();
 $payload = Auth::requireAuth();
-$userId = (int)$payload['sub'];
+$userId = Auth::userId($payload);
 $method = $_SERVER['REQUEST_METHOD'];
 $action = $_GET['action'] ?? '';
 $db = Database::getInstance();

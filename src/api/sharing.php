@@ -16,7 +16,7 @@ require_once __DIR__ . '/../core/SharingToken.php';
 Response::setCors();
 
 $payload = Auth::requireAuth();
-$userId = $payload['sub'];
+$userId = Auth::userId($payload);
 $method = $_SERVER['REQUEST_METHOD'];
 $action = $_GET['action'] ?? null;
 $storage = Storage::adapter();
@@ -181,7 +181,7 @@ if ($method === 'POST' && $action === 'share') {
         $created[] = $shareId;
     }
 
-    $ipHash = Encryption::hashIp($_SERVER['REMOTE_ADDR'] ?? null);
+    $ipHash = Auth::clientIpHash();
     $storage->logAction($userId, 'share_created', 'vault_entry', $sourceEntryId, $ipHash);
 
     Response::success(['share_ids' => $created, 'count' => count($created), 'skipped' => $skipped]);
@@ -270,7 +270,7 @@ if ($method === 'POST' && $action === 'revoke') {
         }
     }
 
-    $ipHash = Encryption::hashIp($_SERVER['REMOTE_ADDR'] ?? null);
+    $ipHash = Auth::clientIpHash();
     $storage->logAction($userId, 'share_revoked', 'vault_entry', $sourceEntryId, $ipHash);
 
     Response::success(['revoked' => $revoked]);

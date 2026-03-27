@@ -13,7 +13,7 @@ require_once __DIR__ . '/../core/Encryption.php';
 Response::setCors();
 
 $payload = Auth::requireAuth();
-$userId = $payload['sub'];
+$userId = Auth::userId($payload);
 $method = $_SERVER['REQUEST_METHOD'];
 $storage = Storage::adapter();
 
@@ -61,7 +61,7 @@ if ($method === 'PUT') {
 
     // Log security action if IP mode changed
     if ($ipModeChanged) {
-        $ipHash = Encryption::hashIp($_SERVER['REMOTE_ADDR'] ?? null);
+        $ipHash = Auth::clientIpHash();
         $storage->logAction($userId, 'audit_ip_mode_changed', null, null, $ipHash);
     }
 

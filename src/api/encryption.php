@@ -22,7 +22,7 @@ $storage = Storage::adapter();
 // ---------------------------------------------------------------------------
 if ($method === 'GET' && $action === 'key-material') {
     $payload = Auth::requireAuth();
-    $keys = $storage->getVaultKeys($payload['sub']);
+    $keys = $storage->getVaultKeys(Auth::userId($payload));
 
     if (!$keys || empty($keys['vault_key_salt'])) {
         Response::success([
@@ -43,7 +43,7 @@ if ($method === 'GET' && $action === 'key-material') {
 // ---------------------------------------------------------------------------
 if ($method === 'GET' && $action === 'recovery-material') {
     $payload = Auth::requireAuth();
-    $keys = $storage->getVaultKeys($payload['sub']);
+    $keys = $storage->getVaultKeys(Auth::userId($payload));
 
     if (!$keys || empty($keys['recovery_key_salt'])) {
         Response::error('No recovery key configured.', 404);
@@ -60,7 +60,7 @@ if ($method === 'GET' && $action === 'recovery-material') {
 // ---------------------------------------------------------------------------
 if ($method === 'GET' && $action === 'recovery-key-encrypted') {
     $payload = Auth::requireAuth();
-    $keys = $storage->getVaultKeys($payload['sub']);
+    $keys = $storage->getVaultKeys(Auth::userId($payload));
 
     if (!$keys || empty($keys['recovery_key_encrypted'])) {
         Response::error('No recovery key configured.', 404);
@@ -76,7 +76,7 @@ if ($method === 'GET' && $action === 'recovery-key-encrypted') {
 // ---------------------------------------------------------------------------
 if ($method === 'GET' && $action === 'public-key') {
     $payload = Auth::requireAuth();
-    $keys = $storage->getVaultKeys($payload['sub']);
+    $keys = $storage->getVaultKeys(Auth::userId($payload));
 
     if (!$keys || empty($keys['public_key'])) {
         Response::error('Vault not set up.', 404);
@@ -92,7 +92,7 @@ if ($method === 'GET' && $action === 'public-key') {
 // ---------------------------------------------------------------------------
 if ($method === 'GET' && $action === 'private-key-encrypted') {
     $payload = Auth::requireAuth();
-    $keys = $storage->getVaultKeys($payload['sub']);
+    $keys = $storage->getVaultKeys(Auth::userId($payload));
 
     if (!$keys || empty($keys['encrypted_private_key'])) {
         Response::error('Vault not set up.', 404);
@@ -108,7 +108,7 @@ if ($method === 'GET' && $action === 'private-key-encrypted') {
 // ---------------------------------------------------------------------------
 if ($method === 'POST' && $action === 'setup') {
     $payload = Auth::requireAuth();
-    $userId = $payload['sub'];
+    $userId = Auth::userId($payload);
     $body = Response::getBody();
 
     // Check not already set up
@@ -138,7 +138,7 @@ if ($method === 'POST' && $action === 'setup') {
     ]);
 
     // Log security action
-    $ipHash = Encryption::hashIp($_SERVER['REMOTE_ADDR'] ?? null);
+    $ipHash = Auth::clientIpHash();
     $storage->logAction($userId, 'vault_setup', null, null, $ipHash);
 
     Response::success(['message' => 'Vault configured.']);
@@ -149,7 +149,7 @@ if ($method === 'POST' && $action === 'setup') {
 // ---------------------------------------------------------------------------
 if ($method === 'POST' && $action === 'update-vault-key') {
     $payload = Auth::requireAuth();
-    $userId = $payload['sub'];
+    $userId = Auth::userId($payload);
     $body = Response::getBody();
 
     if (empty($body['vault_key_salt']) || empty($body['encrypted_dek'])) {
@@ -163,7 +163,7 @@ if ($method === 'POST' && $action === 'update-vault-key') {
         'admin_action_message' => null,
     ]);
 
-    $ipHash = Encryption::hashIp($_SERVER['REMOTE_ADDR'] ?? null);
+    $ipHash = Auth::clientIpHash();
     $storage->logAction($userId, 'vault_key_changed', null, null, $ipHash);
 
     Response::success(['message' => 'Vault key updated.']);
@@ -174,7 +174,7 @@ if ($method === 'POST' && $action === 'update-vault-key') {
 // ---------------------------------------------------------------------------
 if ($method === 'POST' && $action === 'update-recovery') {
     $payload = Auth::requireAuth();
-    $userId = $payload['sub'];
+    $userId = Auth::userId($payload);
     $body = Response::getBody();
 
     $required = ['recovery_key_salt', 'encrypted_dek_recovery', 'recovery_key_encrypted'];
@@ -198,7 +198,7 @@ if ($method === 'POST' && $action === 'update-recovery') {
 // ---------------------------------------------------------------------------
 if ($method === 'POST' && $action === 'update-all') {
     $payload = Auth::requireAuth();
-    $userId = $payload['sub'];
+    $userId = Auth::userId($payload);
     $body = Response::getBody();
 
     $required = ['vault_key_salt', 'encrypted_dek', 'recovery_key_salt',
@@ -219,7 +219,7 @@ if ($method === 'POST' && $action === 'update-all') {
         'admin_action_message'   => null,
     ]);
 
-    $ipHash = Encryption::hashIp($_SERVER['REMOTE_ADDR'] ?? null);
+    $ipHash = Auth::clientIpHash();
     $storage->logAction($userId, 'recovery_key_used', null, null, $ipHash);
 
     Response::success(['message' => 'All vault key material updated.']);
@@ -230,7 +230,7 @@ if ($method === 'POST' && $action === 'update-all') {
 // ---------------------------------------------------------------------------
 if ($method === 'POST' && $action === 'setup-rsa') {
     $payload = Auth::requireAuth();
-    $userId = $payload['sub'];
+    $userId = Auth::userId($payload);
     $body = Response::getBody();
 
     if (empty($body['public_key']) || empty($body['encrypted_private_key'])) {
