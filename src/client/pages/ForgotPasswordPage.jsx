@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Database, User, Shield, Lock, Eye, EyeOff, Copy, Check } from 'lucide-react';
+import { Database, User, Shield, Lock, Eye, EyeOff, Check } from 'lucide-react';
 import api from '../api/client';
+import RecoveryKeyCopyBlock from '../components/RecoveryKeyCopyBlock';
 
 const APP_NAME = import.meta.env.VITE_APP_NAME || 'Personal Vault';
 
@@ -20,7 +21,6 @@ export default function ForgotPasswordPage() {
 
   // Phase 2: recovery key display
   const [newRecoveryKey, setNewRecoveryKey] = useState('');
-  const [copiedRecovery, setCopiedRecovery] = useState(false);
   const [savedConfirmed, setSavedConfirmed] = useState(false);
 
   const handleSubmit = async (e) => {
@@ -86,22 +86,6 @@ export default function ForgotPasswordPage() {
     }
   };
 
-  const handleCopyRecovery = async () => {
-    try {
-      await navigator.clipboard.writeText(newRecoveryKey);
-      setCopiedRecovery(true);
-      setTimeout(() => setCopiedRecovery(false), 2000);
-    } catch {
-      const tmp = document.createElement('textarea');
-      tmp.value = newRecoveryKey;
-      document.body.appendChild(tmp);
-      tmp.select();
-      document.execCommand('copy');
-      document.body.removeChild(tmp);
-      setCopiedRecovery(true);
-      setTimeout(() => setCopiedRecovery(false), 2000);
-    }
-  };
 
   const handleContinue = () => {
     window.location.href = '/';
@@ -122,39 +106,7 @@ export default function ForgotPasswordPage() {
               password or vault key if you forget them.
             </p>
 
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 8,
-                background: '#f9fafb',
-                border: '1px solid #e5e7eb',
-                borderRadius: 8,
-                padding: '12px 16px',
-                marginBottom: 16,
-                fontFamily: 'monospace',
-                fontSize: 16,
-                wordBreak: 'break-all',
-              }}
-            >
-              <span>{newRecoveryKey}</span>
-              <button
-                type="button"
-                onClick={handleCopyRecovery}
-                title="Copy recovery key"
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  padding: 4,
-                  color: copiedRecovery ? '#10b981' : '#6b7280',
-                  flexShrink: 0,
-                }}
-              >
-                {copiedRecovery ? <Check size={18} /> : <Copy size={18} />}
-              </button>
-            </div>
+            <RecoveryKeyCopyBlock recoveryKey={newRecoveryKey} />
 
             <label
               style={{

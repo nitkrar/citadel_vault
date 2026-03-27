@@ -15,6 +15,7 @@ RewriteRule ^config/ - [F,L]
 RewriteRule ^database/ - [F,L]
 RewriteRule ^scripts/ - [F,L]
 RewriteRule ^static/ - [F,L]
+RewriteRule ^src/core/ - [F,L]
 
 # Allow version.json through before the block rule
 RewriteRule ^(.*/)?(version\.json)$ - [L]
@@ -44,6 +45,7 @@ RewriteRule ^ index.php [L]
 
 # Security headers (only if mod_headers is available)
 <IfModule mod_headers.c>
+    Header always set Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
     Header always set X-Robots-Tag "noindex, nofollow"
     Header always set X-Content-Type-Options "nosniff"
     Header always set X-Frame-Options "DENY"

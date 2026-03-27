@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { KeyRound, Copy, Check, AlertTriangle, Shield, Download, Eye, EyeOff } from 'lucide-react';
+import { KeyRound, AlertTriangle, Shield, Download, Eye, EyeOff } from 'lucide-react';
+import RecoveryKeyCopyBlock from './RecoveryKeyCopyBlock';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { useAuth } from '../contexts/AuthContext';
 import Modal from '../components/Modal';
@@ -45,7 +46,6 @@ export default function EncryptionKeyModal() {
 
   // Recovery key display (after setup/recovery)
   const [recoveryKeyDisplay, setRecoveryKeyDisplay] = useState('');
-  const [copiedRecovery, setCopiedRecovery] = useState(false);
   const [savedConfirmed, setSavedConfirmed] = useState(false);
   const [showRecovery, setShowRecovery] = useState(false);
 
@@ -112,7 +112,7 @@ export default function EncryptionKeyModal() {
   // ------------------------------------------------------------------
   const resetForm = () => {
     setVaultKey(''); setConfirmKey(''); setError(''); setSubmitting(false);
-    setRecoveryKeyDisplay(''); setCopiedRecovery(false); setSavedConfirmed(false);
+    setRecoveryKeyDisplay(''); setSavedConfirmed(false);
     setShowRecovery(false); setMode(null); setRecoveryKeyInput('');
     setNewVaultKey(''); setConfirmNewKey(''); setOldVaultKey(''); setShowVaultKey(false);
   };
@@ -202,23 +202,6 @@ export default function EncryptionKeyModal() {
     }
   };
 
-  const handleCopyRecovery = async () => {
-    try {
-      await navigator.clipboard.writeText(recoveryKeyDisplay);
-      setCopiedRecovery(true);
-      setTimeout(() => setCopiedRecovery(false), 2000);
-    } catch {
-      const tmp = document.createElement('textarea');
-      tmp.value = recoveryKeyDisplay;
-      document.body.appendChild(tmp);
-      tmp.select();
-      document.execCommand('copy');
-      document.body.removeChild(tmp);
-      setCopiedRecovery(true);
-      setTimeout(() => setCopiedRecovery(false), 2000);
-    }
-  };
-
   const handleDownloadRecovery = () => {
     const blob = new Blob([`Citadel Vault Recovery Key\n\n${recoveryKeyDisplay}\n\nKeep this file safe. This is the only way to recover your vault if you forget your vault key.`], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
@@ -263,12 +246,7 @@ export default function EncryptionKeyModal() {
           <p style={{ marginBottom: 8, color: '#6b7280', fontSize: 14 }}>
             This recovery key is the <strong>only way</strong> to regain access if you forget your vault key.
           </p>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 8, padding: '12px 16px', marginBottom: 12, fontFamily: 'monospace', fontSize: 16, wordBreak: 'break-all' }}>
-            <span>{recoveryKeyDisplay}</span>
-            <button type="button" onClick={handleCopyRecovery} title="Copy" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: copiedRecovery ? '#10b981' : '#6b7280', flexShrink: 0 }}>
-              {copiedRecovery ? <Check size={18} /> : <Copy size={18} />}
-            </button>
-          </div>
+          <RecoveryKeyCopyBlock recoveryKey={recoveryKeyDisplay} />
           <button type="button" onClick={handleDownloadRecovery} style={{ ...btnSecondary, marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
             <Download size={16} /> Download as file
           </button>
