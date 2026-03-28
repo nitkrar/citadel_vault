@@ -11,10 +11,12 @@ import {
   generateDek, encrypt, decrypt, encryptEntry, decryptEntry,
   deriveWrappingKey, wrapDek, unwrapDek,
   setupVault, unlockVault, changeVaultKey, lockVault,
+  reWrapDekIterations,
   generateRecoveryKey, recoverWithRecoveryKey,
   generateKeyPair, exportPublicKey, importPublicKey,
   hybridEncrypt, hybridDecrypt,
   isUnlocked, lock,
+  PBKDF2_ITERATIONS, PBKDF2_ITERATIONS_LEGACY,
 } from '../../src/client/lib/crypto.js';
 
 // ── Base64 helpers ──────────────────────────────────────────────────────
@@ -435,5 +437,107 @@ describe('Edge cases', () => {
     const blob = await encryptEntry({ a: undefined, b: undefined }, dek);
     const decrypted = await decryptEntry(blob, dek);
     expect(decrypted).toEqual({}); // all undefined values dropped
+  });
+});
+
+// ── PBKDF2 Iteration Migration ──────────────────────────────────────────
+
+describe('PBKDF2 iteration migration', () => {
+  it('exports correct iteration constants', () => {
+    expect(PBKDF2_ITERATIONS).toBe(600000);
+    expect(PBKDF2_ITERATIONS_LEGACY).toBe(100000);
+  });
+
+  it('unlockVault works with explicit legacy iterations', async () => {
+    // Setup creates with 600K (current default)
+    const { keyMaterial } = await setupVault('TestKey#1');
+    lockVault();
+
+    // Unlock with explicit 600K iterations
+    const result = await unlockVault(keyMaterial, 'TestKey#1', PBKDF2_ITERATIONS);
+    expect(result).toBe(true);
+  });
+
+  it('unlockVault fails when iterations mismatch', async () => {
+    // Setup with 600K, try unlock with 100K — different derived key, unwrap fails
+    const { keyMaterial } = await setupVault('TestKey#2');
+    lockVault();
+
+    const result = await unlockVault(keyMaterial, 'TestKey#2', PBKDF2_ITERATIONS_LEGACY);
+    expect(result).toBe(false);
+  });
+
+  it('deriveWrappingKey produces different keys for different iterations', async () => {
+    const salt = toBase64(crypto.getRandomValues(new Uint8Array(16)));
+    const dek = await generateDek();
+
+    const key100k = await deriveWrappingKey('same-pass', salt, 100000);
+    const key600k = await deriveWrappingKey('same-pass', salt, 600000);
+
+    const wrapped100k = await wrapDek(dek, key100k);
+    const wrapped600k = await wrapDek(dek, key600k);
+    expect(wrapped100k).not.toBe(wrapped600k);
+
+    // Cross-unwrap should fail
+    const cross = await unwrapDek(wrapped100k, key600k);
+    expect(cross).toBeNull();
+  });
+
+  it('reWrapDekIterations re-wraps with current iterations', async () => {
+    const vaultKey = 'MigrateKey#1';
+    const { keyMaterial } = await setupVault(vaultKey);
+
+    // Vault is unlocked after setup — reWrap uses DEK in memory
+    const newBlobs = await reWrapDekIterations(vaultKey);
+    expect(newBlobs.vault_key_salt).toBeTruthy();
+    expect(newBlobs.encrypted_dek).toBeTruthy();
+
+    // New blobs should differ from original (new salt)
+    expect(newBlobs.vault_key_salt).not.toBe(keyMaterial.vault_key_salt);
+
+    // Unlock with new blobs at current iterations should work
+    lockVault();
+    const result = await unlockVault(newBlobs, vaultKey, PBKDF2_ITERATIONS);
+    expect(result).toBe(true);
+  });
+
+  it('reWrapDekIterations throws when vault is locked', async () => {
+    lockVault();
+    await expect(reWrapDekIterations('any-key')).rejects.toThrow('Vault must be unlocked');
+  });
+
+  it('changeVaultKey accepts oldIterations param', async () => {
+    const oldKey = 'OldIter#1';
+    const newKey = 'NewIter#2';
+    const { keyMaterial } = await setupVault(oldKey);
+
+    // Change key, passing current iterations for unwrap
+    const newBlobs = await changeVaultKey(keyMaterial, oldKey, newKey, PBKDF2_ITERATIONS);
+    lockVault();
+
+    // New key with default (600K) iterations should work
+    const result = await unlockVault(newBlobs, newKey, PBKDF2_ITERATIONS);
+    expect(result).toBe(true);
+  });
+
+  it('full migration flow: setup at 600K → unlock → reWrap → unlock with new blobs', async () => {
+    const vaultKey = 'FullFlow#1';
+    const { keyMaterial } = await setupVault(vaultKey);
+
+    // Encrypt data while unlocked
+    const dek = (await import('../../src/client/lib/crypto.js'))._getDekForContext();
+    const blob = await encrypt('migration-test', dek);
+
+    // Re-wrap (simulates migration)
+    const newBlobs = await reWrapDekIterations(vaultKey);
+    lockVault();
+
+    // Unlock with new blobs
+    await unlockVault(newBlobs, vaultKey, PBKDF2_ITERATIONS);
+
+    // Data should still decrypt (DEK unchanged)
+    const newDek = (await import('../../src/client/lib/crypto.js'))._getDekForContext();
+    const result = await decrypt(blob, newDek);
+    expect(result).toBe('migration-test');
   });
 });

@@ -5,6 +5,7 @@ export const PREFERENCE_DEFAULTS = {
     audit_ip_mode: 'hashed',
     vault_persist_session: 'lock_on_refresh',
     sync_interval: '3600',
+    kdf_iterations: '100000',
 };
 
 export const VAULT_KEY_MINIMUMS = {

@@ -8,6 +8,10 @@ describe('PREFERENCE_DEFAULTS', () => {
   it('includes sync_interval defaulting to 3600', () => {
     expect(PREFERENCE_DEFAULTS.sync_interval).toBe('3600');
   });
+
+  it('includes kdf_iterations defaulting to 100000 (legacy)', () => {
+    expect(PREFERENCE_DEFAULTS.kdf_iterations).toBe('100000');
+  });
 });
 
 describe('getUserPreference', () => {
