@@ -25,6 +25,24 @@ class Auth {
     }
 
     /**
+     * Query user, generate JWT, and set auth cookie in one step.
+     * Ensures consistent field set (id, username, role, must_reset_password).
+     * Returns the user array for use in API responses.
+     */
+    public static function issueAuthToken(PDO $db, int $userId): array {
+        $stmt = $db->prepare("SELECT id, username, display_name, email, role, must_reset_password FROM users WHERE id = ?");
+        $stmt->execute([$userId]);
+        $user = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if (!$user) {
+            Response::error('User not found.', 404);
+        }
+        $token = self::generateToken($user);
+        self::setAuthCookie($token);
+        $user['token'] = $token;
+        return $user;
+    }
+
+    /**
      * Set the JWT as an httpOnly cookie (immune to XSS).
      */
     public static function setAuthCookie(string $token): void {
