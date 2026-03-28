@@ -174,7 +174,7 @@ Passkey Login (WebAuthn):
 {`Key Derivation:
   Vault Key (numeric, user-provided)
       |
-      | PBKDF2-SHA256 (100,000 iterations, per-user random salt)
+      | PBKDF2-SHA256 (600,000 iterations, per-user random salt)
       v
   Wrapping Key (256-bit)
 

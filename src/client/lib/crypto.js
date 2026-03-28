@@ -10,7 +10,8 @@
  *   Recovery Key → PBKDF2 → Recovery Wrapping Key → wraps same DEK
  */
 
-const PBKDF2_ITERATIONS = 100000;
+export const PBKDF2_ITERATIONS = 600000;
+export const PBKDF2_ITERATIONS_LEGACY = 100000;
 
 // ── Module state ────────────────────────────────────────────────────────
 
@@ -429,12 +430,28 @@ export async function setupVault(vaultKey) {
  * @param {string} vaultKey - user's vault key
  * @returns {boolean} true if unlock succeeded
  */
-export async function unlockVault(blobs, vaultKey) {
-    const wrappingKey = await deriveWrappingKey(vaultKey, blobs.vault_key_salt);
+export async function unlockVault(blobs, vaultKey, iterations = PBKDF2_ITERATIONS) {
+    const wrappingKey = await deriveWrappingKey(vaultKey, blobs.vault_key_salt, iterations);
     const dek = await unwrapDek(blobs.encrypted_dek, wrappingKey);
     if (!dek) return false;
     setDek(dek);
     return true;
+}
+
+/**
+ * Re-wrap the DEK with a higher iteration count (silent migration).
+ * Call AFTER a successful unlockVault — the DEK is already in memory.
+ * Returns new blobs for server storage.
+ */
+export async function reWrapDekIterations(vaultKey) {
+    if (!_dek) throw new Error('Vault must be unlocked first');
+    const newSalt = generateSalt();
+    const newWrappingKey = await deriveWrappingKey(vaultKey, newSalt, PBKDF2_ITERATIONS);
+    const newEncryptedDek = await wrapDek(_dek, newWrappingKey);
+    return {
+        vault_key_salt: newSalt,
+        encrypted_dek: newEncryptedDek,
+    };
 }
 
 /**
@@ -452,9 +469,9 @@ export function lockVault() {
  * @param {string} newVaultKey
  * @returns {{ vault_key_salt: string, encrypted_dek: string }}
  */
-export async function changeVaultKey(oldBlobs, currentVaultKey, newVaultKey) {
-    // Unwrap with current key
-    const oldWrappingKey = await deriveWrappingKey(currentVaultKey, oldBlobs.vault_key_salt);
+export async function changeVaultKey(oldBlobs, currentVaultKey, newVaultKey, oldIterations = PBKDF2_ITERATIONS) {
+    // Unwrap with current key (use caller's iteration count)
+    const oldWrappingKey = await deriveWrappingKey(currentVaultKey, oldBlobs.vault_key_salt, oldIterations);
     const dek = await unwrapDek(oldBlobs.encrypted_dek, oldWrappingKey);
     if (!dek) throw new Error('Current vault key is incorrect');
 

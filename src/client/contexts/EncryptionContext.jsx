@@ -116,13 +116,12 @@ export function EncryptionProvider({ children, user }) {
       }
 
       // 2. Derive key and unwrap DEK client-side
-      const success = await crypto.unlockVault(
-        {
-          vault_key_salt: keyMaterial.vault_key_salt,
-          encrypted_dek: keyMaterial.encrypted_dek,
-        },
-        vaultKey
-      );
+      const kdfIterations = parseInt(getUserPreference(preferences, 'kdf_iterations'), 10) || 100000;
+      const blobs = {
+        vault_key_salt: keyMaterial.vault_key_salt,
+        encrypted_dek: keyMaterial.encrypted_dek,
+      };
+      const success = await crypto.unlockVault(blobs, vaultKey, kdfIterations);
 
       if (!success) {
         throw new Error('Invalid vault key.');
@@ -130,6 +129,17 @@ export function EncryptionProvider({ children, user }) {
 
       // Cache DEK for worker dispatcher
       await workerDispatcher.setKey(crypto._getDekForContext());
+
+      // 3. Silent KDF iteration migration — re-wrap DEK at higher iterations
+      if (kdfIterations < crypto.PBKDF2_ITERATIONS) {
+        try {
+          const newBlobs = await crypto.reWrapDekIterations(vaultKey);
+          await api.post('/encryption.php?action=update-vault-key', newBlobs);
+          await api.put('/preferences.php', { kdf_iterations: String(crypto.PBKDF2_ITERATIONS) });
+        } catch (_) {
+          // Non-fatal — vault stays usable, retries next unlock
+        }
+      }
 
       // 4. Use cached entries if available and fresh, otherwise fetch from server
       const hasCache = await cachePolicy.hasFreshCache();

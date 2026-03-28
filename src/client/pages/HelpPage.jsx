@@ -16,7 +16,7 @@ const faqSections = [
     items: [
       {
         q: 'What is the vault key?',
-        a: 'The vault key is a key that you set during initial setup. It derives the wrapping key (via PBKDF2 with 100,000 iterations) that protects your Data Encryption Key (DEK). You must enter it each session to unlock your data. The server never stores or sees your vault key in plaintext.',
+        a: 'The vault key is a key that you set during initial setup. It derives the wrapping key (via PBKDF2 with 600,000 iterations) that protects your Data Encryption Key (DEK). You must enter it each session to unlock your data. The server never stores or sees your vault key in plaintext.',
       },
       {
         q: 'What is the recovery key?',
@@ -394,7 +394,7 @@ MariaDB / MySQL`}
         >
 {`Vault Key (numeric, user-provided)
    |
-   |  PBKDF2 (100,000 iterations, per-user salt)
+   |  PBKDF2 (600,000 iterations, per-user salt)
    v
 Wrapping Key
    |
