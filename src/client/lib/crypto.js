@@ -443,10 +443,10 @@ export async function unlockVault(blobs, vaultKey, iterations = PBKDF2_ITERATION
  * Call AFTER a successful unlockVault — the DEK is already in memory.
  * Returns new blobs for server storage.
  */
-export async function reWrapDekIterations(vaultKey) {
+export async function reWrapDekIterations(vaultKey, targetIterations = PBKDF2_ITERATIONS) {
     if (!_dek) throw new Error('Vault must be unlocked first');
     const newSalt = generateSalt();
-    const newWrappingKey = await deriveWrappingKey(vaultKey, newSalt, PBKDF2_ITERATIONS);
+    const newWrappingKey = await deriveWrappingKey(vaultKey, newSalt, targetIterations);
     const newEncryptedDek = await wrapDek(_dek, newWrappingKey);
     return {
         vault_key_salt: newSalt,

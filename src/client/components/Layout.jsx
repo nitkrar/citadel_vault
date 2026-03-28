@@ -47,7 +47,7 @@ export function useHideAmounts() {
 }
 
 export default function Layout() {
-  const { user, logout, isSiteAdmin } = useAuth();
+  const { user, logout, isSiteAdmin, preferences, refreshPreferences } = useAuth();
   const { isUnlocked, isLoading, vaultKeyExists, lock: lockVault, promptVault } = useEncryption();
 
   const [hideAmounts, setHideAmounts] = useState(() => {
@@ -65,6 +65,22 @@ export default function Layout() {
   const [pendingShareCount, setPendingShareCount] = useState(0);
   const [showPasskeyBanner, setShowPasskeyBanner] = useState(false);
   const [passkeyBannerLoading, setPasskeyBannerLoading] = useState(false);
+  const [kdfBannerDismissed, setKdfBannerDismissed] = useState(false);
+
+  // Show KDF banner only when preference was never explicitly set by the user
+  const showKdfBanner = isUnlocked && !kdfBannerDismissed
+    && preferences && preferences.kdf_iterations === undefined;
+
+  const dismissKdfBannerSession = () => setKdfBannerDismissed(true);
+
+  const dismissKdfBannerPermanent = async () => {
+    setKdfBannerDismissed(true);
+    try {
+      // Save current default as explicit preference — signals "user made a choice"
+      await api.put('/preferences.php', { kdf_iterations: '100000' });
+      refreshPreferences();
+    } catch (_) {}
+  };
 
   useEffect(() => {
     localStorage.setItem('pv_hide_amounts', hideAmounts);
@@ -424,6 +440,28 @@ export default function Layout() {
                 </button>
                 <button className="btn btn-sm btn-outline" onClick={dismissPasskeyBannerPermanent} style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                   Don't show
+                </button>
+              </div>
+            </div>
+          )}
+          {showKdfBanner && (
+            <div className="alert alert-info" style={{ margin: 'var(--space-md)', marginBottom: 0, justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+              <div className="flex items-center gap-2" style={{ flex: '1 1 auto', minWidth: 0 }}>
+                <Shield size={18} style={{ flexShrink: 0 }} />
+                <div>
+                  <strong>Strengthen your vault encryption?</strong>{' '}
+                  Your encryption uses 100K iterations. We recommend 600K for stronger protection against brute-force attacks.
+                </div>
+              </div>
+              <div className="flex items-center gap-2" style={{ flexShrink: 0, flexWrap: 'wrap', gap: 6 }}>
+                <button className="btn btn-sm btn-primary" onClick={() => { setKdfBannerDismissed(true); navigate('/security'); }}>
+                  Go to Settings
+                </button>
+                <button className="btn btn-sm btn-outline" onClick={dismissKdfBannerSession} style={{ fontSize: 12 }}>
+                  Later
+                </button>
+                <button className="btn btn-sm btn-outline" onClick={dismissKdfBannerPermanent} style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  Don't show again
                 </button>
               </div>
             </div>

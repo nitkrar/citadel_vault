@@ -13,7 +13,7 @@ import { getUserPreference, VAULT_KEY_MINIMUMS } from '../lib/defaults';
 import Section from '../components/Section';
 
 export default function SecurityPage() {
-  const { isUnlocked, changeVaultKey, viewRecoveryKey, lock } = useEncryption();
+  const { isUnlocked, changeVaultKey, changeKdfIterations, viewRecoveryKey, lock } = useEncryption();
   const { user, preferences, refreshPreferences } = useAuth();
 
   // ── Vault Key Change ─────────────────────────────────────────────
@@ -38,6 +38,32 @@ export default function SecurityPage() {
       refreshPreferences();
     } catch {}
     setSavingKeyType(false);
+  };
+
+  // ── KDF Iterations ──────────────────────────────────────────────
+  const savedKdf = parseInt(getUserPreference(preferences, 'kdf_iterations'), 10) || 100000;
+  const [kdfValue, setKdfValue] = useState(savedKdf);
+  const [showKdfConfirm, setShowKdfConfirm] = useState(false);
+  const [kdfVaultKey, setKdfVaultKey] = useState('');
+  const [savingKdf, setSavingKdf] = useState(false);
+  const [kdfError, setKdfError] = useState('');
+  const [kdfSuccess, setKdfSuccess] = useState('');
+
+  const handleKdfSave = async () => {
+    if (!kdfVaultKey) { setKdfError('Vault key is required.'); return; }
+    setKdfError(''); setKdfSuccess('');
+    setSavingKdf(true);
+    try {
+      await changeKdfIterations(kdfVaultKey, kdfValue);
+      setKdfSuccess('Encryption strength updated.');
+      setKdfVaultKey('');
+      setShowKdfConfirm(false);
+      refreshPreferences();
+    } catch (err) {
+      setKdfError(err.message || 'Failed to update. Check your vault key.');
+    } finally {
+      setSavingKdf(false);
+    }
   };
 
   const handleChangeKey = async (e) => {
@@ -295,6 +321,57 @@ export default function SecurityPage() {
               </button>
             ))}
           </div>
+        </div>
+
+        {/* KDF Iterations slider */}
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ display: 'block', marginBottom: 6, fontSize: 13, fontWeight: 500 }}>Encryption Strength (KDF Iterations)</label>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
+            Higher iterations = stronger encryption but slower unlock. 600,000 is recommended.
+          </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, maxWidth: 400 }}>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>100K</span>
+            <input
+              type="range" min={100000} max={1000000} step={100000}
+              value={kdfValue}
+              onChange={e => { setKdfValue(Number(e.target.value)); setShowKdfConfirm(false); setKdfError(''); setKdfSuccess(''); }}
+              style={{ flex: 1 }}
+              disabled={!isUnlocked || savingKdf}
+            />
+            <span style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>1M</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+            <span style={{ fontSize: 14, fontWeight: 600 }}>{(kdfValue / 1000).toLocaleString()}K</span>
+            {kdfValue === 600000 && <span style={{ fontSize: 11, background: 'var(--color-success, #22c55e)', color: '#fff', padding: '1px 6px', borderRadius: 4 }}>Recommended</span>}
+          </div>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
+            {kdfValue <= 200000 && 'Fast unlock, but weaker protection against brute-force attacks. Not recommended for sensitive data.'}
+            {kdfValue > 200000 && kdfValue < 600000 && 'Moderate security. Unlock speed is good on most devices but protection could be stronger.'}
+            {kdfValue === 600000 && 'Balanced security and performance. Meets current OWASP guidelines for key derivation.'}
+            {kdfValue > 600000 && kdfValue < 900000 && 'Strong protection. Unlock may take a moment on older or mobile devices.'}
+            {kdfValue >= 900000 && 'Maximum protection. Unlock will be noticeably slower, especially on mobile devices.'}
+          </p>
+          {kdfSuccess && <div className="alert alert-success mb-3" style={{ marginTop: 8 }}><Check size={14} /> {kdfSuccess}</div>}
+          {kdfValue !== savedKdf && !showKdfConfirm && (
+            <button className="btn btn-secondary btn-sm" style={{ marginTop: 8 }} onClick={() => { setShowKdfConfirm(true); setKdfError(''); }} disabled={!isUnlocked}>
+              Update Encryption Strength
+            </button>
+          )}
+          {showKdfConfirm && (
+            <div style={{ marginTop: 8, maxWidth: 400 }}>
+              {kdfError && <div className="alert alert-danger mb-3">{kdfError}</div>}
+              <div className="form-group">
+                <label className="form-label">Enter vault key to confirm</label>
+                <input className="form-control" type="password" value={kdfVaultKey} onChange={e => setKdfVaultKey(e.target.value)} autoComplete="off" autoFocus />
+              </div>
+              <div className="flex gap-2">
+                <button className="btn btn-primary btn-sm" onClick={handleKdfSave} disabled={savingKdf}>
+                  {savingKdf ? 'Updating encryption...' : 'Confirm'}
+                </button>
+                <button className="btn btn-ghost btn-sm" onClick={() => { setShowKdfConfirm(false); setKdfVaultKey(''); setKdfError(''); setKdfValue(savedKdf); }}>Cancel</button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Change key */}

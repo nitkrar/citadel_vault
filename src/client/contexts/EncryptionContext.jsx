@@ -130,17 +130,6 @@ export function EncryptionProvider({ children, user }) {
       // Cache DEK for worker dispatcher
       await workerDispatcher.setKey(crypto._getDekForContext());
 
-      // 3. Silent KDF iteration migration — re-wrap DEK at higher iterations
-      if (kdfIterations < crypto.PBKDF2_ITERATIONS) {
-        try {
-          const newBlobs = await crypto.reWrapDekIterations(vaultKey);
-          await api.post('/encryption.php?action=update-vault-key', newBlobs);
-          await api.put('/preferences.php', { kdf_iterations: String(crypto.PBKDF2_ITERATIONS) });
-        } catch (_) {
-          // Non-fatal — vault stays usable, retries next unlock
-        }
-      }
-
       // 4. Use cached entries if available and fresh, otherwise fetch from server
       const hasCache = await cachePolicy.hasFreshCache();
       if (!hasCache) {
@@ -215,6 +204,16 @@ export function EncryptionProvider({ children, user }) {
     // 3. Send new blobs to server
     await api.post('/encryption.php?action=update-vault-key', newBlobs);
 
+    return { success: true };
+  }, []);
+
+  // ------------------------------------------------------------------
+  // Change KDF iterations (re-wrap DEK at new iteration count)
+  // ------------------------------------------------------------------
+  const changeKdfIterations = useCallback(async (vaultKey, newIterations) => {
+    const newBlobs = await crypto.reWrapDekIterations(vaultKey, newIterations);
+    await api.post('/encryption.php?action=update-vault-key', newBlobs);
+    await api.put('/preferences.php', { kdf_iterations: String(newIterations) });
     return { success: true };
   }, []);
 
@@ -384,6 +383,7 @@ export function EncryptionProvider({ children, user }) {
     lock,
     setup,
     changeVaultKey,
+    changeKdfIterations,
     recoverWithRecoveryKey,
     viewRecoveryKey,
     encrypt,

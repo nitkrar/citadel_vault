@@ -501,6 +501,24 @@ describe('PBKDF2 iteration migration', () => {
     expect(result).toBe(true);
   });
 
+  it('reWrapDekIterations accepts custom target iterations', async () => {
+    const vaultKey = 'CustomIter#1';
+    await setupVault(vaultKey);
+
+    // Re-wrap at 200K
+    const newBlobs = await reWrapDekIterations(vaultKey, 200000);
+    lockVault();
+
+    // Unlock at 200K should work
+    const result = await unlockVault(newBlobs, vaultKey, 200000);
+    expect(result).toBe(true);
+
+    // Unlock at default 600K should fail
+    lockVault();
+    const wrong = await unlockVault(newBlobs, vaultKey, PBKDF2_ITERATIONS);
+    expect(wrong).toBe(false);
+  });
+
   it('reWrapDekIterations throws when vault is locked', async () => {
     lockVault();
     await expect(reWrapDekIterations('any-key')).rejects.toThrow('Vault must be unlocked');
