@@ -88,7 +88,7 @@ export default function EncryptionKeyModal() {
   const eyeToggleRow = (
     <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 4 }}>
       <button type="button" onClick={() => setShowVaultKey(v => !v)}
-        style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px', color: '#6b7280', fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
+        style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px', color: 'var(--color-text-muted)', fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
         {showVaultKey ? <EyeOff size={14} /> : <Eye size={14} />} {showVaultKey ? 'Hide' : 'Show'}
       </button>
     </div>
@@ -98,13 +98,13 @@ export default function EncryptionKeyModal() {
   // Strength meter (simple visual feedback)
   // ------------------------------------------------------------------
   function getStrength(key) {
-    if (!key) return { label: '', color: '#d1d5db', pct: 0 };
+    if (!key) return { label: '', color: 'var(--color-border)', pct: 0 };
     const min = getVaultKeyMinLength(keyType);
-    if (key.length < min) return { label: 'Too short', color: '#ef4444', pct: 20 };
+    if (key.length < min) return { label: 'Too short', color: 'var(--color-danger)', pct: 20 };
     const ratio = Math.min(key.length / (min * 2), 1);
-    if (ratio < 0.5) return { label: 'Acceptable', color: '#f59e0b', pct: 40 };
-    if (ratio < 0.75) return { label: 'Good', color: '#22c55e', pct: 70 };
-    return { label: 'Strong', color: '#16a34a', pct: 100 };
+    if (ratio < 0.5) return { label: 'Acceptable', color: 'var(--color-warning)', pct: 40 };
+    if (ratio < 0.75) return { label: 'Good', color: 'var(--color-success)', pct: 70 };
+    return { label: 'Strong', color: 'var(--color-success)', pct: 100 };
   }
 
   // ------------------------------------------------------------------
@@ -217,20 +217,20 @@ export default function EncryptionKeyModal() {
 
   // Shared styles
   const inputStyle = {
-    width: '100%', padding: '10px 12px', border: '1px solid #d1d5db',
-    borderRadius: 8, fontSize: 15, boxSizing: 'border-box',
+    width: '100%', padding: '10px 12px', border: '1px solid var(--color-border)',
+    borderRadius: 8, fontSize: 15, boxSizing: 'border-box', background: 'var(--color-input-bg, var(--bg-primary))', color: 'var(--color-text, inherit)',
   };
   const btnPrimary = (disabled) => ({
     width: '100%', padding: '10px 0', borderRadius: 8, border: 'none',
-    background: '#2563eb', color: '#fff', fontWeight: 600, fontSize: 15,
+    background: 'var(--color-primary, #2563eb)', color: '#fff', fontWeight: 600, fontSize: 15,
     cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.7 : 1, marginBottom: 8,
   });
   const btnSecondary = {
-    width: '100%', padding: '10px 0', borderRadius: 8, border: '1px solid #d1d5db',
-    background: 'transparent', color: '#6b7280', fontWeight: 500, fontSize: 14, cursor: 'pointer',
+    width: '100%', padding: '10px 0', borderRadius: 8, border: '1px solid var(--color-border)',
+    background: 'transparent', color: 'var(--color-text-muted)', fontWeight: 500, fontSize: 14, cursor: 'pointer',
   };
   const errorBox = (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 12px', marginBottom: 12, color: '#dc2626', fontSize: 13 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--color-danger-light)', border: '1px solid var(--color-danger)', borderRadius: 8, padding: '10px 12px', marginBottom: 12, color: 'var(--color-danger)', fontSize: 13 }}>
       <AlertTriangle size={16} style={{ flexShrink: 0 }} /><span>{error}</span>
     </div>
   );
@@ -242,8 +242,8 @@ export default function EncryptionKeyModal() {
     return (
       <Modal isOpen={true} title="Save Your Recovery Key" onClose={null}>
         <div style={{ textAlign: 'center', padding: '8px 0' }}>
-          <Shield size={48} style={{ color: '#f59e0b', marginBottom: 16 }} />
-          <p style={{ marginBottom: 8, color: '#6b7280', fontSize: 14 }}>
+          <Shield size={48} style={{ color: 'var(--color-warning)', marginBottom: 16 }} />
+          <p style={{ marginBottom: 8, color: 'var(--color-text-muted)', fontSize: 14 }}>
             This recovery key is the <strong>only way</strong> to regain access if you forget your vault key.
           </p>
           <RecoveryKeyCopyBlock recoveryKey={recoveryKeyDisplay} />
@@ -270,13 +270,13 @@ export default function EncryptionKeyModal() {
     return (
       <Modal isOpen={true} title="Change Your Vault Key" onClose={null}>
         <form onSubmit={handleForceChange}>
-          <div style={{ textAlign: 'center', marginBottom: 16 }}><KeyRound size={40} style={{ color: '#dc2626' }} /></div>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 12px', marginBottom: 16, color: '#dc2626', fontSize: 13 }}>
+          <div style={{ textAlign: 'center', marginBottom: 16 }}><KeyRound size={40} style={{ color: 'var(--color-danger)' }} /></div>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, background: 'var(--color-danger-light)', border: '1px solid var(--color-danger)', borderRadius: 8, padding: '10px 12px', marginBottom: 16, color: 'var(--color-danger)', fontSize: 13 }}>
             <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
             <div>
               <div>Your administrator requires you to change your vault key.</div>
               {adminActionMessage && (
-                <div style={{ marginTop: 6, padding: '6px 10px', background: 'rgba(0,0,0,.04)', borderRadius: 6, fontStyle: 'italic', color: '#991b1b' }}>
+                <div style={{ marginTop: 6, padding: '6px 10px', background: 'rgba(0,0,0,.04)', borderRadius: 6, fontStyle: 'italic', color: 'var(--color-danger)' }}>
                   {adminActionMessage}
                 </div>
               )}
@@ -297,9 +297,9 @@ export default function EncryptionKeyModal() {
             <div style={{ display: 'flex', gap: 6 }}>
               {Object.entries({ numeric: 'PIN', alphanumeric: 'Password', passphrase: 'Passphrase' }).map(([type, label]) => (
                 <button key={type} type="button" onClick={() => { setKeyType(type); setNewVaultKey(''); setConfirmNewKey(''); }}
-                  style={{ flex: 1, padding: '7px 8px', borderRadius: 8, border: `1px solid ${keyType === type ? '#2563eb' : '#d1d5db'}`, background: keyType === type ? '#eff6ff' : 'transparent', color: keyType === type ? '#2563eb' : '#6b7280', fontWeight: 500, fontSize: 13, cursor: 'pointer' }}>
+                  style={{ flex: 1, padding: '7px 8px', borderRadius: 8, border: `1px solid ${keyType === type ? 'var(--color-primary, #2563eb)' : 'var(--color-border)'}`, background: keyType === type ? 'var(--color-primary-light, #eff6ff)' : 'transparent', color: keyType === type ? 'var(--color-primary, #2563eb)' : 'var(--color-text-muted)', fontWeight: 500, fontSize: 13, cursor: 'pointer' }}>
                   {label}
-                  <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>{VAULT_KEY_MINIMUMS[type]}+ chars</div>
+                  <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 2 }}>{VAULT_KEY_MINIMUMS[type]}+ chars</div>
                 </button>
               ))}
             </div>
@@ -308,7 +308,7 @@ export default function EncryptionKeyModal() {
             <label style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}>New Vault Key</label>
             <input {...inputProps} placeholder={`${minLen}+ characters`} value={newVaultKey} onChange={(e) => setNewVaultKey(e.target.value)} required style={inputStyle} />
             {newVaultKey && <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={{ flex: 1, height: 4, borderRadius: 2, background: '#e5e7eb' }}><div style={{ height: '100%', width: `${strength.pct}%`, background: strength.color, borderRadius: 2, transition: 'width 0.2s' }} /></div>
+              <div style={{ flex: 1, height: 4, borderRadius: 2, background: 'var(--color-border)' }}><div style={{ height: '100%', width: `${strength.pct}%`, background: strength.color, borderRadius: 2, transition: 'width 0.2s' }} /></div>
               <span style={{ fontSize: 12, color: strength.color }}>{strength.label}</span>
             </div>}
           </div>
@@ -332,8 +332,8 @@ export default function EncryptionKeyModal() {
     return (
       <Modal isOpen={true} title="Recover Your Vault" onClose={() => setMode(null)}>
         <form onSubmit={handleRecovery}>
-          <div style={{ textAlign: 'center', marginBottom: 16 }}><Shield size={40} style={{ color: '#f59e0b' }} /></div>
-          <p style={{ color: '#6b7280', fontSize: 14, marginBottom: 16 }}>
+          <div style={{ textAlign: 'center', marginBottom: 16 }}><Shield size={40} style={{ color: 'var(--color-warning)' }} /></div>
+          <p style={{ color: 'var(--color-text-muted)', fontSize: 14, marginBottom: 16 }}>
             Enter your recovery key to regain access and set a new vault key.
           </p>
           {error && errorBox}
@@ -346,7 +346,7 @@ export default function EncryptionKeyModal() {
             <label style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}>New Vault Key</label>
             <input {...inputProps} placeholder={`${minLen}+ characters`} value={newVaultKey} onChange={(e) => setNewVaultKey(e.target.value)} required style={inputStyle} />
             {newVaultKey && <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={{ flex: 1, height: 4, borderRadius: 2, background: '#e5e7eb' }}><div style={{ height: '100%', width: `${strength.pct}%`, background: strength.color, borderRadius: 2, transition: 'width 0.2s' }} /></div>
+              <div style={{ flex: 1, height: 4, borderRadius: 2, background: 'var(--color-border)' }}><div style={{ height: '100%', width: `${strength.pct}%`, background: strength.color, borderRadius: 2, transition: 'width 0.2s' }} /></div>
               <span style={{ fontSize: 12, color: strength.color }}>{strength.label}</span>
             </div>}
           </div>
@@ -371,8 +371,8 @@ export default function EncryptionKeyModal() {
     return (
       <Modal isOpen={true} title="Set Up Vault Key" onClose={handleSkip}>
         <form onSubmit={handleSetup}>
-          <div style={{ textAlign: 'center', marginBottom: 16 }}><KeyRound size={40} style={{ color: '#2563eb' }} /></div>
-          <p style={{ color: '#6b7280', fontSize: 14, marginBottom: 16 }}>
+          <div style={{ textAlign: 'center', marginBottom: 16 }}><KeyRound size={40} style={{ color: 'var(--color-primary, #2563eb)' }} /></div>
+          <p style={{ color: 'var(--color-text-muted)', fontSize: 14, marginBottom: 16 }}>
             Create a vault key to protect your data with end-to-end encryption. All encryption happens in your browser — the server never sees your vault key.
           </p>
           {error && errorBox}
@@ -383,9 +383,9 @@ export default function EncryptionKeyModal() {
             <div style={{ display: 'flex', gap: 6 }}>
               {Object.entries({ numeric: 'PIN', alphanumeric: 'Password', passphrase: 'Passphrase' }).map(([type, label]) => (
                 <button key={type} type="button" onClick={() => { setKeyType(type); setVaultKey(''); setConfirmKey(''); }}
-                  style={{ flex: 1, padding: '7px 8px', borderRadius: 8, border: `1px solid ${keyType === type ? '#2563eb' : '#d1d5db'}`, background: keyType === type ? '#eff6ff' : 'transparent', color: keyType === type ? '#2563eb' : '#6b7280', fontWeight: 500, fontSize: 13, cursor: 'pointer' }}>
+                  style={{ flex: 1, padding: '7px 8px', borderRadius: 8, border: `1px solid ${keyType === type ? 'var(--color-primary, #2563eb)' : 'var(--color-border)'}`, background: keyType === type ? 'var(--color-primary-light, #eff6ff)' : 'transparent', color: keyType === type ? 'var(--color-primary, #2563eb)' : 'var(--color-text-muted)', fontWeight: 500, fontSize: 13, cursor: 'pointer' }}>
                   {label}
-                  <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>{VAULT_KEY_MINIMUMS[type]}+ chars</div>
+                  <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 2 }}>{VAULT_KEY_MINIMUMS[type]}+ chars</div>
                 </button>
               ))}
             </div>
@@ -396,7 +396,7 @@ export default function EncryptionKeyModal() {
             <label style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}>Vault Key</label>
             <input {...inputProps} placeholder={`${minLen}+ characters`} value={vaultKey} onChange={(e) => setVaultKey(e.target.value)} autoFocus required style={inputStyle} />
             {vaultKey && <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={{ flex: 1, height: 4, borderRadius: 2, background: '#e5e7eb' }}><div style={{ height: '100%', width: `${strength.pct}%`, background: strength.color, borderRadius: 2, transition: 'width 0.2s' }} /></div>
+              <div style={{ flex: 1, height: 4, borderRadius: 2, background: 'var(--color-border)' }}><div style={{ height: '100%', width: `${strength.pct}%`, background: strength.color, borderRadius: 2, transition: 'width 0.2s' }} /></div>
               <span style={{ fontSize: 12, color: strength.color }}>{strength.label}</span>
             </div>}
           </div>
@@ -420,25 +420,25 @@ export default function EncryptionKeyModal() {
   return (
     <Modal isOpen={true} title={forceUnlockForChange ? 'Vault Key Change Required' : 'Unlock Your Vault'} onClose={forceUnlockForChange ? null : handleSkip}>
       <form onSubmit={handleUnlock}>
-        <div style={{ textAlign: 'center', marginBottom: 16 }}><KeyRound size={40} style={{ color: forceUnlockForChange ? '#dc2626' : '#2563eb' }} /></div>
+        <div style={{ textAlign: 'center', marginBottom: 16 }}><KeyRound size={40} style={{ color: forceUnlockForChange ? 'var(--color-danger)' : 'var(--color-primary, #2563eb)' }} /></div>
         {forceUnlockForChange && (
           <div style={{ marginBottom: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 12px', color: '#dc2626', fontSize: 13 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, background: 'var(--color-danger-light)', border: '1px solid var(--color-danger)', borderRadius: 8, padding: '10px 12px', color: 'var(--color-danger)', fontSize: 13 }}>
               <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
               <div>
                 <div>Your administrator requires you to change your vault key.</div>
                 {adminActionMessage && (
-                  <div style={{ marginTop: 6, padding: '6px 10px', background: 'rgba(0,0,0,.04)', borderRadius: 6, fontStyle: 'italic', color: '#991b1b' }}>
+                  <div style={{ marginTop: 6, padding: '6px 10px', background: 'rgba(0,0,0,.04)', borderRadius: 6, fontStyle: 'italic', color: 'var(--color-danger)' }}>
                     {adminActionMessage}
                   </div>
                 )}
               </div>
             </div>
-            <p style={{ color: '#6b7280', fontSize: 13, marginTop: 8 }}>Enter your current vault key to continue.</p>
+            <p style={{ color: 'var(--color-text-muted)', fontSize: 13, marginTop: 8 }}>Enter your current vault key to continue.</p>
           </div>
         )}
         {!forceUnlockForChange && (
-          <p style={{ color: '#6b7280', fontSize: 14, marginBottom: 16 }}>
+          <p style={{ color: 'var(--color-text-muted)', fontSize: 14, marginBottom: 16 }}>
             Enter your vault key to decrypt your data.
           </p>
         )}
@@ -451,7 +451,7 @@ export default function EncryptionKeyModal() {
         <button type="submit" disabled={submitting} style={btnPrimary(submitting)}>
           {submitting ? 'Unlocking...' : forceUnlockForChange ? 'Continue' : 'Unlock Vault'}
         </button>
-        <button type="button" onClick={() => setMode('recovery')} style={{ ...btnSecondary, marginBottom: 8, color: '#f59e0b' }}>
+        <button type="button" onClick={() => setMode('recovery')} style={{ ...btnSecondary, marginBottom: 8, color: 'var(--color-warning)' }}>
           Forgot vault key? Use recovery key
         </button>
         {!forceUnlockForChange && (

@@ -289,7 +289,7 @@ export default function PortfolioPage() {
           {activeTab === 'type' && <TypeTab groups={p.by_type} fmtD={fmtD} />}
           {activeTab === 'assets' && <AllAssetsTab assets={p.assets} fmtD={fmtD} />}
           {activeTab === 'currencies' && <CurrencyTab groups={p.by_currency} fmtD={fmtD} />}
-          {activeTab === 'history' && <HistoryTab decrypt={decrypt} encrypt={encrypt} fmtD={fmtD} hideAmounts={hideAmounts} currencies={currencies} displayCurrency={displayCurrency} baseCurrency={baseCurrency} />}
+          {activeTab === 'history' && <HistoryTab decrypt={decrypt} encrypt={encrypt} fmtD={fmtD} hideAmounts={hideAmounts} currencies={currencies} displayCurrency={displayCurrency} baseCurrency={baseCurrency} snapshotPrompt={snapshotPrompt} setSnapshotPrompt={setSnapshotPrompt} doSaveSnapshot={doSaveSnapshot} snapshotSaving={snapshotSaving} />}
         </>
       )}
     </div>
@@ -675,7 +675,7 @@ function CurrencyTab({ groups, fmtD }) {
 // History Tab
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-function HistoryTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrency, baseCurrency }) {
+function HistoryTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrency, baseCurrency, snapshotPrompt, setSnapshotPrompt, doSaveSnapshot, snapshotSaving }) {
   const [snapshots, setSnapshots] = useState([]);
   const [loadingSnap, setLoadingSnap] = useState(false);
   const [loaded, setLoaded] = useState(false);
