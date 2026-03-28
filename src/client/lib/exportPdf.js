@@ -6,6 +6,7 @@
  */
 
 import { cleanEntry, TYPE_LABELS } from './exportHelpers';
+import { extractValue } from './portfolioAggregator';
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -20,7 +21,17 @@ function fmtVal(val, currency) {
   return `${s}${val}`;
 }
 
-function primaryValue(c) { return c.value ?? c.current_value ?? c.face_value ?? null; }
+/** Cached template fields lookup — avoids repeated find+parse per entry */
+let _templateFieldsCache = {};
+function getEntryValue(entry, templates) {
+  const type = entry._entryType || entry.entry_type || entry.template_key;
+  if (!_templateFieldsCache[type]) {
+    const tmpl = templates?.find(t => t.template_key === type && !t.owner_id);
+    _templateFieldsCache[type] = tmpl ? parseFields(tmpl.fields) : [];
+  }
+  const val = extractValue(entry, _templateFieldsCache[type]);
+  return val || null;
+}
 function esc(s) { return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 
 function parseFields(raw) {
@@ -41,11 +52,11 @@ function findTemplate(templates, type) {
  * Compute totals per currency from asset entries.
  * Returns { byCurrency: { GBP: 350825, USD: 21000 }, subtotalStr: "£350,825 GBP · $21,000 USD" }
  */
-function computeSubtotals(entries) {
+function computeSubtotals(entries, templates) {
   const byCurrency = {};
   for (const e of entries) {
     const c = cleanEntry(e);
-    const val = Number(primaryValue(c));
+    const val = Number(getEntryValue(c, templates));
     if (isNaN(val) || !c.currency) continue;
     byCurrency[c.currency] = (byCurrency[c.currency] || 0) + val;
   }
@@ -59,8 +70,8 @@ function computeSubtotals(entries) {
  * Build net worth summary tiles HTML.
  * Shows per-currency native totals + grand total in base currency.
  */
-function buildNetWorthTiles(assets, rateMap, baseCurrency) {
-  const { byCurrency } = computeSubtotals(assets);
+function buildNetWorthTiles(assets, rateMap, baseCurrency, templates) {
+  const { byCurrency } = computeSubtotals(assets, templates);
   if (Object.keys(byCurrency).length === 0) return '';
 
   const baseRate = (cur) => rateMap?.[cur] || (cur === baseCurrency ? 1 : 0);
@@ -277,7 +288,7 @@ function buildOverviewAccountsAssets(accounts, assets) {
       treeHtml = linked.map(a => {
         linkedIds.add(a.row_id);
         const ac = cleanEntry(a);
-        const val = primaryValue(ac);
+        const val = getEntryValue(ac, templates);
         return `<div class="tree__item">
           <span class="tree__name">${esc(ac.title ?? ac.name)}</span>
           ${ac.subtype ? `<span class="tree__type">${esc(ac.subtype)}</span>` : ''}
@@ -301,7 +312,7 @@ function buildOverviewAccountsAssets(accounts, assets) {
   if (unlinked.length > 0) {
     const items = unlinked.map((a, i) => {
       const ac = cleanEntry(a);
-      const val = primaryValue(ac);
+      const val = getEntryValue(ac, templates);
       return `<li class="unlinked-list__item">
         <span class="unlinked-list__num">${i + 1}.</span>
         <span class="unlinked-list__name">${esc(ac.title ?? ac.name)}</span>
@@ -312,7 +323,7 @@ function buildOverviewAccountsAssets(accounts, assets) {
     unlinkedHtml = `<hr class="unlinked-divider"/><div class="unlinked-label">Unlinked Assets</div><ul class="unlinked-list">${items}</ul>`;
   }
 
-  const { subtotalStr } = computeSubtotals(assets);
+  const { subtotalStr } = computeSubtotals(assets, templates);
   return `<div class="section">
     <div class="section__header">
       <span class="section__title">Accounts &amp; Assets</span>
@@ -378,7 +389,7 @@ function buildFullAccountsAssets(accounts, assets, templates, { overview = false
       const assetRows = linked.map(a => {
         linkedIds.add(a.row_id);
         const ac = cleanEntry(a);
-        const val = overview ? null : primaryValue(ac);
+        const val = overview ? null : getEntryValue(ac, templates);
         const aFields = getExtraFields(ac, assetFieldsDef, { overview });
         const chips = aFields.map(f => {
           const cls = f.isSecret ? 'chip__value--mono' : (f.isCurrency ? 'chip__value--currency' : 'chip__value');
@@ -425,7 +436,7 @@ function buildFullAccountsAssets(accounts, assets, templates, { overview = false
   }
 
   const subtotalHtml = overview ? '' : (() => {
-    const { subtotalStr } = computeSubtotals(assets);
+    const { subtotalStr } = computeSubtotals(assets, templates);
     return subtotalStr ? `<span class="section__subtotal">${esc(subtotalStr)}</span>` : '';
   })();
   return `<div class="section">
@@ -484,6 +495,7 @@ function buildFullEntryCards(type, entries, templates, { overview = false } = {}
  * @param {string} [baseCurrency] - Base currency code (default 'GBP')
  */
 export async function exportPdf(grouped, templates, mode, dateSuffix, rateMap, baseCurrency = 'GBP') {
+  _templateFieldsCache = {}; // reset per export
   const accounts = grouped.account ?? [];
   const assets = grouped.asset ?? [];
   const standardTypes = ['password', 'license', 'insurance', 'custom'];
@@ -492,7 +504,7 @@ export async function exportPdf(grouped, templates, mode, dateSuffix, rateMap, b
 
   // Net worth tiles (if rate data available)
   if (rateMap && assets.length > 0) {
-    body += buildNetWorthTiles(assets, rateMap, baseCurrency);
+    body += buildNetWorthTiles(assets, rateMap, baseCurrency, templates);
   }
 
   if (mode === 'overview') {
