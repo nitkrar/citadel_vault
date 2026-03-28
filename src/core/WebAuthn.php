@@ -630,16 +630,8 @@ function webauthnVerifyAuth(
     $stmt->execute([$newSignCount, $credentialId]);
 
     // 7. Generate JWT token
-    $user = [
-        'id'       => (int)$cred['user_id'],
-        'username' => $cred['username'],
-        'email'    => $cred['email'],
-        'role'     => $cred['role'],
-    ];
-
     require_once __DIR__ . '/Auth.php';
-    $token = Auth::generateToken($user);
-    Auth::setAuthCookie($token);
+    $user = Auth::issueAuthToken($pdo, (int)$cred['user_id']);
 
     return [
         'user'       => $user,

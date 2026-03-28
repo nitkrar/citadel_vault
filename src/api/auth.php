@@ -116,8 +116,7 @@ if ($method === 'POST' && $action === 'login') {
         // Table may not exist — default to false
     }
 
-    $token = Auth::generateToken($user);
-    Auth::setAuthCookie($token);
+    $authUser = Auth::issueAuthToken($db, (int)$user['id']);
 
     // Once-per-day exchange rate refresh on first login of the day
     try {
@@ -127,6 +126,7 @@ if ($method === 'POST' && $action === 'login') {
     }
 
     Response::success([
+        'token' => $authUser['token'],
         'user' => [
             'id'                    => (int)$user['id'],
             'username'              => $user['username'],
@@ -246,23 +246,16 @@ if ($method === 'POST' && $action === 'register') {
         ], 201);
     }
 
-    $user = [
-        'id'       => $newId,
-        'username' => $username,
-        'email'    => $email,
-        'role'     => $role,
-    ];
-
-    $token = Auth::generateToken($user);
-    Auth::setAuthCookie($token);
+    $user = Auth::issueAuthToken($db, $newId);
 
     Response::success([
+        'token' => $user['token'],
         'user' => [
-            'id'                   => $newId,
-            'username'             => $username,
-            'email'                => $email,
-            'role'                 => $role,
-            'must_reset_password' => false,
+            'id'                   => (int)$user['id'],
+            'username'             => $user['username'],
+            'email'                => $user['email'],
+            'role'                 => $user['role'],
+            'must_reset_password'  => !empty($user['must_reset_password']),
         ],
         'expires_in' => JWT_EXPIRY,
     ], 201);
@@ -464,7 +457,10 @@ if ($method === 'PUT' && $action === 'password') {
     $stmt = $db->prepare("UPDATE users SET password_hash = ? WHERE id = ?");
     $stmt->execute([$hash, $userId]);
 
-    Response::success(['message' => 'Password updated.']);
+    // Reissue JWT so old token is replaced
+    $authUser = Auth::issueAuthToken($db, $userId);
+
+    Response::success(['token' => $authUser['token'], 'message' => 'Password updated.']);
 }
 
 // ---------------------------------------------------------------------------
@@ -512,15 +508,9 @@ if ($method === 'POST' && $action === 'force-change-password') {
     }
 
     // Reissue JWT with must_reset_password cleared
-    $stmt = $db->prepare("SELECT id, username, role, must_reset_password FROM users WHERE id = ?");
-    $stmt->execute([$userId]);
-    $updatedUser = $stmt->fetch(PDO::FETCH_ASSOC);
-    if ($updatedUser) {
-        $token = Auth::generateToken($updatedUser);
-        Auth::setAuthCookie($token);
-    }
+    $authUser = Auth::issueAuthToken($db, $userId);
 
-    Response::success(['message' => 'Password changed successfully.']);
+    Response::success(['token' => $authUser['token'], 'message' => 'Password changed successfully.']);
 }
 
 // ---------------------------------------------------------------------------
@@ -689,21 +679,17 @@ if ($method === 'POST' && $action === 'forgot-password') {
     } catch (Exception $e) {}
 
     // Generate JWT and set cookie
-    $token = Auth::generateToken([
-        'id'       => $userId,
-        'username' => $user['username'],
-        'email'    => $user['email'],
-        'role'     => $user['role'],
-    ]);
-    Auth::setAuthCookie($token);
+    $authUser = Auth::issueAuthToken($db, $userId);
 
     Response::success([
+        'token' => $authUser['token'],
         'user' => [
-            'id'       => $userId,
-            'username' => $user['username'],
-            'email'    => $user['email'],
-            'role'     => $user['role'],
+            'id'       => (int)$authUser['id'],
+            'username' => $authUser['username'],
+            'email'    => $authUser['email'],
+            'role'     => $authUser['role'],
         ],
+        'expires_in' => JWT_EXPIRY,
     ]);
 }
 

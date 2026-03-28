@@ -140,24 +140,15 @@ if ($method === 'POST' && $action === 'auth-verify') {
     // Check account lockout before issuing JWT
     Auth::enforceAccountLockout($db, (int)$result['user']['id']);
 
-    // Check must_change_password
-    $mustChangePassword = false;
-    try {
-        $stmt = $db->prepare("SELECT must_change_password FROM users WHERE id = ?");
-        $stmt->execute([$result['user']['id']]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($row) {
-            $mustChangePassword = (bool)$row['must_change_password'];
-        }
-    } catch (Exception $e) {
-        // Column may not exist yet — default to false
-    }
-
     Response::success([
-        'token'      => $result['token'],
-        'user'       => array_merge($result['user'], [
-            'must_change_password' => $mustChangePassword,
-        ]),
+        'token'      => $result['user']['token'],
+        'user'       => [
+            'id'                   => (int)$result['user']['id'],
+            'username'             => $result['user']['username'],
+            'email'                => $result['user']['email'],
+            'role'                 => $result['user']['role'],
+            'must_change_password' => !empty($result['user']['must_reset_password']),
+        ],
         'expires_in' => $result['expires_in'],
     ]);
 }
