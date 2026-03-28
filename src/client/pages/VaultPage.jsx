@@ -49,12 +49,53 @@ const MONETARY_KEYS = ['balance', 'value', 'current_value', 'purchase_price', 'f
   'premium_amount', 'coverage_amount', 'cash_value', 'credit_limit', 'price_per_share'];
 
 // Inline editable number field for linked asset values
+function InlineTextField({ value, isEditing, editValue, saving, onStartEdit, onChange, onSave, onCancel }) {
+  if (isEditing) {
+    return (
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }} onClick={e => e.stopPropagation()}>
+        <input
+          type="text"
+          className="form-control"
+          value={editValue}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); onSave(); } if (e.key === 'Escape') onCancel(); }}
+          autoFocus
+          disabled={saving}
+          style={{ width: 180, height: 28, fontSize: 13, padding: '2px 6px' }}
+        />
+        <button className="btn btn-ghost btn-sm" onClick={onSave} disabled={saving} style={{ padding: '2px 4px' }}>
+          <Check size={13} />
+        </button>
+        <button className="btn btn-ghost btn-sm" onClick={onCancel} style={{ padding: '2px 4px' }}>
+          <X size={13} />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <span
+      onClick={(e) => { e.stopPropagation(); onStartEdit(); }}
+      title="Click to edit title"
+      style={{
+        cursor: 'pointer', padding: '2px 4px', borderRadius: 4,
+        border: '1px solid transparent', transition: 'border-color .15s',
+      }}
+      onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--border)'}
+      onMouseLeave={e => e.currentTarget.style.borderColor = 'transparent'}
+    >
+      <span className="font-medium">{value || '(untitled)'}</span>
+      <Edit2 size={10} style={{ marginLeft: 4, opacity: 0.4, verticalAlign: -1 }} />
+    </span>
+  );
+}
+
 function InlineNumberField({ label, value, currency, isEditing, editValue, saving, onStartEdit, onChange, onSave, onCancel, masked }) {
   const displayValue = masked ? MASKED : (value ? `${currency ? currency + ' ' : ''}${Number(value).toLocaleString()}` : '—');
 
   if (isEditing) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }} onClick={e => e.stopPropagation()}>
         <span className="text-muted" style={{ fontSize: 11 }}>{label}:</span>
         <input
           type="number"
@@ -79,7 +120,7 @@ function InlineNumberField({ label, value, currency, isEditing, editValue, savin
 
   return (
     <span
-      onClick={onStartEdit}
+      onClick={(e) => { e.stopPropagation(); onStartEdit(e); }}
       title={`Click to edit ${label}`}
       style={{
         fontSize: 13, cursor: 'pointer', padding: '2px 6px', borderRadius: 4,
@@ -145,7 +186,7 @@ export default function VaultPage() {
       setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     } else {
       setSortKey(key);
-      setSortDir(key === 'title' ? 'asc' : 'desc');
+      setSortDir(key === 'title' || key === 'type' ? 'asc' : 'desc');
     }
   };
 
@@ -153,6 +194,7 @@ export default function VaultPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [editEntry, setEditEntry] = useState(null);
   const [viewEntry, setViewEntry] = useState(null);
+  const [parentViewEntry, setParentViewEntry] = useState(null);
   const [showDeleted, setShowDeleted] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [deletedEntries, setDeletedEntries] = useState([]);
@@ -174,6 +216,12 @@ export default function VaultPage() {
   // Inline editing of linked asset values
   const [inlineEditAsset, setInlineEditAsset] = useState(null); // { id, field, value }
   const [inlineEditSaving, setInlineEditSaving] = useState(false);
+  // Inline title editing in vault table
+  const [inlineTitleEdit, setInlineTitleEdit] = useState(null); // { id, value }
+  const [inlineTitleSaving, setInlineTitleSaving] = useState(false);
+  // Inline amount editing in vault table (direct-value templates only)
+  const [inlineAmountEdit, setInlineAmountEdit] = useState(null); // { id, field, value }
+  const [inlineAmountSaving, setInlineAmountSaving] = useState(false);
 
   // Re-encrypt prompt state
   const [reEncryptEntry, setReEncryptEntry] = useState(null);
@@ -430,6 +478,11 @@ export default function VaultPage() {
       let va, vb;
       switch (sortKey) {
         case 'title':    va = da?.title || ''; vb = db?.title || ''; break;
+        case 'type': {
+          const ta = templates.find(t => t.id === a.template_id) || a.template;
+          const tb = templates.find(t => t.id === b.template_id) || b.template;
+          va = ta?.name || a.entry_type || ''; vb = tb?.name || b.entry_type || ''; break;
+        }
         case 'amount':   va = getEntryAmountRaw(a, da); vb = getEntryAmountRaw(b, db); break;
         case 'currency': va = da?.currency || ''; vb = db?.currency || ''; break;
         default:         va = a.updated_at || ''; vb = b.updated_at || '';
@@ -439,7 +492,7 @@ export default function VaultPage() {
       return sa < sb ? -dir : sa > sb ? dir : 0;
     });
     return list;
-  }, [entries, activeType, search, decryptedCache, sortKey, sortDir, baseCurrency, rateMap]);
+  }, [entries, activeType, search, decryptedCache, sortKey, sortDir, baseCurrency, rateMap, templates]);
 
   // ── Counts ───────────────────────────────────────────────────────
   const counts = useMemo(() => {
@@ -572,6 +625,8 @@ export default function VaultPage() {
       });
       setEditEntry(null);
       setForm({});
+      // Restore parent view modal if editing a linked asset
+      if (parentViewEntry) { setViewEntry(parentViewEntry); setParentViewEntry(null); }
       // Prompt to link/create assets after updating an account
       if (savedType === 'account') {
         setPostSaveAccount(updated);
@@ -741,6 +796,40 @@ export default function VaultPage() {
     } finally {
       setInlineEditSaving(false);
       setInlineEditAsset(null);
+    }
+  };
+
+  // ── Inline edit entry title ─────────────────────────────────────
+  const saveInlineTitleEdit = async (entry) => {
+    const d = decryptedCache[entry.id];
+    if (!d) return;
+    const newTitle = inlineTitleEdit?.value?.trim();
+    if (!newTitle || newTitle === d.title) { setInlineTitleEdit(null); return; }
+    setInlineTitleSaving(true);
+    try {
+      await updateEntryLocal(entry.id, { ...d, title: newTitle });
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to update title.');
+    } finally {
+      setInlineTitleSaving(false);
+      setInlineTitleEdit(null);
+    }
+  };
+
+  // ── Inline edit entry amount (direct-value templates only) ──────
+  const saveInlineAmountEdit = async (entry) => {
+    const d = decryptedCache[entry.id];
+    if (!d || !inlineAmountEdit) return;
+    const { field, value } = inlineAmountEdit;
+    if (value === d[field]) { setInlineAmountEdit(null); return; }
+    setInlineAmountSaving(true);
+    try {
+      await updateEntryLocal(entry.id, { ...d, [field]: value });
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to update.');
+    } finally {
+      setInlineAmountSaving(false);
+      setInlineAmountEdit(null);
     }
   };
 
@@ -1303,7 +1392,7 @@ export default function VaultPage() {
                   <tr>
                     <th style={{ width: 40 }}>Type</th>
                     <SortTh sortKey="title" current={sortKey} dir={sortDir} onSort={toggleSort}>Title</SortTh>
-                    <th>Details</th>
+                    <SortableTh sortKey="type" current={sortKey} dir={sortDir} onSort={toggleSort}>Details</SortableTh>
                     <SortTh sortKey="amount" current={sortKey} dir={sortDir} onSort={toggleSort} style={{ width: 130, textAlign: 'right' }}>Amount ({baseCurrency})</SortTh>
                     <SortTh sortKey="currency" current={sortKey} dir={sortDir} onSort={toggleSort} style={{ width: 70 }}>Currency</SortTh>
                     <SortTh sortKey="updated_at" current={sortKey} dir={sortDir} onSort={toggleSort} style={{ width: 140 }}>Updated</SortTh>
@@ -1327,11 +1416,25 @@ export default function VaultPage() {
                     const hasTicker = (subtype === 'stock' && d?.ticker) || (subtype === 'crypto' && d?.coin);
                     const canRefresh = hasIntegration || hasTicker;
                     const integrationInfo = integrationId ? getProviderDisplayInfo(integrationId, getIntegration(d, integrationId)) : null;
+                    // Direct value field for inline amount editing (skip accounts and qty×price templates)
+                    const tplFields = Array.isArray(fields) ? fields : [];
+                    const directValueField = entry.entry_type !== 'account'
+                      ? tplFields.find(f => f.portfolio_role === 'value') || (!tplFields.some(f => f.portfolio_role === 'quantity') ? tplFields.find(f => ['value', 'current_value', 'face_value'].includes(f.key) && f.type === 'number') : null)
+                      : null;
                     return (
                       <tr key={entry.id} style={{ cursor: 'pointer' }} onClick={() => { setViewEntry(entry); }}>
                         <td><Icon size={16} style={{ color: meta.color }} /></td>
                         <td>
-                          <span className="font-medium">{title}</span>
+                          <InlineTextField
+                            value={title}
+                            isEditing={inlineTitleEdit?.id === entry.id}
+                            editValue={inlineTitleEdit?.id === entry.id ? inlineTitleEdit.value : ''}
+                            saving={inlineTitleSaving}
+                            onStartEdit={() => setInlineTitleEdit({ id: entry.id, value: d?.title || '' })}
+                            onChange={(v) => setInlineTitleEdit(prev => ({ ...prev, value: v }))}
+                            onSave={() => saveInlineTitleEdit(entry)}
+                            onCancel={() => setInlineTitleEdit(null)}
+                          />
                           {shareCounts[entry.id] > 0 && (
                             <Share2 size={12} style={{ marginLeft: 4, color: 'var(--color-primary)', verticalAlign: -1 }}
                               title={`Shared with ${shareCounts[entry.id]} ${shareCounts[entry.id] === 1 ? 'person' : 'people'}`} />
@@ -1347,7 +1450,25 @@ export default function VaultPage() {
                             )}
                           </span>
                         </td>
-                        <td style={{ textAlign: 'right' }}><span className="font-medium" style={{ fontSize: 13 }}>{amount || '--'}</span></td>
+                        <td style={{ textAlign: 'right' }}>
+                          {directValueField && d ? (
+                            <InlineNumberField
+                              label={directValueField.label}
+                              value={d[directValueField.key] || ''}
+                              currency={d.currency}
+                              masked={hideAmounts}
+                              isEditing={inlineAmountEdit?.id === entry.id}
+                              editValue={inlineAmountEdit?.id === entry.id ? inlineAmountEdit.value : ''}
+                              saving={inlineAmountSaving}
+                              onStartEdit={(e) => { if (e) e.stopPropagation(); setInlineAmountEdit({ id: entry.id, field: directValueField.key, value: d[directValueField.key] || '' }); }}
+                              onChange={(v) => setInlineAmountEdit(prev => ({ ...prev, value: v }))}
+                              onSave={() => saveInlineAmountEdit(entry)}
+                              onCancel={() => setInlineAmountEdit(null)}
+                            />
+                          ) : (
+                            <span className="font-medium" style={{ fontSize: 13 }}>{amount || '--'}</span>
+                          )}
+                        </td>
                         <td><span className="text-muted" style={{ fontSize: 13 }}>{d?.currency || '--'}</span></td>
                         <td><span className="text-muted" style={{ fontSize: 13 }}>{entry.updated_at ? new Date(entry.updated_at).toLocaleDateString() : '--'}</span></td>
                         <td>
@@ -1469,7 +1590,7 @@ export default function VaultPage() {
       </Modal>
 
       {/* Edit Modal */}
-      <Modal isOpen={!!editEntry} onClose={() => { setEditEntry(null); setVisibleSecrets({}); }} title="Edit Entry">
+      <Modal isOpen={!!editEntry} onClose={() => { setEditEntry(null); setVisibleSecrets({}); if (parentViewEntry) { setViewEntry(parentViewEntry); setParentViewEntry(null); } }} title="Edit Entry">
         <form onSubmit={handleUpdate}>
           {formError && <div className="alert alert-danger mb-3">{formError}</div>}
           {editEntry?.entry_type === 'account' && (
@@ -1481,14 +1602,14 @@ export default function VaultPage() {
           {renderTypeAndTemplateSelectors()}
           {renderFormFields(getFormFields())}
           <div className="flex gap-2 mt-4">
-            <button type="button" className="btn btn-secondary" onClick={() => setEditEntry(null)}>Cancel</button>
+            <button type="button" className="btn btn-secondary" onClick={() => { setEditEntry(null); if (parentViewEntry) { setViewEntry(parentViewEntry); setParentViewEntry(null); } }}>Cancel</button>
             <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving...' : 'Update'}</button>
           </div>
         </form>
       </Modal>
 
       {/* View Modal */}
-      <Modal isOpen={!!viewEntry} onClose={() => setViewEntry(null)} title={decryptedCache[viewEntry?.id]?.title || 'Entry Details'}>
+      <Modal isOpen={!!viewEntry} onClose={() => { if (parentViewEntry) { setViewEntry(parentViewEntry); setParentViewEntry(null); } else { setViewEntry(null); } }} title={parentViewEntry ? `← ${decryptedCache[viewEntry?.id]?.title || 'Asset Details'}` : (decryptedCache[viewEntry?.id]?.title || 'Entry Details')}>
         {viewEntry && (() => {
           const d = decryptedCache[viewEntry.id];
           if (!d) return <p className="text-muted">Unable to decrypt this entry.</p>;
@@ -1613,10 +1734,10 @@ export default function VaultPage() {
                             <span className="text-muted" style={{ fontSize: 12 }}>{tplName}</span>
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <button className="btn btn-ghost btn-sm" onClick={() => setViewEntry(asset)} title="View details">
+                            <button className="btn btn-ghost btn-sm" onClick={() => { setParentViewEntry(viewEntry); setViewEntry(asset); }} title="View details">
                               <Eye size={13} />
                             </button>
-                            <button className="btn btn-ghost btn-sm" onClick={() => openEdit(asset)} title="Edit">
+                            <button className="btn btn-ghost btn-sm" onClick={() => { setParentViewEntry(viewEntry); setViewEntry(null); openEdit(asset); }} title="Edit">
                               <Edit2 size={13} />
                             </button>
                           </div>
