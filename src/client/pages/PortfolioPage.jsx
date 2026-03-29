@@ -4,10 +4,12 @@ import {
   DollarSign, Clock, Camera, Lock, Landmark, AlertTriangle,
   Trash2, ChevronDown, ChevronRight, RefreshCw, Link2,
 } from 'lucide-react';
+import { Line as CJSLine, Bar as CJSBar, Doughnut as CJSDoughnut } from 'react-chartjs-2';
 import {
-  PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis,
-  CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line,
-} from 'recharts';
+  Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement,
+  BarElement, ArcElement, Filler, Title, Tooltip as CJSTooltip, Legend as CJSLegend, TimeScale,
+} from 'chart.js';
+import 'chartjs-adapter-date-fns';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { useVaultEntries } from '../contexts/VaultDataContext';
 import { useHideAmounts } from '../components/Layout';
@@ -19,15 +21,35 @@ import Modal from '../components/Modal';
 import useAppConfig from '../hooks/useAppConfig';
 import api from '../api/client';
 import { fmtCurrency, MASKED, apiData } from '../lib/checks';
-import { buildRateMap, recalculateSnapshot } from '../lib/portfolioAggregator';
+import { buildRateMap, buildSymbolMap, recalculateSnapshot } from '../lib/portfolioAggregator';
 import * as workerDispatcher from '../lib/workerDispatcher';
 import { hasAnyIntegration, getIntegration, getIntegrationType } from '../integrations/helpers';
 import { getProvider } from '../integrations/modules';
 
-const CHART_COLORS = [
-  '#3b82f6', '#22c55e', '#f59e0b', '#ef4444',
-  '#8b5cf6', '#06b6d4', '#ec4899', '#f97316',
-];
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Filler, Title, CJSTooltip, CJSLegend, TimeScale);
+
+const TYPE_COLORS = {
+  cash:            '#00C4B4',  // cyan-teal
+  stock:           '#F5A623',  // warm amber
+  cash_equivalent: '#4FC3F7',  // cornflower sky
+  real_estate:     '#BA68C8',  // soft violet
+  crypto:          '#5C6BC0',  // periwinkle indigo
+  bond:            '#F4845F',  // warm coral
+  vehicle:         '#CFD8DC',  // light blue-grey (rare, muted)
+  asset:           '#78909C',  // mid blue-grey (neutral fallback)
+};
+const EXTRA_COLORS = ['#00897B', '#FFB300', '#29B6F6', '#AB47BC', '#7E57C2', '#FF7043'];
+function getTypeColor(typeKey) {
+  if (TYPE_COLORS[typeKey]) return TYPE_COLORS[typeKey];
+  let hash = 0;
+  for (let i = 0; i < typeKey.length; i++) hash = ((hash << 5) - hash + typeKey.charCodeAt(i)) | 0;
+  return EXTRA_COLORS[Math.abs(hash) % EXTRA_COLORS.length];
+}
+
+const CHART_COLORS = ['#00C4B4', '#F5A623', '#4FC3F7', '#BA68C8', '#5C6BC0', '#F4845F', '#00897B', '#FFB300'];
+const NET_WORTH_COLOR = '#3B82F6';   // hero line — bold electric blue
+const POSITIVE_COLOR  = '#3B9EFF';  // gains — bright blue (NOT green)
+const NEGATIVE_COLOR  = '#E8A838';  // losses — golden amber (NOT red)
 
 const TABS = [
   { key: 'overview',   label: 'Overview',      icon: PieChartIcon },
@@ -314,7 +336,7 @@ function OverviewTab({ portfolio, fmtD, hideAmounts, refreshResult }) {
 
   const typeChartData = useMemo(() =>
     Object.entries(by_type)
-      .map(([, data]) => ({ name: data.label, value: Math.abs(data.total) }))
+      .map(([key, data]) => ({ key, name: data.label, value: Math.abs(data.total) }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 8),
   [by_type]);
@@ -332,6 +354,9 @@ function OverviewTab({ portfolio, fmtD, hideAmounts, refreshResult }) {
 
   const hasGainLoss = summary.total_gain_loss !== undefined && summary.total_gain_loss !== 0;
   const glColor = summary.total_gain_loss > 0 ? 'var(--color-success, #16a34a)' : summary.total_gain_loss < 0 ? 'var(--color-danger, #dc2626)' : 'var(--color-text-muted)';
+
+  const textColor = getComputedStyle(document.documentElement).getPropertyValue('--color-text-muted').trim() || '#6b7280';
+  const borderColor = getComputedStyle(document.documentElement).getPropertyValue('--color-border').trim() || '#e5e7eb';
 
   return (
     <>
@@ -357,27 +382,61 @@ function OverviewTab({ portfolio, fmtD, hideAmounts, refreshResult }) {
           {countryChartData.length > 0 && (
             <div className="card" style={{ padding: 16, flex: 1, minWidth: 280 }}>
               <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>By Country</h4>
-              <ResponsiveContainer width="100%" height={220}>
-                <PieChart>
-                  <Pie data={countryChartData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={2}>
-                    {countryChartData.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
-                  </Pie>
-                  <Tooltip content={<ChartTooltip hideAmounts={hideAmounts} />} />
-                </PieChart>
-              </ResponsiveContainer>
+              <div style={{ height: 220 }}>
+                <CJSDoughnut
+                  data={{
+                    labels: countryChartData.map(d => d.name),
+                    datasets: [{
+                      data: countryChartData.map(d => d.value),
+                      backgroundColor: countryChartData.map((_, i) => CHART_COLORS[i % CHART_COLORS.length]),
+                      borderWidth: 0,
+                    }],
+                  }}
+                  options={{
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '55%',
+                    plugins: {
+                      legend: { position: 'bottom', labels: { color: textColor, font: { size: 11 }, usePointStyle: true, padding: 8 } },
+                      tooltip: {
+                        callbacks: {
+                          label: ctx => hideAmounts ? MASKED : fmtCurrency(ctx.parsed),
+                        },
+                      },
+                    },
+                  }}
+                />
+              </div>
             </div>
           )}
           {typeChartData.length > 0 && (
             <div className="card" style={{ padding: 16, flex: 1, minWidth: 280 }}>
               <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>By Asset Type</h4>
-              <ResponsiveContainer width="100%" height={220}>
-                <PieChart>
-                  <Pie data={typeChartData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={2}>
-                    {typeChartData.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
-                  </Pie>
-                  <Tooltip content={<ChartTooltip hideAmounts={hideAmounts} />} />
-                </PieChart>
-              </ResponsiveContainer>
+              <div style={{ height: 220 }}>
+                <CJSDoughnut
+                  data={{
+                    labels: typeChartData.map(d => d.name),
+                    datasets: [{
+                      data: typeChartData.map(d => d.value),
+                      backgroundColor: typeChartData.map(d => getTypeColor(d.key)),
+                      borderWidth: 0,
+                    }],
+                  }}
+                  options={{
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '55%',
+                    plugins: {
+                      legend: { position: 'bottom', labels: { color: textColor, font: { size: 11 }, usePointStyle: true, padding: 8 } },
+                      tooltip: {
+                        callbacks: {
+                          label: ctx => hideAmounts ? MASKED : fmtCurrency(ctx.parsed),
+                        },
+                      },
+                    },
+                  }}
+                />
+              </div>
             </div>
           )}
         </div>
@@ -386,15 +445,35 @@ function OverviewTab({ portfolio, fmtD, hideAmounts, refreshResult }) {
       {barChartData.length > 1 && (
         <div className="card mt-4" style={{ padding: 16 }}>
           <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Value by Country</h4>
-          <ResponsiveContainer width="100%" height={250}>
-            <BarChart data={barChartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-              <XAxis dataKey="name" tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }} />
-              <YAxis tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }} tickFormatter={v => hideAmounts ? '***' : abbreviateNumber(v)} />
-              <Tooltip content={<ChartTooltip hideAmounts={hideAmounts} />} />
-              <Bar dataKey="total" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+          <div style={{ height: 250 }}>
+            <CJSBar
+              data={{
+                labels: barChartData.map(d => d.name),
+                datasets: [{
+                  label: 'Total',
+                  data: barChartData.map(d => d.total),
+                  backgroundColor: CHART_COLORS[0],
+                  borderRadius: 4,
+                }],
+              }}
+              options={{
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                  x: { grid: { color: borderColor }, ticks: { color: textColor, font: { size: 12 } } },
+                  y: { grid: { color: borderColor }, ticks: { color: textColor, font: { size: 12 }, callback: v => hideAmounts ? '***' : abbreviateNumber(v) } },
+                },
+                plugins: {
+                  legend: { display: false },
+                  tooltip: {
+                    callbacks: {
+                      label: ctx => hideAmounts ? MASKED : fmtCurrency(ctx.parsed.y),
+                    },
+                  },
+                },
+              }}
+            />
+          </div>
         </div>
       )}
     </>
@@ -406,21 +485,6 @@ function SummaryCard({ label, value, color }) {
     <div className="card" style={{ padding: 16 }}>
       <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 4 }}>{label}</div>
       <div style={{ fontSize: 24, fontWeight: 700, color }}>{value}</div>
-    </div>
-  );
-}
-
-function ChartTooltip({ active, payload, hideAmounts }) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div style={{
-      background: 'var(--color-card)', border: '1px solid var(--color-border)',
-      borderRadius: 8, padding: '8px 12px', boxShadow: 'var(--shadow-md)',
-    }}>
-      <p style={{ fontSize: 13, fontWeight: 600, margin: 0 }}>{payload[0].name}</p>
-      <p style={{ fontSize: 13, margin: 0, color: 'var(--color-text-muted)' }}>
-        {hideAmounts ? MASKED : fmtCurrency(payload[0].value)}
-      </p>
     </div>
   );
 }
@@ -686,9 +750,15 @@ function HistoryTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrency, b
   const [selectedSnapshot, setSelectedSnapshot] = useState(null);
   const [expandedTypes, setExpandedTypes] = useState({});
   const [typeFilter, setTypeFilter] = useState('all'); // 'all' | specific type key
+  const [dateRange, setDateRange] = useState('all'); // 'all' | '3m' | '6m' | '1y' | 'ytd'
+  const [showPercent, setShowPercent] = useState(false);
+  const [tableExpanded, setTableExpanded] = useState(false);
 
   // Build current rate map from live currencies
   const currentRateMap = useMemo(() => buildRateMap(currencies || []), [currencies]);
+
+  // Build currency symbol map
+  const symbolMap = useMemo(() => buildSymbolMap(currencies || []), [currencies]);
 
   const loadSnapshots = async () => {
     setLoadingSnap(true);
@@ -762,12 +832,41 @@ function HistoryTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrency, b
 
   const hasSnapshots = snapshots.some(s => s._entries && s._entries.length > 0);
 
-  // Hooks must be called unconditionally (before early returns)
-  // Collect all unique asset types across v3 snapshots for filter
+  // ── All useMemo hooks BEFORE early returns (React Rules of Hooks) ──
+
+  // Filter snapshots by date range
+  const filteredSnapshots = useMemo(() => {
+    if (dateRange === 'all') return snapshots;
+    const now = new Date();
+    let cutoff;
+    if (dateRange === '3m') { cutoff = new Date(now); cutoff.setMonth(cutoff.getMonth() - 3); }
+    else if (dateRange === '6m') { cutoff = new Date(now); cutoff.setMonth(cutoff.getMonth() - 6); }
+    else if (dateRange === '1y') { cutoff = new Date(now); cutoff.setFullYear(cutoff.getFullYear() - 1); }
+    else if (dateRange === 'ytd') { cutoff = new Date(now.getFullYear(), 0, 1); }
+    if (!cutoff) return snapshots;
+    const cutoffStr = cutoff.toISOString().split('T')[0];
+    return snapshots.filter(s => s.snapshot_date >= cutoffStr);
+  }, [snapshots, dateRange]);
+
+  // Single useMemo for all snapshot summaries — all chart data derives from this
+  const snapshotSummaryMap = useMemo(() => {
+    const map = new Map();
+    for (let idx = 0; idx < filteredSnapshots.length; idx++) {
+      const snap = filteredSnapshots[idx];
+      if (!snap._entries || snap._entries.length === 0) continue;
+      const snapRateMap = rateMode === 'snapshot'
+        ? (historicalRatesCache[snap.snapshot_date] || currentRateMap)
+        : currentRateMap;
+      const summary = recalculateSnapshot(snap._entries, snapRateMap, displayCurrency);
+      map.set(snap.id ?? idx, { date: snap.snapshot_date, ...summary });
+    }
+    return map;
+  }, [filteredSnapshots, rateMode, historicalRatesCache, currentRateMap, displayCurrency]);
+
+  // Collect all unique type keys with labels from snapshotSummaryMap
   const allTypeKeys = useMemo(() => {
     const types = new Map();
-    for (const s of snapshots) {
-      const summary = getSnapshotSummary(s);
+    for (const summary of snapshotSummaryMap.values()) {
       if (summary?.by_type) {
         for (const [key, val] of Object.entries(summary.by_type)) {
           if (!types.has(key)) types.set(key, val.label);
@@ -775,25 +874,45 @@ function HistoryTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrency, b
       }
     }
     return types;
-  }, [snapshots, rateMode, historicalRatesCache, displayCurrency]);
+  }, [snapshotSummaryMap]);
 
-  // Build type breakdown chart data (stacked by type over time)
-  const typeBreakdownData = useMemo(() => {
-    if (!hasSnapshots) return [];
-    return snapshots
-      .filter(s => s._entries?.length > 0)
-      .map(s => {
-        const summary = getSnapshotSummary(s);
-        if (!summary) return null;
-        const row = { date: s.snapshot_date };
-        for (const [key, val] of Object.entries(summary.by_type)) {
-          row[key] = Math.abs(val.total);
-        }
-        return row;
-      })
-      .filter(Boolean)
-      .sort((a, b) => a.date.localeCompare(b.date));
-  }, [snapshots, hasSnapshots, rateMode, historicalRatesCache, displayCurrency]);
+  // Chart data: date + netWorth + byType totals per snapshot
+  const chartData = useMemo(() =>
+    [...snapshotSummaryMap.values()].map(s => ({
+      date: s.date,
+      netWorth: s.net_worth,
+      byType: Object.fromEntries(
+        Object.entries(s.by_type).map(([k, v]) => [k, v.total])
+      ),
+    })).sort((a, b) => a.date.localeCompare(b.date)),
+  [snapshotSummaryMap]);
+
+  // Percentage data: each type as % of sum of absolute type totals
+  const percentageData = useMemo(() =>
+    [...snapshotSummaryMap.values()].map(s => {
+      const absSum = Object.values(s.by_type).reduce((acc, t) => acc + Math.abs(t.total), 0);
+      if (absSum === 0) return { date: s.date, types: {} };
+      return {
+        date: s.date,
+        types: Object.fromEntries(
+          Object.entries(s.by_type).map(([k, v]) => [k, (Math.abs(v.total) / absSum) * 100])
+        ),
+      };
+    }).sort((a, b) => a.date.localeCompare(b.date)),
+  [snapshotSummaryMap]);
+
+  // Delta data: consecutive net worth diffs — absolute + percentage (first snapshot omitted)
+  const deltaData = useMemo(() => {
+    const data = [...snapshotSummaryMap.values()].sort((a, b) => a.date.localeCompare(b.date));
+    return data.slice(1).map((s, i) => {
+      const prev = data[i].net_worth;
+      const delta = s.net_worth - prev;
+      const pctDelta = prev !== 0 ? (delta / Math.abs(prev)) * 100 : 0;
+      return { date: s.date, delta, pctDelta };
+    });
+  }, [snapshotSummaryMap]);
+
+  // ── Early returns (after all hooks) ──
 
   if (loadingSnap) {
     return <div className="loading-center"><div className="spinner" /></div>;
@@ -809,141 +928,292 @@ function HistoryTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrency, b
     );
   }
 
-  // Build chart data from v3 snapshots
-  const chartData = snapshots
-    .filter(s => s._entries?.length > 0)
-    .map(s => {
-      const summary = getSnapshotSummary(s);
-      if (!summary) return null;
-      if (typeFilter !== 'all') {
-        const typeData = summary.by_type[typeFilter];
-        return { date: s.snapshot_date, net_worth: typeData?.total || 0 };
-      }
-      return { date: s.snapshot_date, net_worth: summary.net_worth };
-    })
-    .filter(Boolean)
-    .sort((a, b) => a.date.localeCompare(b.date));
+  // ── Chart.js options (read CSS vars for dark mode) ──
+  const textColor = getComputedStyle(document.documentElement).getPropertyValue('--color-text-muted').trim() || '#6b7280';
+  const borderColor = getComputedStyle(document.documentElement).getPropertyValue('--color-border').trim() || '#e5e7eb';
+
+  // Determine which type keys to show in hero chart
+  const visibleTypeKeys = typeFilter === 'all'
+    ? [...allTypeKeys.keys()]
+    : allTypeKeys.has(typeFilter) ? [typeFilter] : [];
+
+  // Hero line chart datasets (normal mode)
+  const heroLineData = {
+    labels: chartData.map(d => d.date),
+    datasets: [
+      ...(typeFilter === 'all' ? [{
+        label: 'Net Worth',
+        data: chartData.map(d => d.netWorth),
+        borderColor: NET_WORTH_COLOR,
+        backgroundColor: NET_WORTH_COLOR + '33',
+        borderWidth: 3,
+        pointRadius: 4,
+        tension: 0.3,
+        fill: false,
+        order: 0,
+      }] : []),
+      ...visibleTypeKeys.map((key, idx) => ({
+        label: allTypeKeys.get(key) || key,
+        data: chartData.map(d => d.byType[key] || 0),
+        borderColor: getTypeColor(key),
+        backgroundColor: getTypeColor(key) + '33',
+        borderWidth: 1.5,
+        pointRadius: 3,
+        tension: 0.3,
+        fill: false,
+        order: idx + 1,
+      })),
+    ],
+  };
+
+  // Hero stacked area datasets (percent mode)
+  const heroPercentData = {
+    labels: percentageData.map(d => d.date),
+    datasets: visibleTypeKeys.map((key, idx) => ({
+      label: allTypeKeys.get(key) || key,
+      data: percentageData.map(d => d.types[key] || 0),
+      borderColor: getTypeColor(key),
+      backgroundColor: getTypeColor(key) + '99',
+      borderWidth: 1.5,
+      pointRadius: 3,
+      tension: 0.3,
+      fill: true,
+      order: idx + 1,
+    })),
+  };
+
+  const heroOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    scales: {
+      x: {
+        type: 'time',
+        time: { unit: 'day', tooltipFormat: 'MMM d, yyyy' },
+        grid: { color: borderColor },
+        ticks: { color: textColor, font: { size: 12 } },
+      },
+      y: {
+        stacked: showPercent || undefined,
+        ...(showPercent ? { max: 100 } : {}),
+        grid: { color: borderColor },
+        ticks: {
+          color: textColor,
+          font: { size: 12 },
+          callback: v => hideAmounts ? '***' : showPercent ? v.toFixed(0) + '%' : abbreviateNumber(v),
+        },
+      },
+    },
+    plugins: {
+      legend: {
+        position: 'bottom',
+        labels: { color: textColor, font: { size: 12 }, usePointStyle: true },
+      },
+      tooltip: {
+        callbacks: {
+          label: ctx => hideAmounts
+            ? `${ctx.dataset.label}: ${MASKED}`
+            : showPercent
+              ? `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)}%`
+              : `${ctx.dataset.label}: ${fmtCurrency(ctx.parsed.y)}`,
+        },
+      },
+    },
+  };
+
+  // Delta bar chart — absolute or % change based on toggle
+  const deltaChartData = {
+    labels: deltaData.map(d => d.date),
+    datasets: [{
+      label: showPercent ? '% Change' : 'Period Change',
+      data: deltaData.map(d => showPercent ? d.pctDelta : d.delta),
+      backgroundColor: deltaData.map(d => (showPercent ? d.pctDelta : d.delta) >= 0 ? POSITIVE_COLOR : NEGATIVE_COLOR),
+      borderRadius: 4,
+    }],
+  };
+
+  const deltaOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    scales: {
+      x: {
+        type: 'time',
+        time: { unit: 'day', tooltipFormat: 'MMM d, yyyy' },
+        grid: { color: borderColor },
+        ticks: { color: textColor, font: { size: 12 } },
+      },
+      y: {
+        grid: { color: borderColor },
+        ticks: {
+          color: textColor,
+          font: { size: 12 },
+          callback: v => hideAmounts ? '***' : showPercent ? v.toFixed(1) + '%' : abbreviateNumber(v),
+        },
+      },
+    },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: {
+          label: ctx => hideAmounts
+            ? `${ctx.dataset.label}: ${MASKED}`
+            : showPercent
+              ? `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)}%`
+              : `${ctx.dataset.label}: ${fmtCurrency(ctx.parsed.y)}`,
+        },
+      },
+    },
+  };
+
+  const currencyToggleLabel = symbolMap[displayCurrency] || displayCurrency;
 
   return (
     <>
-      {/* Controls bar — rate toggle + type filter */}
-      {hasSnapshots && (
-        <div className="card mb-4" style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 13, fontWeight: 600 }}>Rates:</span>
+      {/* Zone 1 — Toolbar */}
+      <div className="card mb-4" style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        {/* Rate mode toggle */}
+        <span style={{ fontSize: 13, fontWeight: 600 }}>Rates:</span>
+        <button
+          className={`btn btn-sm ${rateMode === 'current' ? 'btn-primary' : 'btn-ghost'}`}
+          onClick={() => handleRateModeChange('current')}
+        >
+          Current
+        </button>
+        <button
+          className={`btn btn-sm ${rateMode === 'snapshot' ? 'btn-primary' : 'btn-ghost'}`}
+          onClick={() => handleRateModeChange('snapshot')}
+          disabled={loadingRates}
+        >
+          {loadingRates ? 'Loading...' : 'Snapshot'}
+        </button>
+
+        {/* Type filter dropdown */}
+        {allTypeKeys.size > 1 && (
+          <>
+            <span style={{ fontSize: 13, fontWeight: 600, marginLeft: 8 }}>Filter:</span>
+            <select
+              className="form-control"
+              style={{ width: 'auto', minWidth: 120, fontSize: 13, padding: '2px 24px 2px 8px' }}
+              value={typeFilter}
+              onChange={e => setTypeFilter(e.target.value)}
+            >
+              <option value="all">All types</option>
+              {[...allTypeKeys.entries()].map(([key, label]) => (
+                <option key={key} value={key}>{label}</option>
+              ))}
+            </select>
+          </>
+        )}
+
+        {/* Date range presets */}
+        <span style={{ fontSize: 13, fontWeight: 600, marginLeft: 8 }}>Range:</span>
+        {['all', '3m', '6m', '1y', 'ytd'].map(r => (
           <button
-            className={`btn btn-sm ${rateMode === 'current' ? 'btn-primary' : 'btn-ghost'}`}
-            onClick={() => handleRateModeChange('current')}
+            key={r}
+            className={`btn btn-sm ${dateRange === r ? 'btn-primary' : 'btn-ghost'}`}
+            onClick={() => setDateRange(r)}
           >
-            Today's rates
+            {r === 'all' ? 'All' : r === '3m' ? '3M' : r === '6m' ? '6M' : r === '1y' ? '1Y' : 'YTD'}
+          </button>
+        ))}
+
+        {/* View mode toggle */}
+        <div style={{ display: 'inline-flex', borderRadius: 6, border: '1px solid var(--color-border)', overflow: 'hidden', marginLeft: 'auto' }}>
+          <button
+            className="btn btn-sm"
+            style={{
+              borderRadius: 0, border: 'none', fontWeight: 500, fontSize: 12, padding: '4px 12px',
+              background: !showPercent ? 'var(--color-primary)' : 'transparent',
+              color: !showPercent ? '#fff' : 'var(--color-text-muted)',
+            }}
+            onClick={() => setShowPercent(false)}
+          >
+            Values
           </button>
           <button
-            className={`btn btn-sm ${rateMode === 'snapshot' ? 'btn-primary' : 'btn-ghost'}`}
-            onClick={() => handleRateModeChange('snapshot')}
-            disabled={loadingRates}
+            className="btn btn-sm"
+            style={{
+              borderRadius: 0, border: 'none', borderLeft: '1px solid var(--color-border)', fontWeight: 500, fontSize: 12, padding: '4px 12px',
+              background: showPercent ? 'var(--color-primary)' : 'transparent',
+              color: showPercent ? '#fff' : 'var(--color-text-muted)',
+            }}
+            onClick={() => setShowPercent(true)}
           >
-            {loadingRates ? 'Loading...' : 'Snapshot rates'}
+            % Allocation
           </button>
-          {allTypeKeys.size > 1 && (
-            <>
-              <span style={{ fontSize: 13, fontWeight: 600, marginLeft: 8 }}>Filter:</span>
-              <select
-                className="form-control"
-                style={{ width: 'auto', minWidth: 120, fontSize: 13, padding: '2px 24px 2px 8px' }}
-                value={typeFilter}
-                onChange={e => setTypeFilter(e.target.value)}
-              >
-                <option value="all">All types</option>
-                {[...allTypeKeys.entries()].map(([key, label]) => (
-                  <option key={key} value={key}>{label}</option>
-                ))}
-              </select>
-            </>
-          )}
-        </div>
-      )}
-
-      {chartData.length >= 2 && (
-        <div className="card mb-4" style={{ padding: 16 }}>
-          <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>
-            {typeFilter !== 'all' ? `${allTypeKeys.get(typeFilter) || typeFilter} Over Time` : 'Net Worth Over Time'}
-          </h4>
-          <ResponsiveContainer width="100%" height={250}>
-            <LineChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-              <XAxis dataKey="date" tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }} />
-              <YAxis tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }} tickFormatter={v => hideAmounts ? '***' : abbreviateNumber(v)} />
-              <Tooltip content={<ChartTooltip hideAmounts={hideAmounts} />} />
-              <Line type="monotone" dataKey="net_worth" stroke="#3b82f6" strokeWidth={2} dot={{ r: 4 }} name={typeFilter !== 'all' ? allTypeKeys.get(typeFilter) : 'Net Worth'} />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-
-      {/* Type breakdown chart — line chart showing each type over time */}
-      {typeBreakdownData.length >= 2 && typeFilter === 'all' && (
-        <div className="card mb-4" style={{ padding: 16 }}>
-          <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Asset Type Breakdown</h4>
-          <ResponsiveContainer width="100%" height={250}>
-            <LineChart data={typeBreakdownData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-              <XAxis dataKey="date" tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }} />
-              <YAxis tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }} tickFormatter={v => hideAmounts ? '***' : abbreviateNumber(v)} />
-              <Tooltip content={<ChartTooltip hideAmounts={hideAmounts} />} />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
-              {[...allTypeKeys.keys()].map((key, i) => (
-                <Line key={key} type="monotone" dataKey={key} stroke={CHART_COLORS[i % CHART_COLORS.length]} strokeWidth={2} dot={{ r: 3 }} name={allTypeKeys.get(key)} connectNulls />
-              ))}
-            </LineChart>
-            {/* Stacked bar alternative:
-            <BarChart data={typeBreakdownData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-              <XAxis dataKey="date" tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }} />
-              <YAxis tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }} tickFormatter={v => hideAmounts ? '***' : abbreviateNumber(v)} />
-              <Tooltip content={<ChartTooltip hideAmounts={hideAmounts} />} />
-              {[...allTypeKeys.keys()].map((key, i) => (
-                <Bar key={key} dataKey={key} stackId="types" fill={CHART_COLORS[i % CHART_COLORS.length]} name={allTypeKeys.get(key)} />
-              ))}
-            </BarChart> */}
-          </ResponsiveContainer>
-        </div>
-      )}
-
-      <div className="card">
-        <div className="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th style={{ textAlign: 'right' }}>{typeFilter !== 'all' ? 'Total' : 'Net Worth'}</th>
-                {typeFilter === 'all' && <th style={{ textAlign: 'right' }}>Assets</th>}
-                {typeFilter === 'all' && <th style={{ textAlign: 'right' }}>Liabilities</th>}
-                <th style={{ textAlign: 'right' }}>Count</th>
-              </tr>
-            </thead>
-            <tbody>
-              {[...snapshots].reverse().map((s, i) => {
-                // v3 split model — recalculate from entries
-                const summary = getSnapshotSummary(s);
-                if (!summary) return null;
-                const filtered = typeFilter !== 'all';
-                const typeData = filtered ? summary.by_type[typeFilter] : null;
-                if (filtered && !typeData) return null;
-                const displayTotal = filtered ? (typeData?.total || 0) : summary.net_worth;
-                const displayCount = filtered ? (typeData?.count || 0) : summary.asset_count;
-                return (
-                  <tr key={i} style={{ cursor: 'pointer' }} onClick={() => { setSelectedSnapshot(s); setExpandedTypes({}); }}>
-                    <td>{s.snapshot_date}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 500 }}>{fmtD(displayTotal)}</td>
-                    {!filtered && <td style={{ textAlign: 'right' }}>{fmtD(summary.total_assets)}</td>}
-                    {!filtered && <td style={{ textAlign: 'right' }}>{fmtD(summary.total_liabilities)}</td>}
-                    <td style={{ textAlign: 'right' }}>{displayCount}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
         </div>
       </div>
+
+      {/* Zone 2 — Hero Chart */}
+      {chartData.length >= 1 && (
+        <div className="card mb-4" style={{ padding: 16 }}>
+          <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>
+            {showPercent
+              ? 'Allocation Over Time'
+              : typeFilter !== 'all' ? `${allTypeKeys.get(typeFilter) || typeFilter} Over Time` : 'Portfolio Over Time'}
+          </h4>
+          <div style={{ height: 350 }}>
+            <CJSLine
+              data={showPercent ? heroPercentData : heroLineData}
+              options={heroOptions}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Zone 3 — Delta Bar Chart */}
+      {deltaData.length > 0 && (
+        <div className="card mb-4" style={{ padding: 16 }}>
+          <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>{showPercent ? '% Change Between Snapshots' : 'Period Change'}</h4>
+          <div style={{ height: 250 }}>
+            <CJSBar data={deltaChartData} options={deltaOptions} />
+          </div>
+        </div>
+      )}
+
+      {/* Zone 4 — Collapsible Snapshot Table */}
+      <div className="card">
+        <div
+          style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', userSelect: 'none' }}
+          onClick={() => setTableExpanded(e => !e)}
+        >
+          {tableExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+          <span style={{ fontSize: 14, fontWeight: 600 }}>
+            Snapshots ({[...snapshotSummaryMap.values()].length})
+          </span>
+        </div>
+        {tableExpanded && (
+          <div className="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th style={{ textAlign: 'right' }}>Net Worth</th>
+                  <th style={{ textAlign: 'right' }}>Assets</th>
+                  <th style={{ textAlign: 'right' }}>Liabilities</th>
+                  <th style={{ textAlign: 'right' }}>Count</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...filteredSnapshots].reverse().map((s, i) => {
+                  const snapKey = s.id ?? (filteredSnapshots.length - 1 - i);
+                  const summary = snapshotSummaryMap.get(snapKey);
+                  if (!summary) return null;
+                  return (
+                    <tr key={snapKey} style={{ cursor: 'pointer' }} onClick={() => { setSelectedSnapshot(s); setExpandedTypes({}); }}>
+                      <td>{s.snapshot_date}</td>
+                      <td style={{ textAlign: 'right', fontWeight: 500 }}>{fmtD(summary.net_worth)}</td>
+                      <td style={{ textAlign: 'right' }}>{fmtD(summary.total_assets)}</td>
+                      <td style={{ textAlign: 'right' }}>{fmtD(summary.total_liabilities)}</td>
+                      <td style={{ textAlign: 'right' }}>{summary.asset_count}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       {/* Snapshot stale price prompt */}
       {snapshotPrompt && (
         <div className="modal-overlay" onClick={() => setSnapshotPrompt(null)}>
