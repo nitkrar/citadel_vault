@@ -42,6 +42,7 @@ export async function destroy() {
   sessionStorage.removeItem('pv_cache_timestamp');
   sessionStorage.removeItem('pv_ticker_prices');
   sessionStorage.removeItem('pv_vault_last_tab');
+  sessionStorage.removeItem('pv_portfolio_last_tab');
 
   // 4. Local storage caches (drafts, reference data)
   Object.keys(localStorage).forEach(key => {

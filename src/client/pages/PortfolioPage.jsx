@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   PieChart as PieChartIcon, TrendingUp, Globe, Tag, List,
   DollarSign, Clock, Camera, Lock, Landmark, AlertTriangle,
@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis,
-  CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line,
+  CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line,
 } from 'recharts';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { useVaultEntries } from '../contexts/VaultDataContext';
@@ -15,6 +15,7 @@ import usePortfolioData from '../hooks/usePortfolioData';
 import useVaultData from '../hooks/useVaultData';
 import useSort from '../hooks/useSort';
 import SortableTh from '../components/SortableTh';
+import Modal from '../components/Modal';
 import useAppConfig from '../hooks/useAppConfig';
 import api from '../api/client';
 import { fmtCurrency, MASKED, apiData } from '../lib/checks';
@@ -48,7 +49,7 @@ export default function PortfolioPage() {
     ratesLastUpdated, refreshPrices,
   } = usePortfolioData();
 
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState(() => sessionStorage.getItem('pv_portfolio_last_tab') || 'overview');
   const [expandedGroups, setExpandedGroups] = useState({});
   const [snapshotSaving, setSnapshotSaving] = useState(false);
   const [refreshingAll, setRefreshingAll] = useState(false);
@@ -148,6 +149,7 @@ export default function PortfolioPage() {
       const entryBlobs = portfolio.assets.map(asset => ({
         name: asset.name,
         template_name: asset.template_name,
+        entry_type: asset.entry_type,
         subtype: asset.subtype,
         is_liability: asset.is_liability,
         currency: asset.currency,
@@ -266,7 +268,7 @@ export default function PortfolioPage() {
           <button
             key={t.key}
             className={`tab ${activeTab === t.key ? 'active' : ''}`}
-            onClick={() => setActiveTab(t.key)}
+            onClick={() => { setActiveTab(t.key); sessionStorage.setItem('pv_portfolio_last_tab', t.key); }}
           >
             <t.icon size={14} style={{ marginRight: 4, verticalAlign: -2 }} />
             {t.label}
@@ -677,11 +679,13 @@ function CurrencyTab({ groups, fmtD }) {
 
 function HistoryTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrency, baseCurrency, snapshotPrompt, setSnapshotPrompt, doSaveSnapshot, snapshotSaving }) {
   const [snapshots, setSnapshots] = useState([]);
-  const [loadingSnap, setLoadingSnap] = useState(false);
-  const [loaded, setLoaded] = useState(false);
+  const [loadingSnap, setLoadingSnap] = useState(true);
   const [rateMode, setRateMode] = useState('current'); // 'current' | 'snapshot'
   const [historicalRatesCache, setHistoricalRatesCache] = useState({}); // date → rateMap
   const [loadingRates, setLoadingRates] = useState(false);
+  const [selectedSnapshot, setSelectedSnapshot] = useState(null);
+  const [expandedTypes, setExpandedTypes] = useState({});
+  const [typeFilter, setTypeFilter] = useState('all'); // 'all' | specific type key
 
   // Build current rate map from live currencies
   const currentRateMap = useMemo(() => buildRateMap(currencies || []), [currencies]);
@@ -691,35 +695,27 @@ function HistoryTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrency, b
     try {
       const { data: resp } = await api.get('/snapshots.php');
       const raw = apiData({ data: resp }) || [];
-      // Batch decrypt meta blobs
-      const metaBlobs = raw.map(s => s.data || s.encrypted_data);
-      const decryptedMetas = await workerDispatcher.decryptBatch(metaBlobs, null);
 
       const decrypted = [];
-      for (let i = 0; i < raw.length; i++) {
-        const s = raw[i];
-        const meta = decryptedMetas[i];
-
-        // Decrypt per-entry blobs if present (v3 split model)
-        let entries = null;
-        if (meta && s.entries && s.entries.length > 0) {
-          const entryBlobs = s.entries.map(e => e.encrypted_data);
-          const decryptedEntries = await workerDispatcher.decryptBatch(entryBlobs, null);
-          entries = [];
-          for (let j = 0; j < decryptedEntries.length; j++) {
-            if (decryptedEntries[j]) {
-              entries.push({ ...decryptedEntries[j], entry_id: s.entries[j].entry_id });
-            }
+      for (const s of raw) {
+        if (!s.entries || s.entries.length === 0) continue;
+        const entryBlobs = s.entries.map(e => e.encrypted_data);
+        const decryptedEntries = await workerDispatcher.decryptBatch(entryBlobs, null);
+        const entries = [];
+        for (let j = 0; j < decryptedEntries.length; j++) {
+          if (decryptedEntries[j]) {
+            entries.push({ ...decryptedEntries[j], entry_id: s.entries[j].entry_id });
           }
         }
-
-        decrypted.push({ ...s, _meta: meta, _entries: entries });
+        decrypted.push({ ...s, _entries: entries });
       }
       setSnapshots(decrypted);
     } catch { /* silent */ }
     setLoadingSnap(false);
-    setLoaded(true);
   };
+
+  // Auto-load snapshots on mount
+  useEffect(() => { loadSnapshots(); }, []);
 
   // Fetch historical rates for a specific date (cached)
   const fetchHistoricalRates = async (date) => {
@@ -764,18 +760,40 @@ function HistoryTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrency, b
     return recalculateSnapshot(snapshot._entries, rateMap, displayCurrency);
   };
 
-  // Check if any snapshot has entries (v3)
-  const hasV3Snapshots = snapshots.some(s => s._entries && s._entries.length > 0);
+  const hasSnapshots = snapshots.some(s => s._entries && s._entries.length > 0);
 
-  if (!loaded) {
-    return (
-      <div className="text-center" style={{ padding: 32 }}>
-        <button className="btn btn-primary" onClick={loadSnapshots} disabled={loadingSnap}>
-          <Clock size={16} /> {loadingSnap ? 'Loading...' : 'Load Snapshots'}
-        </button>
-      </div>
-    );
-  }
+  // Hooks must be called unconditionally (before early returns)
+  // Collect all unique asset types across v3 snapshots for filter
+  const allTypeKeys = useMemo(() => {
+    const types = new Map();
+    for (const s of snapshots) {
+      const summary = getSnapshotSummary(s);
+      if (summary?.by_type) {
+        for (const [key, val] of Object.entries(summary.by_type)) {
+          if (!types.has(key)) types.set(key, val.label);
+        }
+      }
+    }
+    return types;
+  }, [snapshots, rateMode, historicalRatesCache, displayCurrency]);
+
+  // Build type breakdown chart data (stacked by type over time)
+  const typeBreakdownData = useMemo(() => {
+    if (!hasSnapshots) return [];
+    return snapshots
+      .filter(s => s._entries?.length > 0)
+      .map(s => {
+        const summary = getSnapshotSummary(s);
+        if (!summary) return null;
+        const row = { date: s.snapshot_date };
+        for (const [key, val] of Object.entries(summary.by_type)) {
+          row[key] = Math.abs(val.total);
+        }
+        return row;
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [snapshots, hasSnapshots, rateMode, historicalRatesCache, displayCurrency]);
 
   if (loadingSnap) {
     return <div className="loading-center"><div className="spinner" /></div>;
@@ -791,30 +809,26 @@ function HistoryTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrency, b
     );
   }
 
-  // Build chart data — use recalculateSnapshot for v3, fallback for legacy
+  // Build chart data from v3 snapshots
   const chartData = snapshots
-    .filter(s => s._meta || s._entries)
+    .filter(s => s._entries?.length > 0)
     .map(s => {
       const summary = getSnapshotSummary(s);
-      if (summary) {
-        return { date: s.snapshot_date, net_worth: summary.net_worth };
+      if (!summary) return null;
+      if (typeFilter !== 'all') {
+        const typeData = summary.by_type[typeFilter];
+        return { date: s.snapshot_date, net_worth: typeData?.total || 0 };
       }
-      // Legacy v2 fallback
-      const d = s._meta;
-      if (!d) return null;
-      return {
-        date: s.snapshot_date,
-        net_worth: d.net_worth ?? d.total ?? (d.assets + (d.accounts || 0)),
-      };
+      return { date: s.snapshot_date, net_worth: summary.net_worth };
     })
     .filter(Boolean)
     .sort((a, b) => a.date.localeCompare(b.date));
 
   return (
     <>
-      {/* Rate toggle — only show if v3 snapshots exist */}
-      {hasV3Snapshots && (
-        <div className="card mb-4" style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+      {/* Controls bar — rate toggle + type filter */}
+      {hasSnapshots && (
+        <div className="card mb-4" style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 13, fontWeight: 600 }}>Rates:</span>
           <button
             className={`btn btn-sm ${rateMode === 'current' ? 'btn-primary' : 'btn-ghost'}`}
@@ -829,20 +843,67 @@ function HistoryTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrency, b
           >
             {loadingRates ? 'Loading...' : 'Snapshot rates'}
           </button>
+          {allTypeKeys.size > 1 && (
+            <>
+              <span style={{ fontSize: 13, fontWeight: 600, marginLeft: 8 }}>Filter:</span>
+              <select
+                className="form-control"
+                style={{ width: 'auto', minWidth: 120, fontSize: 13, padding: '2px 24px 2px 8px' }}
+                value={typeFilter}
+                onChange={e => setTypeFilter(e.target.value)}
+              >
+                <option value="all">All types</option>
+                {[...allTypeKeys.entries()].map(([key, label]) => (
+                  <option key={key} value={key}>{label}</option>
+                ))}
+              </select>
+            </>
+          )}
         </div>
       )}
 
       {chartData.length >= 2 && (
         <div className="card mb-4" style={{ padding: 16 }}>
-          <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Net Worth Over Time</h4>
+          <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>
+            {typeFilter !== 'all' ? `${allTypeKeys.get(typeFilter) || typeFilter} Over Time` : 'Net Worth Over Time'}
+          </h4>
           <ResponsiveContainer width="100%" height={250}>
             <LineChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
               <XAxis dataKey="date" tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }} />
               <YAxis tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }} tickFormatter={v => hideAmounts ? '***' : abbreviateNumber(v)} />
               <Tooltip content={<ChartTooltip hideAmounts={hideAmounts} />} />
-              <Line type="monotone" dataKey="net_worth" stroke="#3b82f6" strokeWidth={2} dot={{ r: 4 }} name="Net Worth" />
+              <Line type="monotone" dataKey="net_worth" stroke="#3b82f6" strokeWidth={2} dot={{ r: 4 }} name={typeFilter !== 'all' ? allTypeKeys.get(typeFilter) : 'Net Worth'} />
             </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* Type breakdown chart — line chart showing each type over time */}
+      {typeBreakdownData.length >= 2 && typeFilter === 'all' && (
+        <div className="card mb-4" style={{ padding: 16 }}>
+          <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Asset Type Breakdown</h4>
+          <ResponsiveContainer width="100%" height={250}>
+            <LineChart data={typeBreakdownData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+              <XAxis dataKey="date" tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }} />
+              <YAxis tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }} tickFormatter={v => hideAmounts ? '***' : abbreviateNumber(v)} />
+              <Tooltip content={<ChartTooltip hideAmounts={hideAmounts} />} />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              {[...allTypeKeys.keys()].map((key, i) => (
+                <Line key={key} type="monotone" dataKey={key} stroke={CHART_COLORS[i % CHART_COLORS.length]} strokeWidth={2} dot={{ r: 3 }} name={allTypeKeys.get(key)} connectNulls />
+              ))}
+            </LineChart>
+            {/* Stacked bar alternative:
+            <BarChart data={typeBreakdownData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+              <XAxis dataKey="date" tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }} />
+              <YAxis tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }} tickFormatter={v => hideAmounts ? '***' : abbreviateNumber(v)} />
+              <Tooltip content={<ChartTooltip hideAmounts={hideAmounts} />} />
+              {[...allTypeKeys.keys()].map((key, i) => (
+                <Bar key={key} dataKey={key} stackId="types" fill={CHART_COLORS[i % CHART_COLORS.length]} name={allTypeKeys.get(key)} />
+              ))}
+            </BarChart> */}
           </ResponsiveContainer>
         </div>
       )}
@@ -853,9 +914,9 @@ function HistoryTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrency, b
             <thead>
               <tr>
                 <th>Date</th>
-                <th style={{ textAlign: 'right' }}>Net Worth</th>
-                <th style={{ textAlign: 'right' }}>Assets</th>
-                <th style={{ textAlign: 'right' }}>Liabilities</th>
+                <th style={{ textAlign: 'right' }}>{typeFilter !== 'all' ? 'Total' : 'Net Worth'}</th>
+                {typeFilter === 'all' && <th style={{ textAlign: 'right' }}>Assets</th>}
+                {typeFilter === 'all' && <th style={{ textAlign: 'right' }}>Liabilities</th>}
                 <th style={{ textAlign: 'right' }}>Count</th>
               </tr>
             </thead>
@@ -863,36 +924,19 @@ function HistoryTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrency, b
               {[...snapshots].reverse().map((s, i) => {
                 // v3 split model — recalculate from entries
                 const summary = getSnapshotSummary(s);
-                if (summary) {
-                  return (
-                    <tr key={i}>
-                      <td>{s.snapshot_date}</td>
-                      <td style={{ textAlign: 'right', fontWeight: 500 }}>{fmtD(summary.net_worth)}</td>
-                      <td style={{ textAlign: 'right' }}>{fmtD(summary.total_assets)}</td>
-                      <td style={{ textAlign: 'right' }}>{fmtD(summary.total_liabilities)}</td>
-                      <td style={{ textAlign: 'right' }}>{summary.asset_count}</td>
-                    </tr>
-                  );
-                }
-
-                // Legacy v2/v1 fallback
-                const d = s._meta;
-                const isV2 = d?.v === 2;
+                if (!summary) return null;
+                const filtered = typeFilter !== 'all';
+                const typeData = filtered ? summary.by_type[typeFilter] : null;
+                if (filtered && !typeData) return null;
+                const displayTotal = filtered ? (typeData?.total || 0) : summary.net_worth;
+                const displayCount = filtered ? (typeData?.count || 0) : summary.asset_count;
                 return (
-                  <tr key={i}>
+                  <tr key={i} style={{ cursor: 'pointer' }} onClick={() => { setSelectedSnapshot(s); setExpandedTypes({}); }}>
                     <td>{s.snapshot_date}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 500 }}>
-                      {d ? fmtD(isV2 ? d.net_worth : (d.total ?? 0)) : '(encrypted)'}
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      {d ? fmtD(isV2 ? d.total_assets : (d.assets ?? 0)) : '--'}
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      {d ? fmtD(isV2 ? d.total_liabilities : 0) : '--'}
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      {d ? (d.asset_count ?? '--') : '--'}
-                    </td>
+                    <td style={{ textAlign: 'right', fontWeight: 500 }}>{fmtD(displayTotal)}</td>
+                    {!filtered && <td style={{ textAlign: 'right' }}>{fmtD(summary.total_assets)}</td>}
+                    {!filtered && <td style={{ textAlign: 'right' }}>{fmtD(summary.total_liabilities)}</td>}
+                    <td style={{ textAlign: 'right' }}>{displayCount}</td>
                   </tr>
                 );
               })}
@@ -924,6 +968,98 @@ function HistoryTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrency, b
           </div>
         </div>
       )}
+
+      {/* Snapshot Detail Modal */}
+      <Modal isOpen={!!selectedSnapshot} onClose={() => setSelectedSnapshot(null)} title={`Snapshot — ${selectedSnapshot?.snapshot_date || ''}`} size="lg">
+        {selectedSnapshot && (() => {
+          const summary = getSnapshotSummary(selectedSnapshot);
+          if (!summary) return <p className="text-muted">No entry data available for this snapshot.</p>;
+
+          // Group entries by type
+          const typeGroups = {};
+          for (const entry of summary.entries) {
+            const key = entry.template_name || entry.subtype || 'Other';
+            if (!typeGroups[key]) typeGroups[key] = { label: key, entries: [], total: 0, isLiability: entry.is_liability };
+            typeGroups[key].entries.push(entry);
+            typeGroups[key].total += entry.displayValue || 0;
+          }
+
+          return (
+            <>
+              {/* Summary cards */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 12, marginBottom: 20 }}>
+                {[
+                  { label: 'Net Worth', value: summary.net_worth, color: 'var(--color-primary)' },
+                  { label: 'Assets', value: summary.total_assets, color: 'var(--success)' },
+                  { label: 'Liabilities', value: summary.total_liabilities, color: 'var(--danger)' },
+                  { label: 'Entries', value: summary.asset_count, raw: true },
+                ].map(c => (
+                  <div key={c.label} style={{
+                    background: 'var(--bg-secondary)', borderRadius: 8, padding: '12px 16px',
+                    textAlign: 'center', border: '1px solid var(--border)',
+                  }}>
+                    <div className="text-muted" style={{ fontSize: 11, marginBottom: 4 }}>{c.label}</div>
+                    <div style={{ fontSize: 18, fontWeight: 600, color: c.color }}>
+                      {c.raw ? c.value : (hideAmounts ? MASKED : fmtD(c.value))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Collapsible type sections */}
+              {Object.entries(typeGroups).map(([key, group]) => {
+                const isOpen = !!expandedTypes[key];
+                return (
+                  <div key={key} style={{ marginBottom: 8 }}>
+                    <button
+                      className="btn btn-ghost"
+                      onClick={() => setExpandedTypes(prev => ({ ...prev, [key]: !prev[key] }))}
+                      style={{
+                        width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        padding: '8px 12px', borderRadius: 6, background: 'var(--bg-secondary)',
+                        border: '1px solid var(--border)',
+                      }}
+                    >
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                        <span className="font-medium">{group.label}</span>
+                        <span className="text-muted" style={{ fontSize: 12 }}>({group.entries.length})</span>
+                      </span>
+                      <span style={{ fontWeight: 500, fontSize: 13, color: group.isLiability ? 'var(--danger)' : undefined }}>
+                        {hideAmounts ? MASKED : fmtD(group.total)}
+                      </span>
+                    </button>
+                    {isOpen && (
+                      <div style={{ padding: '4px 0 0 0' }}>
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Name</th>
+                              <th>Currency</th>
+                              <th style={{ textAlign: 'right' }}>Value ({displayCurrency})</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {group.entries.map((e, j) => (
+                              <tr key={j}>
+                                <td className="font-medium">{e.name}</td>
+                                <td className="text-muted">{e.currency || '--'}</td>
+                                <td style={{ textAlign: 'right', fontWeight: 500, color: e.is_liability ? 'var(--danger)' : undefined }}>
+                                  {hideAmounts ? MASKED : fmtD(e.displayValue)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </>
+          );
+        })()}
+      </Modal>
     </>
   );
 }

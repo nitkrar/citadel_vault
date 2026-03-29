@@ -156,11 +156,12 @@ export async function setKey(cryptoKey) {
  */
 export async function decryptBatch(entries, dek) {
   if (!shouldUseWorker(entries.length)) {
+    const key = dek || _getDekForContext();
     const start = performance.now();
     const results = [];
     for (const blob of entries) {
       try {
-        results.push(await decryptEntry(blob, dek));
+        results.push(await decryptEntry(blob, key));
       } catch {
         results.push(null);
       }
