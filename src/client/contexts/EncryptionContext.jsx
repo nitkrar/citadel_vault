@@ -42,6 +42,13 @@ export function EncryptionProvider({ children, user }) {
     }
   }, []);
 
+  // Lock vault (must be defined before startAutoLock which references it)
+  const lock = useCallback(async () => {
+    await vaultSession.lock();
+    clearAutoLock();
+    setIsUnlocked(false);
+  }, [clearAutoLock]);
+
   const startAutoLock = useCallback((prefs) => {
     clearAutoLock();
     const mode = getUserPreference(prefs, 'auto_lock_mode');
@@ -91,15 +98,6 @@ export function EncryptionProvider({ children, user }) {
     } catch {}
   }, []);
 
-
-  // ------------------------------------------------------------------
-  // Lock vault
-  // ------------------------------------------------------------------
-  const lock = useCallback(async () => {
-    await vaultSession.lock();
-    clearAutoLock();
-    setIsUnlocked(false);
-  }, [clearAutoLock]);
 
   // ------------------------------------------------------------------
   // Unlock vault
