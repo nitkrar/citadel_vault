@@ -1,8 +1,9 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import {
-  PieChart as PieChartIcon, TrendingUp, Globe, Tag, List,
-  DollarSign, Clock, Camera, Lock, Landmark, AlertTriangle,
-  Trash2, ChevronDown, ChevronRight, RefreshCw, Link2,
+  PieChart as PieChartIcon, TrendingUp, List, Plus,
+  DollarSign, Clock, Camera, Lock, AlertTriangle,
+  ChevronDown, ChevronRight, RefreshCw, Link2, Settings,
 } from 'lucide-react';
 import { Line as CJSLine, Bar as CJSBar, Doughnut as CJSDoughnut } from 'react-chartjs-2';
 import {
@@ -15,9 +16,9 @@ import { useVaultEntries } from '../contexts/VaultDataContext';
 import { useHideAmounts } from '../components/Layout';
 import usePortfolioData from '../hooks/usePortfolioData';
 import useVaultData from '../hooks/useVaultData';
-import useSort from '../hooks/useSort';
-import SortableTh from '../components/SortableTh';
 import Modal from '../components/Modal';
+import SegmentedControl from '../components/SegmentedControl';
+import AssetsTab from '../components/portfolio/AssetsTab';
 import useAppConfig from '../hooks/useAppConfig';
 import api from '../api/client';
 import { fmtCurrency, MASKED, apiData } from '../lib/checks';
@@ -52,14 +53,13 @@ const POSITIVE_COLOR  = '#3B9EFF';  // gains — bright blue (NOT green)
 const NEGATIVE_COLOR  = '#E8A838';  // losses — golden amber (NOT red)
 
 const TABS = [
-  { key: 'overview',   label: 'Overview',      icon: PieChartIcon },
-  { key: 'country',    label: 'By Country',    icon: Globe },
-  { key: 'account',    label: 'By Account',    icon: Landmark },
-  { key: 'type',       label: 'By Asset Type', icon: Tag },
-  { key: 'assets',     label: 'All Assets',    icon: List },
-  { key: 'currencies', label: 'By Currency',   icon: DollarSign },
-  { key: 'history',    label: 'History',       icon: Clock },
+  { key: 'overview',    label: 'Overview',    icon: PieChartIcon },
+  { key: 'assets',      label: 'Assets',      icon: List },
+  { key: 'performance', label: 'Performance', icon: TrendingUp },
 ];
+
+// Migration map for old sessionStorage tab keys
+const TAB_MIGRATION = { country: 'assets', account: 'assets', type: 'assets', currencies: 'assets', history: 'performance' };
 
 export default function PortfolioPage() {
   const { isUnlocked, decrypt, encrypt } = useEncryption();
@@ -71,7 +71,11 @@ export default function PortfolioPage() {
     ratesLastUpdated, refreshPrices,
   } = usePortfolioData();
 
-  const [activeTab, setActiveTab] = useState(() => sessionStorage.getItem('pv_portfolio_last_tab') || 'overview');
+  const [activeTab, setActiveTab] = useState(() => {
+    const saved = sessionStorage.getItem('pv_portfolio_last_tab') || 'overview';
+    return TAB_MIGRATION[saved] || saved;
+  });
+  const [assetsGroupBy, setAssetsGroupBy] = useState(() => sessionStorage.getItem('pv_portfolio_assets_group') || 'none');
   const [expandedGroups, setExpandedGroups] = useState({});
   const [snapshotSaving, setSnapshotSaving] = useState(false);
   const [refreshingAll, setRefreshingAll] = useState(false);
@@ -177,6 +181,10 @@ export default function PortfolioPage() {
         currency: asset.currency,
         raw_value: asset.rawValue,
         icon: asset.icon,
+        country: asset.country || null,
+        linked_account: asset.linked_account_id
+          ? { id: asset.linked_account_id, name: portfolio.accounts?.[asset.linked_account_id]?.name || 'Unknown Account' }
+          : null,
       }));
       const encryptedBlobs = await workerDispatcher.encryptBatch(entryBlobs, null);
       const entries = portfolio.assets.map((a, i) => ({
@@ -225,7 +233,17 @@ export default function PortfolioPage() {
   if (loading) {
     return (
       <div className="page-content">
-        <div className="loading-center"><div className="spinner" /></div>
+        <div style={{ marginBottom: 24 }}>
+          <div className="skeleton skeleton-text" style={{ width: 200, height: 20, marginBottom: 8 }} />
+          <div className="skeleton skeleton-text" style={{ width: 300, height: 14 }} />
+        </div>
+        <div className="portfolio-summary-grid">
+          {[1,2,3,4].map(i => <div key={i} className="skeleton skeleton-card" />)}
+        </div>
+        <div className="portfolio-chart-grid">
+          <div className="skeleton skeleton-chart" />
+          <div className="skeleton skeleton-chart" />
+        </div>
       </div>
     );
   }
@@ -299,21 +317,18 @@ export default function PortfolioPage() {
       </div>
 
       {/* Tab Content */}
-      {isEmpty && activeTab !== 'history' ? (
+      {isEmpty && activeTab !== 'performance' ? (
         <div className="empty-state">
           <TrendingUp size={40} className="empty-icon" />
           <h3>No assets yet</h3>
-          <p>Add asset entries in the Vault to see your portfolio.</p>
+          <p>Add asset entries in the Vault to build your portfolio.</p>
+          <Link to="/vault" className="btn btn-primary mt-3"><Plus size={16} /> Add Asset</Link>
         </div>
       ) : (
         <>
           {activeTab === 'overview' && <OverviewTab portfolio={p} fmtD={fmtD} hideAmounts={hideAmounts} refreshResult={refreshResult} />}
-          {activeTab === 'country' && <GroupTab groups={p.by_country} fmtD={fmtD} expanded={expandedGroups} toggle={toggleGroup} labelKey="country" />}
-          {activeTab === 'account' && <GroupTab groups={p.by_account} fmtD={fmtD} expanded={expandedGroups} toggle={toggleGroup} labelKey="account" />}
-          {activeTab === 'type' && <TypeTab groups={p.by_type} fmtD={fmtD} />}
-          {activeTab === 'assets' && <AllAssetsTab assets={p.assets} fmtD={fmtD} />}
-          {activeTab === 'currencies' && <CurrencyTab groups={p.by_currency} fmtD={fmtD} />}
-          {activeTab === 'history' && <HistoryTab decrypt={decrypt} encrypt={encrypt} fmtD={fmtD} hideAmounts={hideAmounts} currencies={currencies} displayCurrency={displayCurrency} baseCurrency={baseCurrency} snapshotPrompt={snapshotPrompt} setSnapshotPrompt={setSnapshotPrompt} doSaveSnapshot={doSaveSnapshot} snapshotSaving={snapshotSaving} />}
+          {activeTab === 'assets' && <AssetsTab portfolio={p} fmtD={fmtD} groupBy={assetsGroupBy} setGroupBy={setAssetsGroupBy} expandedGroups={expandedGroups} toggleGroup={toggleGroup} />}
+          {activeTab === 'performance' && <PerformanceTab decrypt={decrypt} encrypt={encrypt} fmtD={fmtD} hideAmounts={hideAmounts} currencies={currencies} displayCurrency={displayCurrency} baseCurrency={baseCurrency} snapshotPrompt={snapshotPrompt} setSnapshotPrompt={setSnapshotPrompt} doSaveSnapshot={doSaveSnapshot} snapshotSaving={snapshotSaving} decryptedCache={decryptedCache} portfolio={portfolio} />}
         </>
       )}
     </div>
@@ -357,6 +372,7 @@ function OverviewTab({ portfolio, fmtD, hideAmounts, refreshResult }) {
 
   const textColor = getComputedStyle(document.documentElement).getPropertyValue('--color-text-muted').trim() || '#6b7280';
   const borderColor = getComputedStyle(document.documentElement).getPropertyValue('--color-border').trim() || '#e5e7eb';
+  const legendPosition = window.innerWidth >= 768 ? 'right' : 'bottom';
 
   return (
     <>
@@ -378,11 +394,11 @@ function OverviewTab({ portfolio, fmtD, hideAmounts, refreshResult }) {
 
       {/* Charts */}
       {(countryChartData.length > 0 || typeChartData.length > 0) && (
-        <div className="portfolio-chart-row">
+        <div className="portfolio-chart-grid">
           {countryChartData.length > 0 && (
-            <div className="card" style={{ padding: 16, flex: 1, minWidth: 280 }}>
+            <div className="card" style={{ padding: 16 }}>
               <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>By Country</h4>
-              <div style={{ height: 220 }}>
+              <div style={{ minHeight: 220 }}>
                 <CJSDoughnut
                   data={{
                     labels: countryChartData.map(d => d.name),
@@ -397,7 +413,7 @@ function OverviewTab({ portfolio, fmtD, hideAmounts, refreshResult }) {
                     maintainAspectRatio: false,
                     cutout: '55%',
                     plugins: {
-                      legend: { position: 'bottom', labels: { color: textColor, font: { size: 11 }, usePointStyle: true, padding: 8 } },
+                      legend: { position: legendPosition, labels: { color: textColor, font: { size: 11 }, usePointStyle: true, padding: 8 } },
                       tooltip: {
                         callbacks: {
                           label: ctx => hideAmounts ? MASKED : fmtCurrency(ctx.parsed),
@@ -410,9 +426,9 @@ function OverviewTab({ portfolio, fmtD, hideAmounts, refreshResult }) {
             </div>
           )}
           {typeChartData.length > 0 && (
-            <div className="card" style={{ padding: 16, flex: 1, minWidth: 280 }}>
+            <div className="card" style={{ padding: 16 }}>
               <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>By Asset Type</h4>
-              <div style={{ height: 220 }}>
+              <div style={{ minHeight: 220 }}>
                 <CJSDoughnut
                   data={{
                     labels: typeChartData.map(d => d.name),
@@ -427,7 +443,7 @@ function OverviewTab({ portfolio, fmtD, hideAmounts, refreshResult }) {
                     maintainAspectRatio: false,
                     cutout: '55%',
                     plugins: {
-                      legend: { position: 'bottom', labels: { color: textColor, font: { size: 11 }, usePointStyle: true, padding: 8 } },
+                      legend: { position: legendPosition, labels: { color: textColor, font: { size: 11 }, usePointStyle: true, padding: 8 } },
                       tooltip: {
                         callbacks: {
                           label: ctx => hideAmounts ? MASKED : fmtCurrency(ctx.parsed),
@@ -489,259 +505,37 @@ function SummaryCard({ label, value, color }) {
   );
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Group Tab (Country / Account)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-function GroupTab({ groups, fmtD, expanded, toggle }) {
-  const sortedGroups = useMemo(() =>
-    Object.entries(groups).sort((a, b) => Math.abs(b[1].total) - Math.abs(a[1].total)),
-  [groups]);
-
-  if (sortedGroups.length === 0) {
-    return <div className="empty-state"><p>No data to display.</p></div>;
-  }
-
-  return (
-    <div className="flex flex-col gap-3">
-      {sortedGroups.map(([key, group]) => {
-        const isOpen = expanded[key];
-        const label = group.label || key;
-        return (
-          <div key={key} className="card">
-            <button
-              type="button"
-              onClick={() => toggle(key)}
-              style={{
-                width: '100%', display: 'flex', alignItems: 'center', gap: 8,
-                padding: '12px 16px', background: 'none', border: 'none', cursor: 'pointer',
-                textAlign: 'left', fontSize: 14, fontWeight: 600, color: 'var(--color-text)',
-              }}
-            >
-              {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-              <span style={{ flex: 1 }}>{label}</span>
-              <span className="badge badge-muted" style={{ marginRight: 8 }}>{group.count}</span>
-              <span style={{ fontWeight: 700, fontSize: 15 }}>{fmtD(group.total)}</span>
-            </button>
-            {isOpen && (
-              <div className="table-wrapper">
-                <table>
-                  <thead><tr><th>Name</th><th>Type</th><th>Currency</th><th style={{ textAlign: 'right' }}>Value</th></tr></thead>
-                  <tbody>
-                    {group.items.map(item => (
-                      <tr key={item.id}>
-                        <td className="font-medium">{item.name}</td>
-                        <td>
-                          <span className={`badge ${item.is_liability ? 'badge-danger' : 'badge-primary'}`}>
-                            {item.template_name}
-                          </span>
-                        </td>
-                        <td className="td-muted">{item.currency}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 500 }}>{fmtD(item.displayValue)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// By Asset Type Tab
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-function TypeTab({ groups, fmtD }) {
-  const rows = useMemo(() =>
-    Object.entries(groups)
-      .map(([key, data]) => ({ key, ...data }))
-      .sort((a, b) => Math.abs(b.total) - Math.abs(a.total)),
-  [groups]);
-
-  return (
-    <div className="card">
-      <div className="table-wrapper">
-        <table>
-          <thead>
-            <tr>
-              <th>Type</th>
-              <th>Classification</th>
-              <th style={{ textAlign: 'right' }}>Total</th>
-              <th style={{ textAlign: 'right' }}>Count</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(row => (
-              <tr key={row.key}>
-                <td className="font-medium">{row.label}</td>
-                <td>
-                  <span className={`badge ${row.has_liability ? 'badge-danger' : 'badge-success'}`}>
-                    {row.has_liability ? 'Liability' : 'Asset'}
-                  </span>
-                </td>
-                <td style={{ textAlign: 'right', fontWeight: 500 }}>{fmtD(row.total)}</td>
-                <td style={{ textAlign: 'right' }}>{row.count}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// All Assets Tab
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-function AllAssetsTab({ assets, fmtD }) {
-  const { sorted, sortKey, sortDir, onSort } = useSort(assets, 'name', 'asc');
-  const [selected, setSelected] = useState(new Set());
-  const [deleting, setDeleting] = useState(false);
-  const hasAnyGainLoss = assets.some(a => a.gainLoss !== undefined);
-
-  const toggleSelect = (id) => {
-    setSelected(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  };
-
-  const toggleAll = () => {
-    if (selected.size === sorted.length) setSelected(new Set());
-    else setSelected(new Set(sorted.map(a => a.id)));
-  };
-
-  const handleBulkDelete = async () => {
-    if (!confirm(`Delete ${selected.size} selected entries? This cannot be undone.`)) return;
-    setDeleting(true);
-    try {
-      for (const id of selected) {
-        await api.delete(`/vault.php?id=${id}`);
-      }
-      setSelected(new Set());
-      window.dispatchEvent(new Event('vault-sync-refresh'));
-    } catch (err) {
-      alert(err.response?.data?.error || 'Failed to delete some entries.');
-    } finally {
-      setDeleting(false);
-    }
-  };
-
-  return (
-    <>
-      {selected.size > 0 && (
-        <div className="bulk-toolbar">
-          <span className="bulk-count">{selected.size} selected</span>
-          <button className="btn btn-danger btn-sm" onClick={handleBulkDelete} disabled={deleting}>
-            <Trash2 size={14} /> {deleting ? 'Deleting...' : 'Delete'}
-          </button>
-          <button className="btn btn-ghost btn-sm" onClick={() => setSelected(new Set())}>Cancel</button>
-        </div>
-      )}
-      <div className="card">
-        <div className="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th className="th-checkbox">
-                  <input type="checkbox" checked={selected.size === sorted.length && sorted.length > 0} onChange={toggleAll} />
-                </th>
-                <SortableTh label="Name" field="name" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-                <th>Type</th>
-                <th>Currency</th>
-                <SortableTh label="Value" field="displayValue" sortKey={sortKey} sortDir={sortDir} onSort={onSort} style={{ textAlign: 'right' }} />
-                {hasAnyGainLoss && <SortableTh label="Gain/Loss" field="gainLoss" sortKey={sortKey} sortDir={sortDir} onSort={onSort} style={{ textAlign: 'right' }} />}
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.map(item => (
-                <tr key={item.id} className={selected.has(item.id) ? 'row-selected' : ''}>
-                  <td className="td-checkbox">
-                    <input type="checkbox" checked={selected.has(item.id)} onChange={() => toggleSelect(item.id)} />
-                  </td>
-                  <td className="font-medium">{item.name}</td>
-                  <td>
-                    <span className={`badge ${item.is_liability ? 'badge-danger' : 'badge-primary'}`}>
-                      {item.template_name}
-                    </span>
-                  </td>
-                  <td className="td-muted">{item.currency}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 500 }}>{fmtD(item.displayValue)}</td>
-                  {hasAnyGainLoss && (
-                    <td style={{
-                      textAlign: 'right', fontWeight: 500,
-                      color: item.gainLoss > 0 ? 'var(--color-success, #16a34a)' : item.gainLoss < 0 ? 'var(--color-danger, #dc2626)' : 'inherit',
-                    }}>
-                      {item.gainLoss !== undefined ? (
-                        <>
-                          {fmtD(item.gainLoss)}
-                          <span style={{ fontSize: 11, opacity: 0.7, marginLeft: 4 }}>
-                            ({item.gainLossPercent >= 0 ? '+' : ''}{item.gainLossPercent.toFixed(1)}%)
-                          </span>
-                        </>
-                      ) : '—'}
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </>
-  );
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// By Currency Tab
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-function CurrencyTab({ groups, fmtD }) {
-  const rows = useMemo(() =>
-    Object.entries(groups)
-      .map(([code, data]) => ({ code, ...data }))
-      .sort((a, b) => Math.abs(b.total) - Math.abs(a.total)),
-  [groups]);
-
-  return (
-    <div className="card">
-      <div className="table-wrapper">
-        <table>
-          <thead>
-            <tr>
-              <th>Currency</th>
-              <th>Symbol</th>
-              <th style={{ textAlign: 'right' }}>Total (Display)</th>
-              <th style={{ textAlign: 'right' }}>Count</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(row => (
-              <tr key={row.code}>
-                <td className="font-medium">{row.code}</td>
-                <td>{row.symbol}</td>
-                <td style={{ textAlign: 'right', fontWeight: 500 }}>{fmtD(row.total)}</td>
-                <td style={{ textAlign: 'right' }}>{row.count}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
+// (GroupTab, TypeTab, AllAssetsTab, CurrencyTab moved to components/portfolio/AssetsTab.jsx)
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // History Tab
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-function HistoryTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrency, baseCurrency, snapshotPrompt, setSnapshotPrompt, doSaveSnapshot, snapshotSaving }) {
+function getGroupTotals(summary, breakdown) {
+  if (breakdown === 'type') return summary.by_type;
+  if (breakdown === 'country') return summary.by_country;
+  if (breakdown === 'account') return summary.by_account;
+  if (breakdown === 'currency') return summary.by_currency;
+  if (breakdown === 'asset') {
+    const byAsset = {};
+    for (const e of (summary.entries || [])) {
+      const key = String(e.entry_id);
+      if (!key || key === 'undefined') continue;
+      if (!byAsset[key]) byAsset[key] = { total: 0, count: 0, label: e.name || 'Unnamed' };
+      byAsset[key].total += e.displayValue;
+      byAsset[key].count++;
+    }
+    return byAsset;
+  }
+  return {};
+}
+
+function getBreakdownColor(key, breakdown, index) {
+  if (breakdown === 'type') return getTypeColor(key);
+  return CHART_COLORS[index % CHART_COLORS.length];
+}
+
+function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrency, baseCurrency, snapshotPrompt, setSnapshotPrompt, doSaveSnapshot, snapshotSaving, decryptedCache, portfolio }) {
   const [snapshots, setSnapshots] = useState([]);
   const [loadingSnap, setLoadingSnap] = useState(true);
   const [rateMode, setRateMode] = useState('current'); // 'current' | 'snapshot'
@@ -749,10 +543,12 @@ function HistoryTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrency, b
   const [loadingRates, setLoadingRates] = useState(false);
   const [selectedSnapshot, setSelectedSnapshot] = useState(null);
   const [expandedTypes, setExpandedTypes] = useState({});
-  const [typeFilter, setTypeFilter] = useState('all'); // 'all' | specific type key
+  const [groupFilter, setGroupFilter] = useState('all'); // 'all' | specific group key
+  const [breakdown, setBreakdown] = useState(() => sessionStorage.getItem('pv_portfolio_breakdown') || 'type');
   const [dateRange, setDateRange] = useState('all'); // 'all' | '3m' | '6m' | '1y' | 'ytd'
   const [showPercent, setShowPercent] = useState(false);
   const [tableExpanded, setTableExpanded] = useState(false);
+  const [showRateSettings, setShowRateSettings] = useState(false);
 
   // Build current rate map from live currencies
   const currentRateMap = useMemo(() => buildRateMap(currencies || []), [currencies]);
@@ -775,6 +571,29 @@ function HistoryTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrency, b
         for (let j = 0; j < decryptedEntries.length; j++) {
           if (decryptedEntries[j]) {
             entries.push({ ...decryptedEntries[j], entry_id: s.entries[j].entry_id });
+          }
+        }
+        // Backfill old entries missing country/linked_account.
+        // If the vault entry has been deleted since the snapshot was taken,
+        // decryptedCache lookup returns undefined — entry gets country=null
+        // and linked_account=null, which maps to "Unknown" country and
+        // "Not linked to an account" in the breakdown charts.
+        for (const entry of entries) {
+          if (entry.country === undefined || entry.linked_account === undefined) {
+            const vaultEntry = decryptedCache?.[entry.entry_id];
+            if (vaultEntry) {
+              if (entry.country === undefined) entry.country = vaultEntry.country || null;
+              if (entry.linked_account === undefined) {
+                const acctId = vaultEntry.linked_account_id;
+                entry.linked_account = acctId
+                  ? { id: acctId, name: portfolio?.accounts?.[acctId]?.name || 'Unknown Account' }
+                  : null;
+              }
+            } else {
+              // Vault entry deleted — set explicit nulls
+              if (entry.country === undefined) entry.country = null;
+              if (entry.linked_account === undefined) entry.linked_account = null;
+            }
           }
         }
         decrypted.push({ ...s, _entries: entries });
@@ -863,54 +682,77 @@ function HistoryTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrency, b
     return map;
   }, [filteredSnapshots, rateMode, historicalRatesCache, currentRateMap, displayCurrency]);
 
-  // Collect all unique type keys with labels from snapshotSummaryMap
-  const allTypeKeys = useMemo(() => {
-    const types = new Map();
+  // Collect all unique group keys with labels from snapshotSummaryMap
+  const allGroupKeys = useMemo(() => {
+    const keys = new Map();
     for (const summary of snapshotSummaryMap.values()) {
-      if (summary?.by_type) {
-        for (const [key, val] of Object.entries(summary.by_type)) {
-          if (!types.has(key)) types.set(key, val.label);
+      let source;
+      if (breakdown === 'type') source = summary.by_type;
+      else if (breakdown === 'country') source = summary.by_country;
+      else if (breakdown === 'account') source = summary.by_account;
+      else if (breakdown === 'currency') source = summary.by_currency;
+      else if (breakdown === 'asset') {
+        for (const e of (summary.entries || [])) {
+          if (e.entry_id && !keys.has(String(e.entry_id))) {
+            keys.set(String(e.entry_id), e.name || 'Unnamed');
+          }
+        }
+        continue;
+      }
+      if (source) {
+        for (const [key, val] of Object.entries(source)) {
+          if (!keys.has(key)) keys.set(key, val.label || key);
         }
       }
     }
-    return types;
-  }, [snapshotSummaryMap]);
+    return keys;
+  }, [snapshotSummaryMap, breakdown]);
 
-  // Chart data: date + netWorth + byType totals per snapshot
+  // Chart data: date + netWorth + byGroup totals per snapshot
   const chartData = useMemo(() =>
     [...snapshotSummaryMap.values()].map(s => ({
       date: s.date,
       netWorth: s.net_worth,
-      byType: Object.fromEntries(
-        Object.entries(s.by_type).map(([k, v]) => [k, v.total])
+      byGroup: Object.fromEntries(
+        Object.entries(getGroupTotals(s, breakdown)).map(([k, v]) => [k, v.total])
       ),
     })).sort((a, b) => a.date.localeCompare(b.date)),
-  [snapshotSummaryMap]);
+  [snapshotSummaryMap, breakdown]);
 
-  // Percentage data: each type as % of sum of absolute type totals
+  // Percentage data: each group as % of sum of absolute group totals
   const percentageData = useMemo(() =>
     [...snapshotSummaryMap.values()].map(s => {
-      const absSum = Object.values(s.by_type).reduce((acc, t) => acc + Math.abs(t.total), 0);
-      if (absSum === 0) return { date: s.date, types: {} };
+      const groups = getGroupTotals(s, breakdown);
+      const absSum = Object.values(groups).reduce((acc, g) => acc + Math.abs(g.total), 0);
+      if (absSum === 0) return { date: s.date, groups: {} };
       return {
         date: s.date,
-        types: Object.fromEntries(
-          Object.entries(s.by_type).map(([k, v]) => [k, (Math.abs(v.total) / absSum) * 100])
+        groups: Object.fromEntries(
+          Object.entries(groups).map(([k, v]) => [k, (Math.abs(v.total) / absSum) * 100])
         ),
       };
     }).sort((a, b) => a.date.localeCompare(b.date)),
-  [snapshotSummaryMap]);
+  [snapshotSummaryMap, breakdown]);
 
-  // Delta data: consecutive net worth diffs — absolute + percentage (first snapshot omitted)
+  // Delta data: consecutive diffs per group — absolute + percentage (first snapshot omitted)
   const deltaData = useMemo(() => {
     const data = [...snapshotSummaryMap.values()].sort((a, b) => a.date.localeCompare(b.date));
     return data.slice(1).map((s, i) => {
-      const prev = data[i].net_worth;
-      const delta = s.net_worth - prev;
-      const pctDelta = prev !== 0 ? (delta / Math.abs(prev)) * 100 : 0;
-      return { date: s.date, delta, pctDelta };
+      const prev = data[i];
+      const delta = s.net_worth - prev.net_worth;
+      const pctDelta = prev.net_worth !== 0 ? (delta / Math.abs(prev.net_worth)) * 100 : 0;
+      // Per-group deltas for breakdown-aware bar chart
+      const currGroups = getGroupTotals(s, breakdown);
+      const prevGroups = getGroupTotals(prev, breakdown);
+      const byGroup = {};
+      for (const key of new Set([...Object.keys(currGroups), ...Object.keys(prevGroups)])) {
+        const curr = currGroups[key]?.total || 0;
+        const prv = prevGroups[key]?.total || 0;
+        byGroup[key] = { delta: curr - prv, pctDelta: prv !== 0 ? ((curr - prv) / Math.abs(prv)) * 100 : 0 };
+      }
+      return { date: s.date, delta, pctDelta, byGroup };
     });
-  }, [snapshotSummaryMap]);
+  }, [snapshotSummaryMap, breakdown]);
 
   // ── Early returns (after all hooks) ──
 
@@ -932,16 +774,16 @@ function HistoryTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrency, b
   const textColor = getComputedStyle(document.documentElement).getPropertyValue('--color-text-muted').trim() || '#6b7280';
   const borderColor = getComputedStyle(document.documentElement).getPropertyValue('--color-border').trim() || '#e5e7eb';
 
-  // Determine which type keys to show in hero chart
-  const visibleTypeKeys = typeFilter === 'all'
-    ? [...allTypeKeys.keys()]
-    : allTypeKeys.has(typeFilter) ? [typeFilter] : [];
+  // Determine which group keys to show in hero chart
+  const visibleGroupKeys = groupFilter === 'all'
+    ? [...allGroupKeys.keys()]
+    : allGroupKeys.has(groupFilter) ? [groupFilter] : [];
 
   // Hero line chart datasets (normal mode)
   const heroLineData = {
     labels: chartData.map(d => d.date),
     datasets: [
-      ...(typeFilter === 'all' ? [{
+      ...(groupFilter === 'all' ? [{
         label: 'Net Worth',
         data: chartData.map(d => d.netWorth),
         borderColor: NET_WORTH_COLOR,
@@ -952,11 +794,11 @@ function HistoryTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrency, b
         fill: false,
         order: 0,
       }] : []),
-      ...visibleTypeKeys.map((key, idx) => ({
-        label: allTypeKeys.get(key) || key,
-        data: chartData.map(d => d.byType[key] || 0),
-        borderColor: getTypeColor(key),
-        backgroundColor: getTypeColor(key) + '33',
+      ...visibleGroupKeys.map((key, idx) => ({
+        label: allGroupKeys.get(key) || key,
+        data: chartData.map(d => d.byGroup[key] || 0),
+        borderColor: getBreakdownColor(key, breakdown, idx),
+        backgroundColor: getBreakdownColor(key, breakdown, idx) + '33',
         borderWidth: 1.5,
         pointRadius: 3,
         tension: 0.3,
@@ -969,11 +811,11 @@ function HistoryTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrency, b
   // Hero stacked area datasets (percent mode)
   const heroPercentData = {
     labels: percentageData.map(d => d.date),
-    datasets: visibleTypeKeys.map((key, idx) => ({
-      label: allTypeKeys.get(key) || key,
-      data: percentageData.map(d => d.types[key] || 0),
-      borderColor: getTypeColor(key),
-      backgroundColor: getTypeColor(key) + '99',
+    datasets: visibleGroupKeys.map((key, idx) => ({
+      label: allGroupKeys.get(key) || key,
+      data: percentageData.map(d => d.groups[key] || 0),
+      borderColor: getBreakdownColor(key, breakdown, idx),
+      backgroundColor: getBreakdownColor(key, breakdown, idx) + '99',
       borderWidth: 1.5,
       pointRadius: 3,
       tension: 0.3,
@@ -985,6 +827,7 @@ function HistoryTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrency, b
   const heroOptions = {
     responsive: true,
     maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
     scales: {
       x: {
         type: 'time',
@@ -1020,20 +863,48 @@ function HistoryTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrency, b
     },
   };
 
-  // Delta bar chart — absolute or % change based on toggle
+  // Delta bar chart — per-group bars when breakdown active, or single net worth bar
   const deltaChartData = {
     labels: deltaData.map(d => d.date),
-    datasets: [{
-      label: showPercent ? '% Change' : 'Period Change',
-      data: deltaData.map(d => showPercent ? d.pctDelta : d.delta),
-      backgroundColor: deltaData.map(d => (showPercent ? d.pctDelta : d.delta) >= 0 ? POSITIVE_COLOR : NEGATIVE_COLOR),
-      borderRadius: 4,
-    }],
+    datasets: visibleGroupKeys.length > 0 && groupFilter !== 'all'
+      // Single filtered group — one dataset
+      ? [{
+          label: allGroupKeys.get(groupFilter) || groupFilter,
+          data: deltaData.map(d => {
+            const g = d.byGroup[groupFilter];
+            return showPercent ? (g?.pctDelta || 0) : (g?.delta || 0);
+          }),
+          backgroundColor: deltaData.map(d => {
+            const v = showPercent ? (d.byGroup[groupFilter]?.pctDelta || 0) : (d.byGroup[groupFilter]?.delta || 0);
+            return v >= 0 ? POSITIVE_COLOR : NEGATIVE_COLOR;
+          }),
+          borderRadius: 4,
+        }]
+      // All groups — stacked bars per group
+      : visibleGroupKeys.length > 1
+        ? visibleGroupKeys.map((key, idx) => ({
+            label: allGroupKeys.get(key) || key,
+            data: deltaData.map(d => {
+              const g = d.byGroup[key];
+              return showPercent ? (g?.pctDelta || 0) : (g?.delta || 0);
+            }),
+            backgroundColor: getBreakdownColor(key, breakdown, idx),
+            borderRadius: 2,
+            stack: 'delta',
+          }))
+        // Fallback: single net worth bar (no breakdown or only 1 group)
+        : [{
+            label: showPercent ? '% Change' : 'Period Change',
+            data: deltaData.map(d => showPercent ? d.pctDelta : d.delta),
+            backgroundColor: deltaData.map(d => (showPercent ? d.pctDelta : d.delta) >= 0 ? POSITIVE_COLOR : NEGATIVE_COLOR),
+            borderRadius: 4,
+          }],
   };
 
   const deltaOptions = {
     responsive: true,
     maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
     scales: {
       x: {
         type: 'time',
@@ -1051,7 +922,7 @@ function HistoryTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrency, b
       },
     },
     plugins: {
-      legend: { display: false },
+      legend: { display: visibleGroupKeys.length > 1, position: 'bottom', labels: { color: textColor, font: { size: 11 }, usePointStyle: true } },
       tooltip: {
         callbacks: {
           label: ctx => hideAmounts
@@ -1068,90 +939,93 @@ function HistoryTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrency, b
 
   return (
     <>
-      {/* Zone 1 — Toolbar */}
+      {/* Zone 1 — Toolbar (streamlined) */}
       <div className="card mb-4" style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        {/* Rate mode toggle */}
-        <span style={{ fontSize: 13, fontWeight: 600 }}>Rates:</span>
-        <button
-          className={`btn btn-sm ${rateMode === 'current' ? 'btn-primary' : 'btn-ghost'}`}
-          onClick={() => handleRateModeChange('current')}
+        {/* Breakdown dropdown */}
+        <span style={{ fontSize: 13, fontWeight: 600 }}>Breakdown:</span>
+        <select
+          className="form-control"
+          style={{ width: 'auto', minWidth: 140, fontSize: 13 }}
+          value={breakdown}
+          onChange={e => {
+            const val = e.target.value;
+            setBreakdown(val);
+            setGroupFilter('all');
+            sessionStorage.setItem('pv_portfolio_breakdown', val);
+          }}
         >
-          Current
-        </button>
-        <button
-          className={`btn btn-sm ${rateMode === 'snapshot' ? 'btn-primary' : 'btn-ghost'}`}
-          onClick={() => handleRateModeChange('snapshot')}
-          disabled={loadingRates}
-        >
-          {loadingRates ? 'Loading...' : 'Snapshot'}
-        </button>
+          <option value="type">By Type</option>
+          <option value="country">By Country</option>
+          <option value="account">By Account</option>
+          <option value="currency">By Currency</option>
+          <option value="asset">By Asset</option>
+        </select>
 
-        {/* Type filter dropdown */}
-        {allTypeKeys.size > 1 && (
+        {/* Group filter dropdown */}
+        {allGroupKeys.size > 1 && (
           <>
-            <span style={{ fontSize: 13, fontWeight: 600, marginLeft: 8 }}>Filter:</span>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>Filter:</span>
             <select
               className="form-control"
               style={{ width: 'auto', minWidth: 120, fontSize: 13, padding: '2px 24px 2px 8px' }}
-              value={typeFilter}
-              onChange={e => setTypeFilter(e.target.value)}
+              value={groupFilter}
+              onChange={e => setGroupFilter(e.target.value)}
             >
-              <option value="all">All types</option>
-              {[...allTypeKeys.entries()].map(([key, label]) => (
+              <option value="all">All</option>
+              {[...allGroupKeys.entries()].map(([key, label]) => (
                 <option key={key} value={key}>{label}</option>
               ))}
             </select>
           </>
         )}
 
-        {/* Date range presets */}
-        <span style={{ fontSize: 13, fontWeight: 600, marginLeft: 8 }}>Range:</span>
-        {['all', '3m', '6m', '1y', 'ytd'].map(r => (
-          <button
-            key={r}
-            className={`btn btn-sm ${dateRange === r ? 'btn-primary' : 'btn-ghost'}`}
-            onClick={() => setDateRange(r)}
-          >
-            {r === 'all' ? 'All' : r === '3m' ? '3M' : r === '6m' ? '6M' : r === '1y' ? '1Y' : 'YTD'}
-          </button>
-        ))}
-
         {/* View mode toggle */}
-        <div style={{ display: 'inline-flex', borderRadius: 6, border: '1px solid var(--color-border)', overflow: 'hidden', marginLeft: 'auto' }}>
-          <button
-            className="btn btn-sm"
-            style={{
-              borderRadius: 0, border: 'none', fontWeight: 500, fontSize: 12, padding: '4px 12px',
-              background: !showPercent ? 'var(--color-primary)' : 'transparent',
-              color: !showPercent ? '#fff' : 'var(--color-text-muted)',
-            }}
-            onClick={() => setShowPercent(false)}
-          >
-            Values
+        <SegmentedControl
+          options={[{ value: 'values', label: 'Values' }, { value: 'percent', label: '% Allocation' }]}
+          value={showPercent ? 'percent' : 'values'}
+          onChange={v => setShowPercent(v === 'percent')}
+        />
+
+        {/* Rate mode — gear icon popover */}
+        <div style={{ position: 'relative', marginLeft: 'auto' }}>
+          <button className="btn btn-ghost btn-sm" onClick={() => setShowRateSettings(prev => !prev)} title="Rate settings">
+            <Settings size={16} />
           </button>
-          <button
-            className="btn btn-sm"
-            style={{
-              borderRadius: 0, border: 'none', borderLeft: '1px solid var(--color-border)', fontWeight: 500, fontSize: 12, padding: '4px 12px',
-              background: showPercent ? 'var(--color-primary)' : 'transparent',
-              color: showPercent ? '#fff' : 'var(--color-text-muted)',
-            }}
-            onClick={() => setShowPercent(true)}
-          >
-            % Allocation
-          </button>
+          {showRateSettings && (
+            <div className="card" style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, padding: '10px 14px', zIndex: 20, minWidth: 180, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-muted)', display: 'block', marginBottom: 6 }}>Rate Mode</span>
+              <SegmentedControl
+                options={[{ value: 'current', label: 'Current' }, { value: 'snapshot', label: loadingRates ? 'Loading...' : 'Snapshot' }]}
+                value={rateMode}
+                onChange={v => { handleRateModeChange(v); setShowRateSettings(false); }}
+              />
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Zone 2 — Hero Chart */}
+      {/* Zone 2 — Hero Chart (with date range inside) */}
       {chartData.length >= 1 && (
         <div className="card mb-4" style={{ padding: 16 }}>
-          <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>
-            {showPercent
-              ? 'Allocation Over Time'
-              : typeFilter !== 'all' ? `${allTypeKeys.get(typeFilter) || typeFilter} Over Time` : 'Portfolio Over Time'}
-          </h4>
-          <div style={{ height: 350 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+            <h4 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>
+              {showPercent
+                ? 'Allocation Over Time'
+                : groupFilter !== 'all' ? `${allGroupKeys.get(groupFilter) || groupFilter} Over Time` : 'Portfolio Over Time'}
+            </h4>
+            <SegmentedControl
+              options={[
+                { value: 'all', label: 'All' },
+                { value: '3m', label: '3M' },
+                { value: '6m', label: '6M' },
+                { value: '1y', label: '1Y' },
+                { value: 'ytd', label: 'YTD' },
+              ]}
+              value={dateRange}
+              onChange={setDateRange}
+            />
+          </div>
+          <div style={{ minHeight: 300, height: '40vh', maxHeight: 500 }}>
             <CJSLine
               data={showPercent ? heroPercentData : heroLineData}
               options={heroOptions}

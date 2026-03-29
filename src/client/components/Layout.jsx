@@ -38,6 +38,7 @@ import {
   X,
   RefreshCw,
 } from 'lucide-react';
+import { PBKDF2_ITERATIONS_RECOMMENDED, getKdfIterations } from '../lib/crypto';
 
 // --- Hide Amounts Context ---
 const HideAmountsContext = createContext();
@@ -77,7 +78,7 @@ export default function Layout() {
     setKdfBannerDismissed(true);
     try {
       // Save current default as explicit preference — signals "user made a choice"
-      await api.put('/preferences.php', { kdf_iterations: '100000' });
+      await api.put('/preferences.php', { kdf_iterations: String(getKdfIterations(preferences)) });
       refreshPreferences();
     } catch (_) {}
   };
@@ -450,7 +451,7 @@ export default function Layout() {
                 <Shield size={18} style={{ flexShrink: 0 }} />
                 <div>
                   <strong>Strengthen your vault encryption?</strong>{' '}
-                  Your encryption uses 100K iterations. We recommend 600K for stronger protection against brute-force attacks.
+                  {`Your encryption uses 100K iterations. We recommend ${PBKDF2_ITERATIONS_RECOMMENDED / 1000}K for stronger protection against brute-force attacks.`}
                 </div>
               </div>
               <div className="flex items-center gap-2" style={{ flexShrink: 0, flexWrap: 'wrap', gap: 6 }}>

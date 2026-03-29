@@ -16,7 +16,7 @@ import {
   generateKeyPair, exportPublicKey, importPublicKey,
   hybridEncrypt, hybridDecrypt,
   isUnlocked, lock,
-  PBKDF2_ITERATIONS, PBKDF2_ITERATIONS_LEGACY,
+  PBKDF2_ITERATIONS, PBKDF2_ITERATIONS_RECOMMENDED,
 } from '../../src/client/lib/crypto.js';
 
 // ── Base64 helpers ──────────────────────────────────────────────────────
@@ -444,26 +444,26 @@ describe('Edge cases', () => {
 
 describe('PBKDF2 iteration migration', () => {
   it('exports correct iteration constants', () => {
-    expect(PBKDF2_ITERATIONS).toBe(600000);
-    expect(PBKDF2_ITERATIONS_LEGACY).toBe(100000);
+    expect(PBKDF2_ITERATIONS).toBe(100000);
+    expect(PBKDF2_ITERATIONS_RECOMMENDED).toBe(600000);
   });
 
-  it('unlockVault works with explicit legacy iterations', async () => {
-    // Setup creates with 600K (current default)
+  it('unlockVault works with default iterations', async () => {
+    // Setup creates with 100K (default)
     const { keyMaterial } = await setupVault('TestKey#1');
     lockVault();
 
-    // Unlock with explicit 600K iterations
+    // Unlock with default 100K iterations
     const result = await unlockVault(keyMaterial, 'TestKey#1', PBKDF2_ITERATIONS);
     expect(result).toBe(true);
   });
 
   it('unlockVault fails when iterations mismatch', async () => {
-    // Setup with 600K, try unlock with 100K — different derived key, unwrap fails
+    // Setup with 100K (default), try unlock with 600K — different derived key, unwrap fails
     const { keyMaterial } = await setupVault('TestKey#2');
     lockVault();
 
-    const result = await unlockVault(keyMaterial, 'TestKey#2', PBKDF2_ITERATIONS_LEGACY);
+    const result = await unlockVault(keyMaterial, 'TestKey#2', PBKDF2_ITERATIONS_RECOMMENDED);
     expect(result).toBe(false);
   });
 
@@ -483,7 +483,7 @@ describe('PBKDF2 iteration migration', () => {
     expect(cross).toBeNull();
   });
 
-  it('reWrapDekIterations re-wraps with current iterations', async () => {
+  it('reWrapDekIterations re-wraps with default iterations', async () => {
     const vaultKey = 'MigrateKey#1';
     const { keyMaterial } = await setupVault(vaultKey);
 
@@ -495,7 +495,7 @@ describe('PBKDF2 iteration migration', () => {
     // New blobs should differ from original (new salt)
     expect(newBlobs.vault_key_salt).not.toBe(keyMaterial.vault_key_salt);
 
-    // Unlock with new blobs at current iterations should work
+    // Unlock with new blobs at default iterations should work
     lockVault();
     const result = await unlockVault(newBlobs, vaultKey, PBKDF2_ITERATIONS);
     expect(result).toBe(true);
@@ -513,7 +513,7 @@ describe('PBKDF2 iteration migration', () => {
     const result = await unlockVault(newBlobs, vaultKey, 200000);
     expect(result).toBe(true);
 
-    // Unlock at default 600K should fail
+    // Unlock at default 100K should fail (wrapped at 200K)
     lockVault();
     const wrong = await unlockVault(newBlobs, vaultKey, PBKDF2_ITERATIONS);
     expect(wrong).toBe(false);
@@ -538,7 +538,7 @@ describe('PBKDF2 iteration migration', () => {
     expect(result).toBe(true);
   });
 
-  it('full migration flow: setup at 600K → unlock → reWrap → unlock with new blobs', async () => {
+  it('full migration flow: setup at 100K → unlock → reWrap at 600K → unlock with new blobs', async () => {
     const vaultKey = 'FullFlow#1';
     const { keyMaterial } = await setupVault(vaultKey);
 
@@ -546,12 +546,12 @@ describe('PBKDF2 iteration migration', () => {
     const dek = (await import('../../src/client/lib/crypto.js'))._getDekForContext();
     const blob = await encrypt('migration-test', dek);
 
-    // Re-wrap (simulates migration)
-    const newBlobs = await reWrapDekIterations(vaultKey);
+    // Re-wrap at recommended 600K (simulates user upgrading via Security page)
+    const newBlobs = await reWrapDekIterations(vaultKey, PBKDF2_ITERATIONS_RECOMMENDED);
     lockVault();
 
-    // Unlock with new blobs
-    await unlockVault(newBlobs, vaultKey, PBKDF2_ITERATIONS);
+    // Unlock with new blobs at 600K
+    await unlockVault(newBlobs, vaultKey, PBKDF2_ITERATIONS_RECOMMENDED);
 
     // Data should still decrypt (DEK unchanged)
     const newDek = (await import('../../src/client/lib/crypto.js'))._getDekForContext();

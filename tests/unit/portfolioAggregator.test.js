@@ -462,6 +462,52 @@ describe('aggregatePortfolio gain/loss integration', () => {
 
 // ── edge cases ──────────────────────────────────────────────────────────
 
+describe('recalculateSnapshot — by_country, by_account, and by_currency label', () => {
+  const entries = [
+    { name: 'HSBC Savings', raw_value: 5000, currency: 'GBP', is_liability: false, template_name: 'cash', subtype: 'cash', country: 'UK', linked_account: { id: 10, name: 'My Savings' }, entry_id: 101 },
+    { name: 'US Bond', raw_value: 3000, currency: 'USD', is_liability: false, template_name: 'bond', subtype: 'bond', country: 'US', linked_account: null, entry_id: 102 },
+    { name: 'UK Stock', raw_value: 2000, currency: 'GBP', is_liability: false, template_name: 'stock', subtype: 'stock', country: 'UK', linked_account: { id: 10, name: 'My Savings' }, entry_id: 103 },
+  ];
+  const rateMap = { GBP: 1, USD: 0.8 };
+
+  it('groups by country', () => {
+    const result = recalculateSnapshot(entries, rateMap, 'GBP');
+    expect(result.by_country).toBeDefined();
+    expect(Object.keys(result.by_country)).toContain('UK');
+    expect(Object.keys(result.by_country)).toContain('US');
+    expect(result.by_country['UK'].count).toBe(2);
+    expect(result.by_country['UK'].label).toBe('UK');
+  });
+
+  it('groups by account', () => {
+    const result = recalculateSnapshot(entries, rateMap, 'GBP');
+    expect(result.by_account).toBeDefined();
+    expect(result.by_account['10']).toBeDefined();
+    expect(result.by_account['10'].label).toBe('My Savings');
+    expect(result.by_account['10'].count).toBe(2);
+    expect(result.by_account['_unlinked']).toBeDefined();
+    expect(result.by_account['_unlinked'].count).toBe(1);
+  });
+
+  it('includes label on by_currency entries', () => {
+    const result = recalculateSnapshot(entries, rateMap, 'GBP');
+    expect(result.by_currency['GBP'].label).toBe('GBP');
+    expect(result.by_currency['USD'].label).toBe('USD');
+  });
+
+  it('handles entries with null country/linked_account (deleted vault entries)', () => {
+    const deletedEntries = [
+      { name: 'Deleted Asset', raw_value: 1000, currency: 'USD', is_liability: false,
+        template_name: 'stock', subtype: 'stock', country: null, linked_account: null, entry_id: 999 },
+    ];
+    const result = recalculateSnapshot(deletedEntries, { USD: 1 }, 'USD');
+    expect(result.by_country['Unknown']).toBeDefined();
+    expect(result.by_country['Unknown'].count).toBe(1);
+    expect(result.by_account['_unlinked']).toBeDefined();
+    expect(result.by_account['_unlinked'].count).toBe(1);
+  });
+});
+
 describe('edge cases', () => {
   it('recalculateSnapshot with raw_value: NaN does not poison totals', () => {
     const entries = [

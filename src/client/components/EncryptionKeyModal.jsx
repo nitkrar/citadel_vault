@@ -3,8 +3,9 @@ import { KeyRound, AlertTriangle, Shield, Download, Eye, EyeOff } from 'lucide-r
 import RecoveryKeyCopyBlock from './RecoveryKeyCopyBlock';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { useAuth } from '../contexts/AuthContext';
+import api from '../api/client';
 import Modal from '../components/Modal';
-import { getVaultKeyMinLength, getUserPreference, VAULT_KEY_MINIMUMS } from '../lib/defaults';
+import { getVaultKeyMinLength, getUserPreference, VAULT_KEY_MINIMUMS, validateVaultKey } from '../lib/defaults';
 
 /**
  * EncryptionKeyModal
@@ -77,8 +78,10 @@ export default function EncryptionKeyModal() {
 
   if (!isVisible) return null;
 
-  const minLen = getVaultKeyMinLength(keyType);
-  const isNumeric = keyType === 'numeric';
+  // All modes use local keyType (initialized from preference, changeable via selector)
+  const activeKeyType = keyType;
+  const minLen = getVaultKeyMinLength(activeKeyType);
+  const isNumeric = activeKeyType === 'numeric';
   const inputType = isNumeric && !showVaultKey ? 'tel' : (showVaultKey ? 'text' : 'password');
   const inputProps = {
     type: inputType,
@@ -123,7 +126,8 @@ export default function EncryptionKeyModal() {
   const handleSetup = async (e) => {
     e.preventDefault();
     setError('');
-    if (vaultKey.length < minLen) { setError(`Vault key must be at least ${minLen} characters.`); return; }
+    const keyErr = validateVaultKey(vaultKey, activeKeyType);
+    if (keyErr) { setError(keyErr); return; }
     if (vaultKey !== confirmKey) { setError('Vault keys do not match.'); return; }
 
     setSubmitting(true);
@@ -167,12 +171,15 @@ export default function EncryptionKeyModal() {
     e.preventDefault();
     setError('');
     if (!recoveryKeyInput.trim()) { setError('Enter your recovery key.'); return; }
-    if (newVaultKey.length < minLen) { setError(`New vault key must be at least ${minLen} characters.`); return; }
+    const recKeyErr = validateVaultKey(newVaultKey, activeKeyType);
+    if (recKeyErr) { setError(recKeyErr); return; }
     if (newVaultKey !== confirmNewKey) { setError('New vault keys do not match.'); return; }
 
     setSubmitting(true);
     try {
       const result = await recoverWithRecoveryKey(recoveryKeyInput.trim(), newVaultKey);
+      // Save chosen key type as new preference
+      try { await api.put('/preferences.php', { vault_key_type: activeKeyType }); } catch (_) {}
       setRecoveryKeyDisplay(result.recoveryKey);
       setShowRecovery(true);
     } catch (err) {
@@ -186,7 +193,8 @@ export default function EncryptionKeyModal() {
     e.preventDefault();
     setError('');
     if (!oldVaultKey) { setError('Enter your current vault key.'); return; }
-    if (newVaultKey.length < minLen) { setError(`New vault key must be at least ${minLen} characters.`); return; }
+    const forceKeyErr = validateVaultKey(newVaultKey, activeKeyType);
+    if (forceKeyErr) { setError(forceKeyErr); return; }
     if (newVaultKey === oldVaultKey) { setError('New vault key must be different from your current key.'); return; }
     if (newVaultKey !== confirmNewKey) { setError('New vault keys do not match.'); return; }
 
@@ -341,6 +349,21 @@ export default function EncryptionKeyModal() {
             <label style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}>Recovery Key</label>
             <input type="text" placeholder="Enter your 32-character recovery key" value={recoveryKeyInput} onChange={(e) => setRecoveryKeyInput(e.target.value)} autoComplete="off" autoFocus required style={{ ...inputStyle, fontFamily: 'monospace' }} />
           </div>
+
+          {/* Key type selector for new vault key */}
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}>New Key Type</label>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {Object.entries({ numeric: 'PIN', alphanumeric: 'Password', passphrase: 'Passphrase' }).map(([type, label]) => (
+                <button key={type} type="button" onClick={() => { setKeyType(type); setNewVaultKey(''); setConfirmNewKey(''); }}
+                  style={{ flex: 1, padding: '7px 8px', borderRadius: 8, border: `1px solid ${activeKeyType === type ? 'var(--color-primary, #2563eb)' : 'var(--color-border)'}`, background: activeKeyType === type ? 'var(--color-primary-light, #eff6ff)' : 'transparent', color: activeKeyType === type ? 'var(--color-primary, #2563eb)' : 'var(--color-text-muted)', fontWeight: 500, fontSize: 13, cursor: 'pointer' }}>
+                  {label}
+                  <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 2 }}>{VAULT_KEY_MINIMUMS[type]}+ chars</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
           {eyeToggleRow}
           <div style={{ marginBottom: 12 }}>
             <label style={{ display: 'block', marginBottom: 4, fontSize: 13, fontWeight: 500 }}>New Vault Key</label>

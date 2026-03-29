@@ -114,7 +114,7 @@ export function EncryptionProvider({ children, user }) {
       }
 
       // 2. Derive key and unwrap DEK client-side
-      const kdfIterations = parseInt(getUserPreference(preferences, 'kdf_iterations'), 10) || 100000;
+      const kdfIterations = crypto.getKdfIterations(preferences);
       const blobs = {
         vault_key_salt: keyMaterial.vault_key_salt,
         encrypted_dek: keyMaterial.encrypted_dek,
@@ -192,18 +192,20 @@ export function EncryptionProvider({ children, user }) {
     const { data: keyResp } = await api.get('/encryption.php?action=key-material');
     const blobs = apiData({ data: keyResp });
 
-    // 2. Re-wrap DEK client-side
+    // 2. Re-wrap DEK client-side (pass current KDF iterations so unwrap uses the right count)
+    const currentIterations = crypto.getKdfIterations(preferences);
     const newBlobs = await crypto.changeVaultKey(
       { vault_key_salt: blobs.vault_key_salt, encrypted_dek: blobs.encrypted_dek },
       currentVaultKey,
-      newVaultKey
+      newVaultKey,
+      currentIterations
     );
 
     // 3. Send new blobs to server
     await api.post('/encryption.php?action=update-vault-key', newBlobs);
 
     return { success: true };
-  }, []);
+  }, [preferences]);
 
   // ------------------------------------------------------------------
   // Change KDF iterations (re-wrap DEK at new iteration count)
@@ -214,7 +216,7 @@ export function EncryptionProvider({ children, user }) {
     // the wrong key — bricking the vault on next unlock.
     const { data: keyResp } = await api.get('/encryption.php?action=key-material');
     const keyMaterial = apiData({ data: keyResp });
-    const currentIterations = parseInt(getUserPreference(preferences, 'kdf_iterations'), 10) || 100000;
+    const currentIterations = crypto.getKdfIterations(preferences);
     const isValid = await crypto.unlockVault(
       { vault_key_salt: keyMaterial.vault_key_salt, encrypted_dek: keyMaterial.encrypted_dek },
       vaultKey,
@@ -239,13 +241,18 @@ export function EncryptionProvider({ children, user }) {
       const recoveryBlobs = apiData({ data: recResp });
 
       // 2. Unwrap DEK with recovery key, re-wrap with new vault key, generate new recovery key
+      //    Recovery key was wrapped at whatever default iterations were at setup time.
+      //    New vault key uses the user's current KDF preference (or default if unset).
+      const currentIterations = crypto.getKdfIterations(preferences);
       const result = await crypto.recoverWithRecoveryKey(
         {
           recovery_key_salt: recoveryBlobs.recovery_key_salt,
           encrypted_dek_recovery: recoveryBlobs.encrypted_dek_recovery,
         },
         recoveryKey,
-        newVaultKey
+        newVaultKey,
+        crypto.PBKDF2_ITERATIONS, // recovery key iterations (always default — set at setup)
+        currentIterations     // new vault key iterations (user's preference)
       );
 
       // 3. Send all new blobs to server
