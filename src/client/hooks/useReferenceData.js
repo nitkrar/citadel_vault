@@ -46,7 +46,7 @@ function saveToStorage(key, data) {
  * @returns {object}  { [key]: Array, loading: boolean }
  */
 export default function useReferenceData(configs, opts = {}) {
-  const { deps = [] } = opts;
+  const { deps = [], enabled = true } = opts;
 
   // Build initial state from cache (in-memory first, then localStorage)
   const buildState = () => {
@@ -68,6 +68,9 @@ export default function useReferenceData(configs, opts = {}) {
   const [loading, setLoading] = useState(!allCached);
 
   useEffect(() => {
+    // Skip fetching when disabled (e.g. user not authenticated)
+    if (!enabled) return;
+
     // Determine which configs need fetching
     const toFetch = configs.filter(({ key }) => !loadFromStorage(key));
     if (toFetch.length === 0) {

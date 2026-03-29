@@ -13,22 +13,29 @@ export function AuthProvider({ children }) {
   const [adminActionMessage, setAdminActionMessage] = useState(null);
   const [preferences, setPreferences] = useState({});
 
-  // On mount, check if we have a valid auth cookie by calling /me
+  // On mount, try to restore session only if a prior login left a hint.
+  // The httpOnly cookie is invisible to JS, so we use a localStorage flag
+  // set at login and cleared at logout. No flag = fresh visit, skip /me.
   useEffect(() => {
-    Promise.all([
-      api.get('/auth.php?action=me'),
-      api.get('/preferences.php'),
-    ])
-      .then(([meRes, prefsRes]) => {
+    if (!localStorage.getItem('pv_has_session')) {
+      setLoading(false);
+      return;
+    }
+    api.get('/auth.php?action=me')
+      .then(async (meRes) => {
         const u = meRes.data.data;
         setUser(u);
         setMustChangePassword(!!u?.must_change_password);
         setMustChangeVaultKey(!!u?.must_change_vault_key);
         setAdminActionMessage(u?.admin_action_message || null);
-        setPreferences(prefsRes.data?.data || prefsRes.data || {});
+        try {
+          const prefsRes = await api.get('/preferences.php');
+          setPreferences(prefsRes.data?.data || prefsRes.data || {});
+        } catch {}
       })
       .catch(() => {
-        // No valid cookie or expired — user is not logged in
+        // Cookie expired or invalid — clean up the hint
+        localStorage.removeItem('pv_has_session');
         setUser(null);
       })
       .finally(() => {
@@ -39,6 +46,7 @@ export function AuthProvider({ children }) {
   const login = async (username, password) => {
     const res = await api.post('/auth.php?action=login', { username, password });
     const { user: newUser } = res.data.data;
+    localStorage.setItem('pv_has_session', '1');
     setUser(newUser);
     setMustChangePassword(!!newUser?.must_change_password);
     setMustChangeVaultKey(!!newUser?.must_change_vault_key);
@@ -48,6 +56,7 @@ export function AuthProvider({ children }) {
 
   const loginWithToken = (data) => {
     const { user: newUser } = data;
+    localStorage.setItem('pv_has_session', '1');
     setUser(newUser);
     setMustChangePassword(!!newUser?.must_change_password);
     setMustChangeVaultKey(!!newUser?.must_change_vault_key);
@@ -67,6 +76,7 @@ export function AuthProvider({ children }) {
       password,
     });
     const { user: newUser } = res.data.data;
+    localStorage.setItem('pv_has_session', '1');
     setUser(newUser);
     return res.data.data;
   };
@@ -78,7 +88,10 @@ export function AuthProvider({ children }) {
     // 2. Clear auth cookie via server
     api.post('/auth.php?action=logout').catch(() => {});
 
-    // 3. Reset all React state
+    // 3. Clear session hint
+    localStorage.removeItem('pv_has_session');
+
+    // 4. Reset all React state
     setUser(null);
     setMustChangePassword(false);
     setMustChangeVaultKey(false);
