@@ -28,6 +28,7 @@ if ($method === 'GET') {
 
     $result = array_map(function ($s) {
         return [
+            'id'            => (int)$s['id'],
             'snapshot_date' => $s['snapshot_date'],
             'snapshot_time' => $s['snapshot_time'] ?? null,
             'data'          => $s['encrypted_data'],

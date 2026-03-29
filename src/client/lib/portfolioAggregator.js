@@ -120,7 +120,7 @@ export function buildSymbolMap(currencies) {
  * @param {Array} entries - Decrypted snapshot entry blobs [{name, template_name, subtype, is_liability, currency, raw_value, icon}]
  * @param {object} rateMap - Currency code → rate_to_base map
  * @param {string} displayCurrency - User's display currency
- * @returns {object} { total_assets, total_liabilities, net_worth, asset_count, by_type, by_currency, entries }
+ * @returns {object} { total_assets, total_liabilities, net_worth, asset_count, by_type, by_currency, by_country, by_account, entries }
  */
 export function recalculateSnapshot(entries, rateMap, displayCurrency) {
   let totalAssets = 0;
@@ -128,6 +128,8 @@ export function recalculateSnapshot(entries, rateMap, displayCurrency) {
   let assetCount = 0;
   const byType = {};
   const byCurrency = {};
+  const byCountry = {};
+  const byAccount = {};
   const enrichedEntries = [];
 
   for (const e of entries) {
@@ -156,10 +158,30 @@ export function recalculateSnapshot(entries, rateMap, displayCurrency) {
 
     // Group by currency
     if (!byCurrency[currency]) {
-      byCurrency[currency] = { total: 0, count: 0 };
+      byCurrency[currency] = { total: 0, count: 0, label: currency };
     }
     byCurrency[currency].total += displayValue;
     byCurrency[currency].count++;
+
+    // Group by country
+    const countryKey = e.country || 'Unknown';
+    if (!byCountry[countryKey]) {
+      byCountry[countryKey] = { total: 0, count: 0, label: countryKey };
+    }
+    byCountry[countryKey].total += displayValue;
+    byCountry[countryKey].count++;
+
+    // Group by linked account
+    const acctId = e.linked_account?.id;
+    const acctKey = acctId ? String(acctId) : '_unlinked';
+    if (!byAccount[acctKey]) {
+      byAccount[acctKey] = {
+        total: 0, count: 0,
+        label: e.linked_account?.name || 'Not linked to an account',
+      };
+    }
+    byAccount[acctKey].total += displayValue;
+    byAccount[acctKey].count++;
 
     enrichedEntries.push({ ...e, displayValue });
   }
@@ -171,6 +193,8 @@ export function recalculateSnapshot(entries, rateMap, displayCurrency) {
     asset_count: assetCount,
     by_type: byType,
     by_currency: byCurrency,
+    by_country: byCountry,
+    by_account: byAccount,
     entries: enrichedEntries,
   };
 }

@@ -66,7 +66,7 @@ export default defineConfig(({ mode }) => {
         output: {
           manualChunks: {
             'react-vendor': ['react', 'react-dom', 'react-router-dom'],
-            'charts': ['recharts'],
+            'charts': ['chart.js', 'react-chartjs-2'],
             'icons': ['lucide-react'],
             'axios': ['axios'],
             'xlsx': ['xlsx'],

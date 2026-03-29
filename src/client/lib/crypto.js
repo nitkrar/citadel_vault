@@ -10,8 +10,18 @@
  *   Recovery Key → PBKDF2 → Recovery Wrapping Key → wraps same DEK
  */
 
-export const PBKDF2_ITERATIONS = 600000;
-export const PBKDF2_ITERATIONS_LEGACY = 100000;
+export const PBKDF2_ITERATIONS = 100000;
+export const PBKDF2_ITERATIONS_RECOMMENDED = 600000;
+
+/**
+ * Resolve the user's current KDF iteration count from preferences.
+ * Single source of truth — all callers use this instead of manual parseInt + fallback.
+ */
+export function getKdfIterations(preferences) {
+    const raw = preferences?.kdf_iterations;
+    const parsed = parseInt(raw, 10);
+    return parsed > 0 ? parsed : PBKDF2_ITERATIONS;
+}
 
 // ── Module state ────────────────────────────────────────────────────────
 
@@ -475,9 +485,9 @@ export async function changeVaultKey(oldBlobs, currentVaultKey, newVaultKey, old
     const dek = await unwrapDek(oldBlobs.encrypted_dek, oldWrappingKey);
     if (!dek) throw new Error('Current vault key is incorrect');
 
-    // Re-wrap with new key
+    // Re-wrap with new key at SAME iteration count (preserve user's KDF preference)
     const newSalt = generateSalt();
-    const newWrappingKey = await deriveWrappingKey(newVaultKey, newSalt);
+    const newWrappingKey = await deriveWrappingKey(newVaultKey, newSalt, oldIterations);
     const newEncryptedDek = await wrapDek(dek, newWrappingKey);
 
     // Update module state with the (same) DEK
@@ -497,21 +507,21 @@ export async function changeVaultKey(oldBlobs, currentVaultKey, newVaultKey, old
  * @param {string} newVaultKey
  * @returns {object} All new blobs for server storage + newRecoveryKey
  */
-export async function recoverWithRecoveryKey(recoveryBlobs, recoveryKey, newVaultKey) {
-    // Unwrap DEK with recovery key
-    const recoveryWrappingKey = await deriveWrappingKey(recoveryKey, recoveryBlobs.recovery_key_salt);
+export async function recoverWithRecoveryKey(recoveryBlobs, recoveryKey, newVaultKey, recoveryIterations = PBKDF2_ITERATIONS, newIterations = PBKDF2_ITERATIONS) {
+    // Unwrap DEK with recovery key (must match iterations used at setup/last recovery)
+    const recoveryWrappingKey = await deriveWrappingKey(recoveryKey, recoveryBlobs.recovery_key_salt, recoveryIterations);
     const dek = await unwrapDek(recoveryBlobs.encrypted_dek_recovery, recoveryWrappingKey);
     if (!dek) throw new Error('Recovery key is incorrect');
 
     // Set DEK in module state
     setDek(dek);
 
-    // New vault key wrapping
+    // New vault key wrapping (use caller's iteration count)
     const newVaultSalt = generateSalt();
-    const newVaultWrappingKey = await deriveWrappingKey(newVaultKey, newVaultSalt);
+    const newVaultWrappingKey = await deriveWrappingKey(newVaultKey, newVaultSalt, newIterations);
     const newEncryptedDek = await wrapDek(dek, newVaultWrappingKey);
 
-    // New recovery key
+    // New recovery key (always at default iterations — recovery is a fresh start)
     const newRecoveryKey = generateRecoveryKey();
     const newRecoverySalt = generateSalt();
     const newRecoveryWrappingKey = await deriveWrappingKey(newRecoveryKey, newRecoverySalt);
@@ -540,8 +550,8 @@ export async function recoverWithRecoveryKey(recoveryBlobs, recoveryKey, newVaul
  * @returns {object} { newRecoveryKey, recovery_key_salt, encrypted_dek_recovery, recovery_key_encrypted }
  * @throws if recovery key is incorrect
  */
-export async function verifyRecoveryKeyAndRotate(recoveryBlobs, recoveryKey) {
-    const recoveryWrappingKey = await deriveWrappingKey(recoveryKey, recoveryBlobs.recovery_key_salt);
+export async function verifyRecoveryKeyAndRotate(recoveryBlobs, recoveryKey, recoveryIterations = PBKDF2_ITERATIONS) {
+    const recoveryWrappingKey = await deriveWrappingKey(recoveryKey, recoveryBlobs.recovery_key_salt, recoveryIterations);
     const dek = await unwrapDek(recoveryBlobs.encrypted_dek_recovery, recoveryWrappingKey);
     if (!dek) throw new Error('Recovery key is incorrect');
 

@@ -25,3 +25,15 @@ export function getUserPreference(prefs, key) {
 export function getVaultKeyMinLength(keyType) {
     return VAULT_KEY_MINIMUMS[keyType] || 8;
 }
+
+/**
+ * Validate a vault key against the key type's minimum length.
+ * Returns error message string if invalid, null if valid.
+ */
+export function validateVaultKey(key, keyType) {
+    const minLen = getVaultKeyMinLength(keyType || 'alphanumeric');
+    if (!key || key.length < minLen) {
+        return `Vault key must be at least ${minLen} characters.`;
+    }
+    return null;
+}

@@ -10,6 +10,7 @@ import { useAuth } from '../contexts/AuthContext';
 import useVaultData from '../hooks/useVaultData';
 import { apiData } from '../lib/checks';
 import { getUserPreference, VAULT_KEY_MINIMUMS } from '../lib/defaults';
+import { PBKDF2_ITERATIONS_RECOMMENDED, getKdfIterations } from '../lib/crypto';
 import Section from '../components/Section';
 import SaveToast from '../components/SaveToast';
 
@@ -55,7 +56,7 @@ export default function SecurityPage() {
   };
 
   // ── KDF Iterations ──────────────────────────────────────────────
-  const savedKdf = parseInt(getUserPreference(preferences, 'kdf_iterations'), 10) || 100000;
+  const savedKdf = getKdfIterations(preferences);
   const [kdfValue, setKdfValue] = useState(savedKdf);
   const [showKdfConfirm, setShowKdfConfirm] = useState(false);
   const [kdfVaultKey, setKdfVaultKey] = useState('');
@@ -371,13 +372,13 @@ export default function SecurityPage() {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
             <span style={{ fontSize: 14, fontWeight: 600 }}>{(kdfValue / 1000).toLocaleString()}K</span>
-            {kdfValue === 600000 && <span style={{ fontSize: 11, background: 'var(--color-success, #22c55e)', color: '#fff', padding: '1px 6px', borderRadius: 4 }}>Recommended</span>}
+            {kdfValue === PBKDF2_ITERATIONS_RECOMMENDED && <span style={{ fontSize: 11, background: 'var(--color-success, #22c55e)', color: '#fff', padding: '1px 6px', borderRadius: 4 }}>Recommended</span>}
           </div>
           <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
             {kdfValue <= 200000 && 'Fast unlock, but weaker protection against brute-force attacks. Not recommended for sensitive data.'}
-            {kdfValue > 200000 && kdfValue < 600000 && 'Moderate security. Unlock speed is good on most devices but protection could be stronger.'}
-            {kdfValue === 600000 && 'Balanced security and performance. Meets current OWASP guidelines for key derivation.'}
-            {kdfValue > 600000 && kdfValue < 900000 && 'Strong protection. Unlock may take a moment on older or mobile devices.'}
+            {kdfValue > 200000 && kdfValue < PBKDF2_ITERATIONS_RECOMMENDED && 'Moderate security. Unlock speed is good on most devices but protection could be stronger.'}
+            {kdfValue === PBKDF2_ITERATIONS_RECOMMENDED && 'Balanced security and performance. Meets current OWASP guidelines for key derivation.'}
+            {kdfValue > PBKDF2_ITERATIONS_RECOMMENDED && kdfValue < 900000 && 'Strong protection. Unlock may take a moment on older or mobile devices.'}
             {kdfValue >= 900000 && 'Maximum protection. Unlock will be noticeably slower, especially on mobile devices.'}
           </p>
           {kdfSuccess && <div className="alert alert-success mb-3" style={{ marginTop: 8 }}><Check size={14} /> {kdfSuccess}</div>}
