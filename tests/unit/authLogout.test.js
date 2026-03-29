@@ -12,6 +12,16 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, act } from '@testing-library/react';
 import { createElement, useEffect, useRef } from 'react';
 
+// Node 22+ built-in localStorage lacks Storage API — provide a proper mock
+const store = {};
+const storageMock = {
+  getItem: vi.fn((k) => store[k] ?? null),
+  setItem: vi.fn((k, v) => { store[k] = String(v); }),
+  removeItem: vi.fn((k) => { delete store[k]; }),
+  clear: vi.fn(() => { for (const k in store) delete store[k]; }),
+};
+Object.defineProperty(globalThis, 'localStorage', { value: storageMock, writable: true, configurable: true });
+
 // ── Module mocks (must be before imports) ───────────────────────────
 
 vi.mock('../../src/client/api/client', () => ({

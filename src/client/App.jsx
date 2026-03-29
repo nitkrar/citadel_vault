@@ -208,7 +208,7 @@ import * as cachePolicy from './lib/cachePolicy';
 
 function EncryptionWrapper({ children }) {
   const { user } = useAuth();
-  const { config } = useAppConfig();
+  const { config } = useAppConfig({ enabled: !!user });
 
   useEffect(() => {
     if (config) {
