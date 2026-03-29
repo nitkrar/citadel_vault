@@ -132,6 +132,8 @@ export function recalculateSnapshot(entries, rateMap, displayCurrency) {
 
   for (const e of entries) {
     if (!e || e.raw_value === undefined || Number.isNaN(e.raw_value)) continue;
+    // Skip zero-value non-liability entries (match aggregatePortfolio)
+    if (e.raw_value === 0 && !e.is_liability) continue;
 
     const currency = e.currency || displayCurrency;
     const displayValue = convertCurrency(e.raw_value, currency, displayCurrency, rateMap);
@@ -144,8 +146,8 @@ export function recalculateSnapshot(entries, rateMap, displayCurrency) {
       totalAssets += displayValue;
     }
 
-    // Group by type
-    const typeKey = e.subtype || e.template_name || 'other';
+    // Group by type (match aggregatePortfolio: subtype || entry_type)
+    const typeKey = e.subtype || e.entry_type || e.template_name || 'other';
     if (!byType[typeKey]) {
       byType[typeKey] = { total: 0, count: 0, label: e.template_name || typeKey };
     }
