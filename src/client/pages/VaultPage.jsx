@@ -1392,7 +1392,7 @@ export default function VaultPage() {
                   <tr>
                     <th style={{ width: 40 }}>Type</th>
                     <SortTh sortKey="title" current={sortKey} dir={sortDir} onSort={toggleSort}>Title</SortTh>
-                    <SortableTh sortKey="type" current={sortKey} dir={sortDir} onSort={toggleSort}>Details</SortableTh>
+                    <SortTh sortKey="type" current={sortKey} dir={sortDir} onSort={toggleSort}>Details</SortTh>
                     <SortTh sortKey="amount" current={sortKey} dir={sortDir} onSort={toggleSort} style={{ width: 130, textAlign: 'right' }}>Amount ({baseCurrency})</SortTh>
                     <SortTh sortKey="currency" current={sortKey} dir={sortDir} onSort={toggleSort} style={{ width: 70 }}>Currency</SortTh>
                     <SortTh sortKey="updated_at" current={sortKey} dir={sortDir} onSort={toggleSort} style={{ width: 140 }}>Updated</SortTh>
