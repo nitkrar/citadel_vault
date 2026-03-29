@@ -17,8 +17,9 @@ RewriteRule ^scripts/ - [F,L]
 RewriteRule ^static/ - [F,L]
 RewriteRule ^src/core/ - [F,L]
 
-# Allow version.json through before the block rule
-RewriteRule ^(.*/)?(version\.json)$ - [L]
+# Serve version.json and registerSW.js from dist/ (before the block rule)
+RewriteRule ^version\.json$ dist/version.json [L]
+RewriteRule ^registerSW\.js$ dist/registerSW.js [L]
 
 # Allow robots.txt through
 RewriteRule ^robots\.txt$ - [L]
@@ -34,8 +35,8 @@ RewriteCond %{REQUEST_FILENAME} -f [OR]
 RewriteCond %{REQUEST_FILENAME} -d
 RewriteRule ^ - [L]
 
-# Serve static assets from dist/ (CSS, favicon, version.json)
-RewriteRule ^(styles\.css|favicon\.svg|version\.json)$ dist/$1 [L]
+# Serve static assets from dist/ (CSS, favicon)
+RewriteRule ^(styles\.css|favicon\.svg)$ dist/$1 [L]
 
 # Serve built JS/CSS assets from dist/assets/
 RewriteRule ^assets/(.*)$ dist/assets/$1 [L]
