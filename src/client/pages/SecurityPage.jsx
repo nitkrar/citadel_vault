@@ -11,10 +11,21 @@ import useVaultData from '../hooks/useVaultData';
 import { apiData } from '../lib/checks';
 import { getUserPreference, VAULT_KEY_MINIMUMS } from '../lib/defaults';
 import Section from '../components/Section';
+import SaveToast from '../components/SaveToast';
 
 export default function SecurityPage() {
-  const { isUnlocked, changeVaultKey, changeKdfIterations, viewRecoveryKey, lock } = useEncryption();
+  const { isUnlocked, changeVaultKey, changeKdfIterations, viewRecoveryKey, lock, saveSession } = useEncryption();
   const { user, preferences, refreshPreferences } = useAuth();
+
+  // ── Toast ─────────────────────────────────────────────────────────
+  const [toastKey, setToastKey] = useState(0);
+  const [toastType, setToastType] = useState('success');
+  const [toastMessage, setToastMessage] = useState('');
+  const showToast = (message, type = 'success') => {
+    setToastMessage(message);
+    setToastType(type);
+    setToastKey(k => k + 1);
+  };
 
   // ── Vault Key Change ─────────────────────────────────────────────
   const [showChangeKey, setShowChangeKey] = useState(false);
@@ -36,7 +47,10 @@ export default function SecurityPage() {
       await api.put('/preferences.php', { vault_key_type: type });
       setNewKeyType(type);
       refreshPreferences();
-    } catch {}
+      showToast('Settings saved');
+    } catch {
+      showToast('Failed to save', 'error');
+    }
     setSavingKeyType(false);
   };
 
@@ -185,7 +199,12 @@ export default function SecurityPage() {
   const handleIpModeChange = async (mode) => {
     setLocalPrefs(prev => ({ ...prev, audit_ip_mode: mode }));
     setSavingIpMode(true);
-    try { await api.put('/preferences.php', { audit_ip_mode: mode }); } catch {}
+    try {
+      await api.put('/preferences.php', { audit_ip_mode: mode });
+      showToast('Settings saved');
+    } catch {
+      showToast('Failed to save', 'error');
+    }
     setSavingIpMode(false);
   };
 
@@ -202,14 +221,23 @@ export default function SecurityPage() {
 
   const handleAutoLockChange = async (key, value) => {
     setLocalPrefs(prev => ({ ...prev, [key]: value }));
-    // Switching to lock_on_refresh: clear cached session DEK so next refresh locks
     if (key === 'vault_persist_session' && value === 'lock_on_refresh') {
+      // Switching to lock_on_refresh: clear cached session DEK so next refresh locks
       sessionStorage.removeItem('pv_session_dek');
+    }
+    if (key === 'vault_persist_session' && value === 'persist_in_tab' && isUnlocked) {
+      // Switching to stay-unlocked: write DEK to sessionStorage now so first refresh works
+      await saveSession();
     }
     // Mark that user has customized lock settings (hides default hint on lock screen)
     try { localStorage.setItem('pv_lock_customized', '1'); } catch {}
     setSavingAutoLock(true);
-    try { await api.put('/preferences.php', { [key]: value }); } catch {}
+    try {
+      await api.put('/preferences.php', { [key]: value });
+      showToast('Settings saved');
+    } catch {
+      showToast('Failed to save', 'error');
+    }
     setSavingAutoLock(false);
   };
 
@@ -224,6 +252,7 @@ export default function SecurityPage() {
   const currentKeyType = newKeyType || getUserPreference(preferences, 'vault_key_type');
 
   return (
+    <>
     <div className="page-content">
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div><h1 className="page-title">Security</h1><p className="page-subtitle">Vault key, recovery, privacy, and audit log</p></div>
@@ -516,5 +545,15 @@ export default function SecurityPage() {
       </Section>
 
     </div>
+
+    {toastKey > 0 && (
+      <SaveToast
+        key={toastKey}
+        message={toastMessage}
+        type={toastType}
+        onDismiss={() => setToastKey(0)}
+      />
+    )}
+    </>
   );
 }

@@ -209,11 +209,24 @@ export function EncryptionProvider({ children, user }) {
   // Change KDF iterations (re-wrap DEK at new iteration count)
   // ------------------------------------------------------------------
   const changeKdfIterations = useCallback(async (vaultKey, newIterations) => {
+    // Verify vault key against current server-stored blobs before re-wrapping.
+    // Without this check, any string is accepted and the DEK gets wrapped with
+    // the wrong key — bricking the vault on next unlock.
+    const { data: keyResp } = await api.get('/encryption.php?action=key-material');
+    const keyMaterial = apiData({ data: keyResp });
+    const currentIterations = parseInt(getUserPreference(preferences, 'kdf_iterations'), 10) || 100000;
+    const isValid = await crypto.unlockVault(
+      { vault_key_salt: keyMaterial.vault_key_salt, encrypted_dek: keyMaterial.encrypted_dek },
+      vaultKey,
+      currentIterations,
+    );
+    if (!isValid) throw new Error('Incorrect vault key.');
+
     const newBlobs = await crypto.reWrapDekIterations(vaultKey, newIterations);
     await api.post('/encryption.php?action=update-vault-key', newBlobs);
     await api.put('/preferences.php', { kdf_iterations: String(newIterations) });
     return { success: true };
-  }, []);
+  }, [preferences]);
 
   // ------------------------------------------------------------------
   // Recover with recovery key
@@ -388,6 +401,7 @@ export function EncryptionProvider({ children, user }) {
     decrypt,
     skipVault,
     promptVault,
+    saveSession,
   };
 
   return (
