@@ -17,9 +17,10 @@ RewriteRule ^scripts/ - [F,L]
 RewriteRule ^static/ - [F,L]
 RewriteRule ^src/core/ - [F,L]
 
-# Serve version.json and registerSW.js from dist/ (before the block rule)
-RewriteRule ^version\.json$ dist/version.json [L]
-RewriteRule ^registerSW\.js$ dist/registerSW.js [L]
+# Serve PWA files from dist/ (before the block rule)
+RewriteRule ^version\.json$ dist/version.json [END]
+RewriteRule ^registerSW\.js$ dist/registerSW.js [END]
+RewriteRule ^sw\.js$ dist/sw.js [END]
 
 # Allow robots.txt through
 RewriteRule ^robots\.txt$ - [L]
