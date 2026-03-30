@@ -5,6 +5,7 @@ import * as workerDispatcher from '../lib/workerDispatcher';
 import useCurrencies from './useCurrencies';
 import useTemplates from './useTemplates';
 import useAppConfig from './useAppConfig';
+import useRefreshPrices from './useRefreshPrices';
 import api from '../api/client';
 
 const PRICE_CACHE_KEY = 'pv_ticker_prices';
@@ -96,42 +97,8 @@ export default function usePortfolioData() {
     api.put('/preferences.php', { display_currency: code }).catch(() => {});
   }, []);
 
-  // Refresh prices from server for stock/crypto entries
-  const refreshPrices = useCallback(async () => {
-    if (!decryptedEntries || decryptedEntries.length === 0) return { count: 0, prices: {} };
-
-    // Collect tickers from decrypted stock/crypto entries
-    const tickers = [];
-    for (const entry of decryptedEntries) {
-      const subtype = entry.template?.subtype;
-      if (subtype === 'stock' && entry.decrypted?.ticker) {
-        tickers.push(entry.decrypted.ticker);
-      } else if (subtype === 'crypto' && entry.decrypted?.coin) {
-        tickers.push(entry.decrypted.coin);
-      }
-    }
-
-    if (tickers.length === 0) return { count: 0, prices: {} };
-
-    const unique = [...new Set(tickers)];
-    const cached = getCachedPrices();
-
-    // Filter to only uncached tickers
-    const uncached = unique.filter(t => !cached[t]);
-
-    let fetchedPrices = {};
-    if (uncached.length > 0) {
-      const { data: resp } = await api.post('/prices.php', { tickers: uncached });
-      const result = resp?.data || resp;
-      fetchedPrices = result?.prices || {};
-    }
-
-    // Merge into cache
-    const merged = { ...cached, ...fetchedPrices };
-    setCachedPrices(merged);
-
-    return { count: Object.keys(fetchedPrices).length, prices: merged };
-  }, [decryptedEntries]);
+  // Centralized price refresh — fetches AND applies to entries
+  const { refreshAndApplyPrices } = useRefreshPrices();
 
   return {
     portfolio,
@@ -143,6 +110,6 @@ export default function usePortfolioData() {
     baseCurrency,
     currencies,
     ratesLastUpdated: portfolio?.rates_last_updated || null,
-    refreshPrices,
+    refreshAndApplyPrices,
   };
 }
