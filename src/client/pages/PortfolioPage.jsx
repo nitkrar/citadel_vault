@@ -68,7 +68,7 @@ export default function PortfolioPage() {
   const {
     portfolio, loading, error, refetch,
     displayCurrency, setDisplayCurrency, baseCurrency, currencies,
-    ratesLastUpdated, refreshPrices,
+    ratesLastUpdated, refreshAndApplyPrices,
   } = usePortfolioData();
 
   const [activeTab, setActiveTab] = useState(() => {
@@ -105,7 +105,7 @@ export default function PortfolioPage() {
 
       // Refresh prices (stock/crypto)
       promises.push(
-        refreshPrices()
+        refreshAndApplyPrices()
           .then(r => { if (r.count > 0) results.push(`${r.count} price${r.count !== 1 ? 's' : ''}`); })
           .catch(() => results.push('prices failed'))
       );
@@ -1093,20 +1093,20 @@ function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrenc
         <div className="modal-overlay" onClick={() => setSnapshotPrompt(null)}>
           <div className="modal-dialog" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h3 className="modal-title">Fetched Prices Not Applied</h3>
+              <h3 className="modal-title">Prices May Be Outdated</h3>
               <button className="modal-close-btn" onClick={() => setSnapshotPrompt(null)}>&times;</button>
             </div>
             <div className="modal-body">
               <div className="alert alert-warning" style={{ marginBottom: 16 }}>
                 <AlertTriangle size={16} style={{ flexShrink: 0 }} />
-                <span>You have {snapshotPrompt.staleCount} fetched price{snapshotPrompt.staleCount !== 1 ? 's' : ''} that haven't been applied to your entries yet.</span>
+                <span>Some stock/crypto prices may not have been saved to your entries.</span>
               </div>
-              <p className="text-muted" style={{ fontSize: 13 }}>Snapshot will use the prices currently stored in your entries, not the recently fetched prices.</p>
+              <p className="text-muted" style={{ fontSize: 13 }}>The snapshot will capture the values currently stored in your vault entries. To get the latest prices, cancel and run Refresh All first.</p>
             </div>
             <div className="modal-footer" style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
               <button className="btn btn-outline" onClick={() => setSnapshotPrompt(null)}>Cancel</button>
               <button className="btn btn-primary" onClick={doSaveSnapshot} disabled={snapshotSaving}>
-                {snapshotSaving ? 'Saving...' : 'Snapshot as-is'}
+                {snapshotSaving ? 'Saving...' : 'Save with current values'}
               </button>
             </div>
           </div>

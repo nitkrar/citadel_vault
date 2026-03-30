@@ -15,6 +15,7 @@ import useTemplates from '../hooks/useTemplates';
 import useAppConfig from '../hooks/useAppConfig';
 import useExchanges from '../hooks/useExchanges';
 import useShareData from '../hooks/useShareData';
+import useRefreshPrices from '../hooks/useRefreshPrices';
 import ImportModal from '../components/ImportModal';
 import SortTh from '../components/SortableTh';
 import { useHideAmounts } from '../components/Layout';
@@ -148,6 +149,7 @@ export default function VaultPage() {
 
   const { countries } = useCountries();
   const { currencies } = useCurrencies();
+  const { refreshAndApplyPrices } = useRefreshPrices();
   const { templates } = useTemplates();
   const { config } = useAppConfig();
   const { exchanges } = useExchanges();
@@ -1232,39 +1234,15 @@ export default function VaultPage() {
                     onClick={async () => {
                       const results = [];
                       const promises = [];
-                      // Refresh prices
+                      // Refresh prices (centralized — fetches + applies to entries)
                       if (hasTickers) {
-                        const tickers = [];
-                        for (const e of entries) {
-                          const d = decryptedCache[e.id];
-                          const tpl = templates.find(t => t.id === e.template_id) || e.template;
-                          if (tpl?.subtype === 'stock' && d?.ticker) tickers.push(d.ticker);
-                          else if (tpl?.subtype === 'crypto' && d?.coin) tickers.push(d.coin);
-                        }
-                        if (tickers.length > 0) {
-                          promises.push(
-                            api.post('/prices.php', { tickers: [...new Set(tickers)] })
-                              .then(async ({ data: resp }) => {
-                                const priceResult = apiData({ data: resp });
-                                const prices = priceResult?.prices || {};
-                                let priceCount = 0;
-                                for (const e of entries) {
-                                  const d = decryptedCache[e.id];
-                                  const tpl = templates.find(t => t.id === e.template_id) || e.template;
-                                  const ticker = tpl?.subtype === 'crypto' ? d?.coin : d?.ticker;
-                                  if (!ticker || !prices[ticker]) continue;
-                                  const priceKey = tpl?.subtype === 'crypto' ? 'price_per_unit' : 'price_per_share';
-                                  const updated = { ...d, [priceKey]: String(prices[ticker].price), currency: prices[ticker].currency };
-                                  await updateEntryLocal(e.id, updated);
-                                  priceCount++;
-                                }
-                                if (priceCount > 0) results.push(`${priceCount} price${priceCount !== 1 ? 's' : ''}`);
-                              })
-                              .catch(() => results.push('prices failed'))
-                          );
-                        }
+                        promises.push(
+                          refreshAndApplyPrices()
+                            .then(r => { if (r.count > 0) results.push(`${r.count} price${r.count !== 1 ? 's' : ''}`); })
+                            .catch(() => results.push('prices failed'))
+                        );
                       }
-                      // Refresh balances
+                      // Refresh balances (Plaid)
                       if (plaidItemIds.length > 0) {
                         const provider = getProvider('plaid');
                         if (!provider) { results.push('integration not available'); }
