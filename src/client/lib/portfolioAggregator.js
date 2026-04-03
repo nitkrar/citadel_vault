@@ -149,7 +149,8 @@ export function recalculateSnapshot(entries, rateMap, displayCurrency) {
     }
 
     // Group by type (match aggregatePortfolio: subtype || entry_type)
-    const typeKey = e.subtype || e.entry_type || e.template_name || 'other';
+    // Normalize to lowercase — old snapshots may have capitalized template_name as key
+    const typeKey = (e.subtype || e.entry_type || e.template_name || 'other').toLowerCase();
     if (!byType[typeKey]) {
       byType[typeKey] = { total: 0, count: 0, label: e.template_name || typeKey };
     }
