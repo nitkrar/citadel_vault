@@ -290,6 +290,21 @@ export function EncryptionProvider({ children, user }) {
   }, []);
 
   // ------------------------------------------------------------------
+  // Regenerate recovery key (vault must be unlocked)
+  // ------------------------------------------------------------------
+  const regenerateRecoveryKey = useCallback(async () => {
+    const result = await crypto.regenerateRecoveryKey();
+
+    await api.post('/encryption.php?action=update-recovery', {
+      recovery_key_salt: result.recovery_key_salt,
+      encrypted_dek_recovery: result.encrypted_dek_recovery,
+      recovery_key_encrypted: result.recovery_key_encrypted,
+    });
+
+    return result.recoveryKey;
+  }, []);
+
+  // ------------------------------------------------------------------
   // Encrypt / Decrypt convenience wrappers
   // ------------------------------------------------------------------
   const encrypt = useCallback(async (data) => {
@@ -404,6 +419,7 @@ export function EncryptionProvider({ children, user }) {
     changeKdfIterations,
     recoverWithRecoveryKey,
     viewRecoveryKey,
+    regenerateRecoveryKey,
     encrypt,
     decrypt,
     skipVault,

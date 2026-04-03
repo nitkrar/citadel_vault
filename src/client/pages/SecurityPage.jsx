@@ -15,7 +15,7 @@ import Section from '../components/Section';
 import SaveToast from '../components/SaveToast';
 
 export default function SecurityPage() {
-  const { isUnlocked, changeVaultKey, changeKdfIterations, viewRecoveryKey, lock, saveSession } = useEncryption();
+  const { isUnlocked, changeVaultKey, changeKdfIterations, viewRecoveryKey, regenerateRecoveryKey, lock, saveSession } = useEncryption();
   const { user, preferences, refreshPreferences } = useAuth();
 
   // ── Toast ─────────────────────────────────────────────────────────
@@ -175,6 +175,8 @@ export default function SecurityPage() {
   const [recoveryKey, setRecoveryKey] = useState('');
   const [showRecovery, setShowRecovery] = useState(false);
   const [loadingRecovery, setLoadingRecovery] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const [showRegenConfirm, setShowRegenConfirm] = useState(false);
 
   const handleViewRecovery = async () => {
     setLoadingRecovery(true);
@@ -186,6 +188,21 @@ export default function SecurityPage() {
       alert(err.message || 'Failed to view recovery key.');
     } finally {
       setLoadingRecovery(false);
+    }
+  };
+
+  const handleRegenerateRecovery = async () => {
+    setRegenerating(true);
+    try {
+      const newKey = await regenerateRecoveryKey();
+      setRecoveryKey(newKey);
+      setShowRecovery(true);
+      setShowRegenConfirm(false);
+      showToast('Recovery key regenerated');
+    } catch (err) {
+      showToast(err.message || 'Failed to regenerate recovery key', 'error');
+    } finally {
+      setRegenerating(false);
     }
   };
 
@@ -210,8 +227,12 @@ export default function SecurityPage() {
   };
 
   // ── Audit log ────────────────────────────────────────────────────
+  const [auditFilter, setAuditFilter] = useState('all');
   const fetchAudit = useCallback(async () => {
-    const { data: resp } = await api.get('/audit.php');
+    const oneYearAgo = new Date();
+    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+    const from = oneYearAgo.toISOString().slice(0, 10);
+    const { data: resp } = await api.get(`/audit.php?from=${from}`);
     return apiData({ data: resp }) || [];
   }, []);
 
@@ -500,13 +521,32 @@ export default function SecurityPage() {
         {showRecovery ? (
           <div>
             <RecoveryKeyCopyBlock recoveryKey={recoveryKey} />
-            <button className="btn btn-ghost btn-sm" onClick={() => { setShowRecovery(false); setRecoveryKey(''); }}>Hide</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => { setShowRecovery(false); setRecoveryKey(''); setShowRegenConfirm(false); }}>Hide</button>
           </div>
         ) : (
-          <button className="btn btn-secondary" onClick={handleViewRecovery} disabled={loadingRecovery}>
-            <Eye size={14} /> {loadingRecovery ? 'Decrypting...' : 'View Recovery Key'}
-          </button>
+          <div className="flex gap-2">
+            <button className="btn btn-secondary" onClick={handleViewRecovery} disabled={loadingRecovery}>
+              <Eye size={14} /> {loadingRecovery ? 'Decrypting...' : 'View Recovery Key'}
+            </button>
+            <button className="btn btn-secondary" onClick={() => setShowRegenConfirm(true)} disabled={!isUnlocked}>
+              <KeyRound size={14} /> Regenerate
+            </button>
+          </div>
         )}
+        {showRegenConfirm && !showRecovery && (
+          <div className="alert alert-danger" style={{ marginTop: 12 }}>
+            <p style={{ marginBottom: 8 }}><strong>Warning:</strong> Your current recovery key will be permanently invalidated. Make sure to save the new one.</p>
+            <div className="flex gap-2">
+              <button className="btn btn-danger btn-sm" onClick={handleRegenerateRecovery} disabled={regenerating}>
+                {regenerating ? 'Regenerating...' : 'Confirm Regenerate'}
+              </button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowRegenConfirm(false)} disabled={regenerating}>Cancel</button>
+            </div>
+          </div>
+        )}
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 12 }}>
+          Recovery key events are recorded in the Security Log below.
+        </p>
       </Section>
 
       {/* ── Privacy ────────────────────────────────────────────── */}
@@ -529,19 +569,44 @@ export default function SecurityPage() {
       {/* ── Security Log ───────────────────────────────────────── */}
       <Section icon={Clock} title="Security Log">
         {auditLoading ? <div className="spinner" /> :
-          auditLog.length === 0 ? <p className="text-muted">No security events recorded.</p> : (
-            <div style={{ maxHeight: 300, overflowY: 'auto' }}>
-              <table style={{ width: '100%' }}>
-                <thead><tr><th>Action</th><th>Date</th></tr></thead>
-                <tbody>{auditLog.slice(0, 10).map((entry, i) => (
-                  <tr key={i}>
-                    <td style={{ textTransform: 'capitalize' }}>{entry.action?.replace(/_/g, ' ')}</td>
-                    <td style={{ fontSize: 13, whiteSpace: 'nowrap' }}>{new Date(entry.created_at).toLocaleString()}</td>
-                  </tr>
-                ))}</tbody>
-              </table>
-            </div>
-          )
+          auditLog.length === 0 ? <p className="text-muted">No security events recorded.</p> : (() => {
+            const filters = [
+              { key: 'all', label: 'All' },
+              { key: 'auth', label: 'Auth', match: a => a.startsWith('login') || a === 'password_changed' || a === 'force_change_password' },
+              { key: 'vault', label: 'Vault', match: a => a.startsWith('vault_') },
+              { key: 'recovery', label: 'Recovery', match: a => a.startsWith('recovery_key') },
+              { key: 'sharing', label: 'Sharing', match: a => a.startsWith('share_') },
+            ];
+            const activeFilter = filters.find(f => f.key === auditFilter);
+            const filtered = auditFilter === 'all'
+              ? auditLog
+              : auditLog.filter(e => activeFilter?.match(e.action));
+            return (
+              <>
+                <div className="flex gap-2" style={{ marginBottom: 8, flexWrap: 'wrap' }}>
+                  {filters.map(f => (
+                    <button key={f.key} className={`btn btn-sm ${auditFilter === f.key ? 'btn-primary' : 'btn-ghost'}`}
+                      onClick={() => setAuditFilter(f.key)}>{f.label}</button>
+                  ))}
+                </div>
+                {filtered.length === 0 ? (
+                  <p className="text-muted">No matching events.</p>
+                ) : (
+                  <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+                    <table style={{ width: '100%' }}>
+                      <thead><tr><th>Action</th><th>Date</th></tr></thead>
+                      <tbody>{filtered.map((entry, i) => (
+                        <tr key={i}>
+                          <td style={{ textTransform: 'capitalize' }}>{entry.action?.replace(/_/g, ' ')}</td>
+                          <td style={{ fontSize: 13, whiteSpace: 'nowrap' }}>{new Date(entry.created_at).toLocaleString()}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            );
+          })()
         }
       </Section>
 

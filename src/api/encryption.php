@@ -190,6 +190,9 @@ if ($method === 'POST' && $action === 'update-recovery') {
         'recovery_key_encrypted' => $body['recovery_key_encrypted'],
     ]);
 
+    $ipHash = Auth::clientIpHash();
+    $storage->logAction($userId, 'recovery_key_regenerated', null, null, $ipHash);
+
     Response::success(['message' => 'Recovery key updated.']);
 }
 

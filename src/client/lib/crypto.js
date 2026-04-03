@@ -571,6 +571,30 @@ export async function verifyRecoveryKeyAndRotate(recoveryBlobs, recoveryKey, rec
 }
 
 /**
+ * Regenerate recovery key (requires vault to be unlocked).
+ * Generates a fresh recovery key and re-wraps the existing DEK with it.
+ * The old recovery key is permanently invalidated.
+ *
+ * @returns {object} { recoveryKey, recovery_key_salt, encrypted_dek_recovery, recovery_key_encrypted }
+ */
+export async function regenerateRecoveryKey() {
+    if (!_dek) throw new Error('Vault must be unlocked to regenerate recovery key');
+
+    const newRecoveryKey = generateRecoveryKey();
+    const newSalt = generateSalt();
+    const wrappingKey = await deriveWrappingKey(newRecoveryKey, newSalt);
+    const encryptedDekRecovery = await wrapDek(_dek, wrappingKey);
+    const recoveryKeyEncrypted = await encrypt(newRecoveryKey, _dek);
+
+    return {
+        recoveryKey: newRecoveryKey,
+        recovery_key_salt: newSalt,
+        encrypted_dek_recovery: encryptedDekRecovery,
+        recovery_key_encrypted: recoveryKeyEncrypted,
+    };
+}
+
+/**
  * View the recovery key (requires vault to be unlocked).
  * Decrypts the recovery_key_encrypted blob stored on server.
  */
