@@ -11,7 +11,7 @@ import {
   generateDek, encrypt, decrypt, encryptEntry, decryptEntry,
   deriveWrappingKey, wrapDek, unwrapDek,
   setupVault, unlockVault, changeVaultKey, lockVault,
-  reWrapDekIterations,
+  reWrapDekIterations, getKdfIterations,
   generateRecoveryKey, recoverWithRecoveryKey, regenerateRecoveryKey,
   verifyRecoveryKeyAndRotate, viewRecoveryKey,
   generateKeyPair, exportPublicKey, importPublicKey,
@@ -19,6 +19,7 @@ import {
   isUnlocked, lock,
   PBKDF2_ITERATIONS, PBKDF2_ITERATIONS_RECOMMENDED,
 } from '../../src/client/lib/crypto.js';
+import { validateVaultKey } from '../../src/client/lib/defaults.js';
 
 // ── Base64 helpers ──────────────────────────────────────────────────────
 
@@ -667,5 +668,274 @@ describe('PBKDF2 iteration migration', () => {
     const newDek = (await import('../../src/client/lib/crypto.js'))._getDekForContext();
     const result = await decrypt(blob, newDek);
     expect(result).toBe('migration-test');
+  });
+
+  it('setupVault at default cannot unlock at 200K', async () => {
+    const { keyMaterial } = await setupVault('TestKey#3');
+    lockVault();
+    const result = await unlockVault(keyMaterial, 'TestKey#3', 200000);
+    expect(result).toBe(false);
+  });
+
+  it('changeVaultKey without iterations fails when setup used non-default', async () => {
+    // Setup at default, re-wrap at 200K to simulate user with non-default KDF
+    const vaultKey = 'IterBug#1';
+    const { keyMaterial } = await setupVault(vaultKey);
+    const reWrapped = await reWrapDekIterations(vaultKey, 200000);
+    lockVault();
+
+    // Unlock at 200K (correct)
+    await unlockVault(reWrapped, vaultKey, 200000);
+
+    // Change key WITHOUT passing iterations — defaults to 100K, unwrap at 200K fails
+    const newKey = 'NewIterBug#1';
+    await expect(
+      changeVaultKey(reWrapped, vaultKey, newKey, PBKDF2_ITERATIONS)
+    ).rejects.toThrow('Current vault key is incorrect');
+  });
+
+  it('changeVaultKey preserves iteration count in new blobs', async () => {
+    const oldKey = 'PreserveIter#1';
+    const newKey = 'PreserveIter#2';
+    const { keyMaterial } = await setupVault(oldKey);
+
+    // Re-wrap at 200K
+    const reWrapped = await reWrapDekIterations(oldKey, 200000);
+    lockVault();
+    await unlockVault(reWrapped, oldKey, 200000);
+
+    // Change key with correct iterations (200K)
+    const newBlobs = await changeVaultKey(reWrapped, oldKey, newKey, 200000);
+    lockVault();
+
+    // New key should work at 200K (iterations preserved)
+    const result = await unlockVault(newBlobs, newKey, 200000);
+    expect(result).toBe(true);
+
+    // New key should NOT work at 100K
+    lockVault();
+    const wrong = await unlockVault(newBlobs, newKey, PBKDF2_ITERATIONS);
+    expect(wrong).toBe(false);
+  });
+
+  it('changeVaultKey with wrong current key throws', async () => {
+    const { keyMaterial } = await setupVault('RightKey#1');
+    await expect(
+      changeVaultKey(keyMaterial, 'WrongKey#1', 'NewKey#1', PBKDF2_ITERATIONS)
+    ).rejects.toThrow('Current vault key is incorrect');
+  });
+
+  it('reWrapDekIterations with wrong vault key produces unusable blobs', async () => {
+    const correctKey = 'CorrectRewrap#1';
+    await setupVault(correctKey);
+
+    // Re-wrap with wrong key — wraps DEK with wrong-key-derived wrapping key
+    const badBlobs = await reWrapDekIterations('WrongRewrap#1', 200000);
+    lockVault();
+
+    // Correct key at 200K can't unwrap (was wrapped with wrong-key-derived key)
+    const result = await unlockVault(badBlobs, correctKey, 200000);
+    expect(result).toBe(false);
+  });
+
+  it('reWrapDekIterations preserves DEK — data still decrypts', async () => {
+    const vaultKey = 'DataPreserve#1';
+    await setupVault(vaultKey);
+
+    const dek = (await import('../../src/client/lib/crypto.js'))._getDekForContext();
+    const blob = await encrypt('preserve-test', dek);
+
+    // Re-wrap at 200K
+    const newBlobs = await reWrapDekIterations(vaultKey, 200000);
+    lockVault();
+    await unlockVault(newBlobs, vaultKey, 200000);
+
+    // Same data decrypts (DEK unchanged, only wrapping changed)
+    const newDek = (await import('../../src/client/lib/crypto.js'))._getDekForContext();
+    const result = await decrypt(blob, newDek);
+    expect(result).toBe('preserve-test');
+  });
+
+  it('recoverWithRecoveryKey fails with wrong recoveryIterations', async () => {
+    const { recoveryKey, keyMaterial } = await setupVault('RecIter#1');
+    lockVault();
+
+    // Recovery key was wrapped at default (100K). Try with 200K — wrong derived key.
+    await expect(
+      recoverWithRecoveryKey(
+        { recovery_key_salt: keyMaterial.recovery_key_salt, encrypted_dek_recovery: keyMaterial.encrypted_dek_recovery },
+        recoveryKey, 'NewKey#1', 200000, PBKDF2_ITERATIONS
+      )
+    ).rejects.toThrow('Recovery key is incorrect');
+  });
+
+  it('recoverWithRecoveryKey — old vault key fails after recovery', async () => {
+    const oldKey = 'OldVault#1';
+    const { recoveryKey, keyMaterial } = await setupVault(oldKey);
+    lockVault();
+
+    const newKey = 'NewVault#1';
+    const recovered = await recoverWithRecoveryKey(
+      { recovery_key_salt: keyMaterial.recovery_key_salt, encrypted_dek_recovery: keyMaterial.encrypted_dek_recovery },
+      recoveryKey, newKey
+    );
+    lockVault();
+
+    // Old key should not work with new blobs
+    const result = await unlockVault(recovered, oldKey, PBKDF2_ITERATIONS);
+    expect(result).toBe(false);
+  });
+
+  it('recoverWithRecoveryKey — old recovery key fails (rotated)', async () => {
+    const { recoveryKey: oldRecKey, keyMaterial } = await setupVault('RotateRec#1');
+    lockVault();
+
+    const recovered = await recoverWithRecoveryKey(
+      { recovery_key_salt: keyMaterial.recovery_key_salt, encrypted_dek_recovery: keyMaterial.encrypted_dek_recovery },
+      oldRecKey, 'NewKey#1'
+    );
+    lockVault();
+
+    // Old recovery key with NEW blobs should fail
+    await expect(
+      recoverWithRecoveryKey(
+        { recovery_key_salt: recovered.recovery_key_salt, encrypted_dek_recovery: recovered.encrypted_dek_recovery },
+        oldRecKey, 'AnotherKey#1'
+      )
+    ).rejects.toThrow('Recovery key is incorrect');
+  });
+
+  it('recoverWithRecoveryKey respects newIterations param', async () => {
+    const { recoveryKey, keyMaterial } = await setupVault('IterRecover#1');
+    lockVault();
+
+    // Recover with newIterations=200K
+    const recovered = await recoverWithRecoveryKey(
+      { recovery_key_salt: keyMaterial.recovery_key_salt, encrypted_dek_recovery: keyMaterial.encrypted_dek_recovery },
+      recoveryKey, 'NewKey#1', PBKDF2_ITERATIONS, 200000
+    );
+    lockVault();
+
+    // Should unlock at 200K
+    const result = await unlockVault(recovered, 'NewKey#1', 200000);
+    expect(result).toBe(true);
+
+    // Should NOT unlock at default 100K
+    lockVault();
+    const wrong = await unlockVault(recovered, 'NewKey#1', PBKDF2_ITERATIONS);
+    expect(wrong).toBe(false);
+  });
+
+  it('verifyRecoveryKeyAndRotate fails with wrong iterations', async () => {
+    const { recoveryKey, keyMaterial } = await setupVault('VerifyIter#1');
+
+    await expect(
+      verifyRecoveryKeyAndRotate(
+        { recovery_key_salt: keyMaterial.recovery_key_salt, encrypted_dek_recovery: keyMaterial.encrypted_dek_recovery },
+        recoveryKey, 200000 // wrong — was wrapped at 100K
+      )
+    ).rejects.toThrow('Recovery key is incorrect');
+  });
+
+  it('verifyRecoveryKeyAndRotate — old key cannot unwrap new blobs', async () => {
+    const { recoveryKey, keyMaterial } = await setupVault('RotateVerify#1');
+
+    const rotated = await verifyRecoveryKeyAndRotate(
+      { recovery_key_salt: keyMaterial.recovery_key_salt, encrypted_dek_recovery: keyMaterial.encrypted_dek_recovery },
+      recoveryKey
+    );
+
+    // Old recovery key should fail against new blobs
+    await expect(
+      verifyRecoveryKeyAndRotate(
+        { recovery_key_salt: rotated.recovery_key_salt, encrypted_dek_recovery: rotated.encrypted_dek_recovery },
+        recoveryKey
+      )
+    ).rejects.toThrow('Recovery key is incorrect');
+  });
+});
+
+// ── getKdfIterations ─────────────────────────────────────────────────────
+
+describe('getKdfIterations', () => {
+  it('returns 100K when preferences is null', () => {
+    expect(getKdfIterations(null)).toBe(100000);
+  });
+
+  it('returns 100K when preferences is undefined', () => {
+    expect(getKdfIterations(undefined)).toBe(100000);
+  });
+
+  it('returns 100K when kdf_iterations key is missing', () => {
+    expect(getKdfIterations({})).toBe(100000);
+  });
+
+  it('returns 100K when kdf_iterations is empty string', () => {
+    expect(getKdfIterations({ kdf_iterations: '' })).toBe(100000);
+  });
+
+  it('returns 100K when kdf_iterations is 0', () => {
+    expect(getKdfIterations({ kdf_iterations: '0' })).toBe(100000);
+  });
+
+  it('returns 100K when kdf_iterations is negative', () => {
+    expect(getKdfIterations({ kdf_iterations: '-1' })).toBe(100000);
+  });
+
+  it('returns 100K when kdf_iterations is non-numeric', () => {
+    expect(getKdfIterations({ kdf_iterations: 'abc' })).toBe(100000);
+  });
+
+  it('returns parsed value for valid string', () => {
+    expect(getKdfIterations({ kdf_iterations: '200000' })).toBe(200000);
+  });
+
+  it('returns parsed value for valid number', () => {
+    expect(getKdfIterations({ kdf_iterations: 600000 })).toBe(600000);
+  });
+});
+
+// ── validateVaultKey ─────────────────────────────────────────────────────
+
+describe('validateVaultKey', () => {
+  it('returns null for valid alphanumeric key (8+ chars)', () => {
+    expect(validateVaultKey('MyVault#1', 'alphanumeric')).toBeNull();
+  });
+
+  it('returns null for valid numeric key (6+ chars)', () => {
+    expect(validateVaultKey('123456', 'numeric')).toBeNull();
+  });
+
+  it('returns null for valid passphrase (16+ chars)', () => {
+    expect(validateVaultKey('this is my long pass', 'passphrase')).toBeNull();
+  });
+
+  it('returns error for too-short alphanumeric key', () => {
+    expect(validateVaultKey('Short#1', 'alphanumeric')).toMatch(/at least 8/);
+  });
+
+  it('returns error for too-short numeric key', () => {
+    expect(validateVaultKey('12345', 'numeric')).toMatch(/at least 6/);
+  });
+
+  it('returns error for too-short passphrase', () => {
+    expect(validateVaultKey('short phrase', 'passphrase')).toMatch(/at least 16/);
+  });
+
+  it('returns error for empty string', () => {
+    expect(validateVaultKey('', 'alphanumeric')).toMatch(/at least/);
+  });
+
+  it('returns error for null', () => {
+    expect(validateVaultKey(null, 'alphanumeric')).toMatch(/at least/);
+  });
+
+  it('returns error for undefined', () => {
+    expect(validateVaultKey(undefined, 'alphanumeric')).toMatch(/at least/);
+  });
+
+  it('falls back to alphanumeric (8) when keyType is unknown', () => {
+    expect(validateVaultKey('Valid#12', 'unknown_type')).toBeNull();
+    expect(validateVaultKey('Short', 'unknown_type')).toMatch(/at least 8/);
   });
 });
