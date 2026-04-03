@@ -5,7 +5,8 @@
  */
 
 // Load .env file (custom parser, no Composer)
-$envFile = __DIR__ . '/.env';
+// Allow override via CITADEL_ENV_FILE for test isolation
+$envFile = getenv('CITADEL_ENV_FILE') ?: (__DIR__ . '/.env');
 if (file_exists($envFile)) {
     $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
     foreach ($lines as $line) {
