@@ -20,6 +20,7 @@ import Modal from '../components/Modal';
 import SegmentedControl from '../components/SegmentedControl';
 import AssetsTab from '../components/portfolio/AssetsTab';
 import useAppConfig from '../hooks/useAppConfig';
+import useCountries from '../hooks/useCountries';
 import api from '../api/client';
 import { fmtCurrency, MASKED, apiData } from '../lib/checks';
 import { buildRateMap, buildSymbolMap, recalculateSnapshot } from '../lib/portfolioAggregator';
@@ -70,6 +71,7 @@ export default function PortfolioPage() {
     displayCurrency, setDisplayCurrency, baseCurrency, currencies,
     ratesLastUpdated, refreshAndApplyPrices,
   } = usePortfolioData();
+  const { countries } = useCountries();
 
   const [activeTab, setActiveTab] = useState(() => {
     const saved = sessionStorage.getItem('pv_portfolio_last_tab') || 'overview';
@@ -328,7 +330,7 @@ export default function PortfolioPage() {
         <>
           {activeTab === 'overview' && <OverviewTab portfolio={p} fmtD={fmtD} hideAmounts={hideAmounts} refreshResult={refreshResult} />}
           {activeTab === 'assets' && <AssetsTab portfolio={p} fmtD={fmtD} groupBy={assetsGroupBy} setGroupBy={setAssetsGroupBy} expandedGroups={expandedGroups} toggleGroup={toggleGroup} />}
-          {activeTab === 'performance' && <PerformanceTab decrypt={decrypt} encrypt={encrypt} fmtD={fmtD} hideAmounts={hideAmounts} currencies={currencies} displayCurrency={displayCurrency} baseCurrency={baseCurrency} snapshotPrompt={snapshotPrompt} setSnapshotPrompt={setSnapshotPrompt} doSaveSnapshot={doSaveSnapshot} snapshotSaving={snapshotSaving} decryptedCache={decryptedCache} portfolio={portfolio} />}
+          {activeTab === 'performance' && <PerformanceTab decrypt={decrypt} encrypt={encrypt} fmtD={fmtD} hideAmounts={hideAmounts} currencies={currencies} countries={countries} displayCurrency={displayCurrency} baseCurrency={baseCurrency} snapshotPrompt={snapshotPrompt} setSnapshotPrompt={setSnapshotPrompt} doSaveSnapshot={doSaveSnapshot} snapshotSaving={snapshotSaving} decryptedCache={decryptedCache} portfolio={portfolio} />}
         </>
       )}
     </div>
@@ -535,7 +537,7 @@ function getBreakdownColor(key, breakdown, index) {
   return CHART_COLORS[index % CHART_COLORS.length];
 }
 
-function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrency, baseCurrency, snapshotPrompt, setSnapshotPrompt, doSaveSnapshot, snapshotSaving, decryptedCache, portfolio }) {
+function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies, countries, displayCurrency, baseCurrency, snapshotPrompt, setSnapshotPrompt, doSaveSnapshot, snapshotSaving, decryptedCache, portfolio }) {
   const [snapshots, setSnapshots] = useState([]);
   const [loadingSnap, setLoadingSnap] = useState(true);
   const [rateMode, setRateMode] = useState('current'); // 'current' | 'snapshot'
@@ -556,6 +558,13 @@ function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrenc
   // Build currency symbol map
   const symbolMap = useMemo(() => buildSymbolMap(currencies || []), [currencies]);
 
+  // Build country code → name map
+  const countryMap = useMemo(() => {
+    const map = {};
+    for (const c of (countries || [])) map[c.code] = c.name;
+    return map;
+  }, [countries]);
+
   const loadSnapshots = async () => {
     setLoadingSnap(true);
     try {
@@ -573,29 +582,50 @@ function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrenc
             entries.push({ ...decryptedEntries[j], entry_id: s.entries[j].entry_id });
           }
         }
-        // Backfill old entries missing country/linked_account.
-        // If the vault entry has been deleted since the snapshot was taken,
-        // decryptedCache lookup returns undefined — entry gets country=null
-        // and linked_account=null, which maps to "Unknown" country and
-        // "Not linked to an account" in the breakdown charts.
-        for (const entry of entries) {
-          if (entry.country === undefined || entry.linked_account === undefined) {
+        // Backfill entries missing country/linked_account or with "Unknown Account".
+        // Resolves from decryptedCache (live vault data). If vault entry was deleted,
+        // sets explicit nulls. Persists fixes back to server so backfill is one-time.
+        const entriesToUpdate = [];
+        for (let j = 0; j < entries.length; j++) {
+          const entry = entries[j];
+          const needsCountry = entry.country === undefined;
+          const needsAccount = entry.linked_account === undefined
+            || entry.linked_account?.name === 'Unknown Account';
+
+          if (needsCountry || needsAccount) {
             const vaultEntry = decryptedCache?.[entry.entry_id];
             if (vaultEntry) {
-              if (entry.country === undefined) entry.country = vaultEntry.country || null;
-              if (entry.linked_account === undefined) {
+              if (needsCountry) entry.country = vaultEntry.country || null;
+              if (needsAccount) {
                 const acctId = vaultEntry.linked_account_id;
                 entry.linked_account = acctId
-                  ? { id: acctId, name: portfolio?.accounts?.[acctId]?.name || 'Unknown Account' }
+                  ? { id: acctId, name: decryptedCache?.[acctId]?.title || 'Unknown Account' }
                   : null;
               }
             } else {
-              // Vault entry deleted — set explicit nulls
-              if (entry.country === undefined) entry.country = null;
-              if (entry.linked_account === undefined) entry.linked_account = null;
+              if (needsCountry) entry.country = null;
+              if (needsAccount) entry.linked_account = null;
             }
+            entriesToUpdate.push(j);
           }
         }
+
+        // Persist backfilled entries to server
+        if (entriesToUpdate.length > 0) {
+          try {
+            const blobsToEncrypt = entriesToUpdate.map(j => {
+              const { entry_id, ...blob } = entries[j];
+              return blob;
+            });
+            const encryptedBlobs = await workerDispatcher.encryptBatch(blobsToEncrypt, null);
+            const updatePayload = entriesToUpdate.map((j, idx) => ({
+              entry_id: entries[j].entry_id,
+              encrypted_data: encryptedBlobs[idx],
+            }));
+            await api.put('/snapshots.php', { snapshot_id: s.id, entries: updatePayload });
+          } catch { /* backfill save failed — display still corrected in-memory */ }
+        }
+
         decrypted.push({ ...s, _entries: entries });
       }
       setSnapshots(decrypted);
@@ -701,12 +731,21 @@ function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies, displayCurrenc
       }
       if (source) {
         for (const [key, val] of Object.entries(source)) {
-          if (!keys.has(key)) keys.set(key, val.label || key);
+          if (!keys.has(key)) {
+            let label = val.label || key;
+            if (breakdown === 'currency') {
+              const sym = symbolMap[key];
+              if (sym && sym !== key) label = `${sym} ${key}`;
+            } else if (breakdown === 'country') {
+              label = countryMap[key] || label;
+            }
+            keys.set(key, label);
+          }
         }
       }
     }
     return keys;
-  }, [snapshotSummaryMap, breakdown]);
+  }, [snapshotSummaryMap, breakdown, symbolMap, countryMap]);
 
   // Chart data: date + netWorth + byGroup totals per snapshot
   const chartData = useMemo(() =>

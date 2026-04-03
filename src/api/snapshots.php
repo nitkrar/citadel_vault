@@ -72,6 +72,31 @@ if ($method === 'POST') {
 }
 
 // ---------------------------------------------------------------------------
+// PUT — Update encrypted_data on existing snapshot entries
+// ---------------------------------------------------------------------------
+if ($method === 'PUT') {
+    $body = Response::getBody();
+    $snapshotId = (int)($body['snapshot_id'] ?? 0);
+    $entries = $body['entries'] ?? [];
+
+    if (!$snapshotId) {
+        Response::error('snapshot_id is required.', 400);
+    }
+    if (!is_array($entries) || empty($entries)) {
+        Response::error('entries must be a non-empty array.', 400);
+    }
+
+    foreach ($entries as $entry) {
+        if (empty($entry['encrypted_data']) || !isset($entry['entry_id'])) {
+            Response::error('Each entry must have entry_id and encrypted_data.', 400);
+        }
+    }
+
+    $updated = $storage->updateSnapshotEntries($userId, $snapshotId, $entries);
+    Response::success(['message' => "Updated $updated entries."]);
+}
+
+// ---------------------------------------------------------------------------
 // Fallback
 // ---------------------------------------------------------------------------
 Response::error('Invalid request.', 400);

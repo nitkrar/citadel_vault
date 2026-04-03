@@ -515,6 +515,25 @@ class MariaDbAdapter implements StorageAdapter {
         }
     }
 
+    public function updateSnapshotEntries(int $userId, int $snapshotId, array $entries): int {
+        // Verify snapshot belongs to user
+        $stmt = $this->db->prepare('SELECT id FROM portfolio_snapshots WHERE id = ? AND user_id = ?');
+        $stmt->execute([$snapshotId, $userId]);
+        if (!$stmt->fetch()) {
+            throw new \RuntimeException('Snapshot not found or access denied.');
+        }
+
+        $updated = 0;
+        $stmt = $this->db->prepare(
+            'UPDATE portfolio_snapshot_entries SET encrypted_data = ? WHERE snapshot_id = ? AND entry_id = ?'
+        );
+        foreach ($entries as $entry) {
+            $stmt->execute([$entry['encrypted_data'], $snapshotId, $entry['entry_id']]);
+            $updated += $stmt->rowCount();
+        }
+        return $updated;
+    }
+
     public function getSnapshotsWithEntries(int $userId, ?string $fromDate = null, ?string $toDate = null): array {
         // Fetch snapshot headers
         $sql = 'SELECT id, snapshot_date, snapshot_time, encrypted_data
