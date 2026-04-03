@@ -12,7 +12,8 @@ import {
   deriveWrappingKey, wrapDek, unwrapDek,
   setupVault, unlockVault, changeVaultKey, lockVault,
   reWrapDekIterations,
-  generateRecoveryKey, recoverWithRecoveryKey,
+  generateRecoveryKey, recoverWithRecoveryKey, regenerateRecoveryKey,
+  verifyRecoveryKeyAndRotate, viewRecoveryKey,
   generateKeyPair, exportPublicKey, importPublicKey,
   hybridEncrypt, hybridDecrypt,
   isUnlocked, lock,
@@ -322,6 +323,115 @@ describe('Recovery key', () => {
         'NewKey#1'
       )
     ).rejects.toThrow('Recovery key is incorrect');
+  });
+
+  it('regenerateRecoveryKey produces new key and valid blobs', async () => {
+    const { recoveryKey: originalKey, keyMaterial } = await setupVault('VaultKey#1');
+
+    // Encrypt data before regeneration
+    const dek = (await import('../../src/client/lib/crypto.js'))._getDekForContext();
+    const blob = await encrypt('secret-data', dek);
+
+    // Regenerate
+    const result = await regenerateRecoveryKey();
+    expect(result.recoveryKey).toBeTruthy();
+    expect(result.recoveryKey.length).toBe(32);
+    expect(result.recoveryKey).not.toBe(originalKey);
+    expect(result.recovery_key_salt).toBeTruthy();
+    expect(result.encrypted_dek_recovery).toBeTruthy();
+    expect(result.recovery_key_encrypted).toBeTruthy();
+
+    // New recovery key can recover the vault
+    lockVault();
+    const recovered = await recoverWithRecoveryKey(
+      {
+        recovery_key_salt: result.recovery_key_salt,
+        encrypted_dek_recovery: result.encrypted_dek_recovery,
+      },
+      result.recoveryKey,
+      'NewVaultKey#1'
+    );
+    expect(recovered.vault_key_salt).toBeTruthy();
+
+    // Original data still decrypts after recovery with new key
+    const newDek = (await import('../../src/client/lib/crypto.js'))._getDekForContext();
+    const decrypted = await decrypt(blob, newDek);
+    expect(decrypted).toBe('secret-data');
+  });
+
+  it('regenerateRecoveryKey invalidates old recovery key', async () => {
+    const { recoveryKey: oldKey, keyMaterial } = await setupVault('VaultKey#1');
+
+    const result = await regenerateRecoveryKey();
+
+    lockVault();
+
+    // Old key should no longer work with the new blobs
+    await expect(
+      recoverWithRecoveryKey(
+        {
+          recovery_key_salt: result.recovery_key_salt,
+          encrypted_dek_recovery: result.encrypted_dek_recovery,
+        },
+        oldKey,
+        'NewKey#1'
+      )
+    ).rejects.toThrow('Recovery key is incorrect');
+  });
+
+  it('regenerateRecoveryKey fails when vault is locked', async () => {
+    await setupVault('VaultKey#1');
+    lockVault();
+
+    await expect(regenerateRecoveryKey()).rejects.toThrow('Vault must be unlocked');
+  });
+
+  it('verifyRecoveryKeyAndRotate returns rotated blobs', async () => {
+    const { recoveryKey, keyMaterial } = await setupVault('VaultKey#1');
+
+    const rotated = await verifyRecoveryKeyAndRotate(
+      {
+        recovery_key_salt: keyMaterial.recovery_key_salt,
+        encrypted_dek_recovery: keyMaterial.encrypted_dek_recovery,
+      },
+      recoveryKey
+    );
+
+    expect(rotated.newRecoveryKey).toBeTruthy();
+    expect(rotated.newRecoveryKey).not.toBe(recoveryKey);
+    expect(rotated.recovery_key_salt).toBeTruthy();
+    expect(rotated.encrypted_dek_recovery).toBeTruthy();
+    expect(rotated.recovery_key_encrypted).toBeTruthy();
+  });
+
+  it('verifyRecoveryKeyAndRotate fails with wrong key', async () => {
+    const { keyMaterial } = await setupVault('VaultKey#1');
+
+    await expect(
+      verifyRecoveryKeyAndRotate(
+        {
+          recovery_key_salt: keyMaterial.recovery_key_salt,
+          encrypted_dek_recovery: keyMaterial.encrypted_dek_recovery,
+        },
+        'wrong-key-wrong-key-wrong-key-00'
+      )
+    ).rejects.toThrow('Recovery key is incorrect');
+  });
+
+  it('viewRecoveryKey decrypts stored blob', async () => {
+    const { recoveryKey, keyMaterial } = await setupVault('VaultKey#1');
+
+    const viewed = await viewRecoveryKey(keyMaterial.recovery_key_encrypted);
+    expect(viewed).toBe(recoveryKey);
+  });
+
+  it('viewRecoveryKey fails when vault is locked', async () => {
+    const { keyMaterial } = await setupVault('VaultKey#1');
+    lockVault();
+
+    await expect(
+      viewRecoveryKey(keyMaterial.recovery_key_encrypted)
+    ).rejects.toThrow('Vault must be unlocked');
   });
 });
 
