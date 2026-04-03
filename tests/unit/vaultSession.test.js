@@ -115,6 +115,18 @@ describe('vaultSession.lock()', () => {
     expect(localStorage.getItem('pv_ref_templates')).toBe('data');
     localStorage.clear();
   });
+
+  it('preserves pv_session_dek when preserveSession is true', async () => {
+    await lock({ preserveSession: true });
+    expect(sessionStorage.getItem('pv_session_dek')).toBe('secret-dek');
+    expect(crypto.lockVault).toHaveBeenCalled();
+    expect(workerDispatcher.setKey).toHaveBeenCalledWith(null);
+  });
+
+  it('clears pv_session_dek when preserveSession is false (default)', async () => {
+    await lock({ preserveSession: false });
+    expect(sessionStorage.getItem('pv_session_dek')).toBeNull();
+  });
 });
 
 describe('vaultSession.destroy()', () => {

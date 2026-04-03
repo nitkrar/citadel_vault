@@ -15,13 +15,20 @@ import { entryStore } from './entryStore';
 
 /**
  * Lock the vault. User remains authenticated.
- * Clears: in-memory DEK, session DEK, worker DEK, IndexedDB (per policy).
+ * Clears: in-memory DEK, worker DEK, IndexedDB (per policy).
  * Keeps: worker process (for re-unlock), localStorage caches.
+ *
+ * @param {object} [opts]
+ * @param {boolean} [opts.preserveSession=false] - If true, keep pv_session_dek
+ *   in sessionStorage so the vault can restore on remount/refresh.
+ *   Used by unmount cleanup to avoid breaking persist_in_tab.
  */
-export async function lock() {
+export async function lock({ preserveSession = false } = {}) {
   crypto.lockVault();
   workerDispatcher.setKey(null);       // clears main-thread raw key + sends clearKey to worker
-  sessionStorage.removeItem('pv_session_dek');
+  if (!preserveSession) {
+    sessionStorage.removeItem('pv_session_dek');
+  }
   await cachePolicy.onVaultLock();
 }
 

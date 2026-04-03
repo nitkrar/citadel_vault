@@ -398,7 +398,7 @@ export function EncryptionProvider({ children, user }) {
   useEffect(() => {
     return () => {
       clearAutoLock();
-      vaultSession.lock();
+      vaultSession.lock({ preserveSession: true });
     };
   }, [clearAutoLock]);
 
