@@ -29,6 +29,19 @@ vi.mock('../../src/client/lib/defaults', () => ({
     ({ numeric: 4, alphanumeric: 8, passphrase: 12 })[type] || 8,
   getUserPreference: () => 'alphanumeric',
   VAULT_KEY_MINIMUMS: { numeric: 4, alphanumeric: 8, passphrase: 12 },
+  validateVaultKey: (key, keyType) => {
+    const min = ({ numeric: 4, alphanumeric: 8, passphrase: 12 })[keyType] || 8;
+    if (!key || key.length < min) return `Vault key must be at least ${min} characters.`;
+    return null;
+  },
+}));
+
+vi.mock('../../src/client/api/client', () => ({
+  default: { put: vi.fn(() => Promise.resolve({ data: {} })) },
+}));
+
+vi.mock('../../src/client/components/RecoveryKeyCopyBlock', () => ({
+  default: ({ recoveryKey }) => <div data-testid="recovery-key-display">{recoveryKey}</div>,
 }));
 
 const iconStub = (name) => (props) => <span data-icon={name} />;
@@ -481,6 +494,190 @@ describe('EncryptionKeyModal', () => {
 
       fireEvent.click(screen.getByText('Hide'));
       expect(screen.getByText('Show')).toBeInTheDocument();
+    });
+  });
+
+  // -----------------------------------------------------------------
+  // 18. Setup interaction — submit calls setup(), shows recovery key
+  // -----------------------------------------------------------------
+  describe('setup interaction', () => {
+    beforeEach(() => {
+      mockEncryption = {
+        ...defaultEncryption,
+        vaultKeyExists: false,
+        vaultPromptForced: null,
+        setup: vi.fn(() => Promise.resolve({ recoveryKey: 'abc123def456abc123def456abc123de' })),
+      };
+    });
+
+    it('shows error when keys do not match', async () => {
+      render(<EncryptionKeyModal />);
+      const inputs = screen.getAllByDisplayValue('');
+      fireEvent.change(inputs[0], { target: { value: 'VaultKey#1' } });
+      fireEvent.change(inputs[1], { target: { value: 'Different#1' } });
+      fireEvent.click(screen.getByText('Set Up Vault Key', { selector: 'button' }));
+
+      expect(await screen.findByText('Vault keys do not match.')).toBeInTheDocument();
+      expect(mockEncryption.setup).not.toHaveBeenCalled();
+    });
+
+    it('shows error when key too short', async () => {
+      render(<EncryptionKeyModal />);
+      const inputs = screen.getAllByDisplayValue('');
+      fireEvent.change(inputs[0], { target: { value: 'short' } });
+      fireEvent.change(inputs[1], { target: { value: 'short' } });
+      fireEvent.click(screen.getByText('Set Up Vault Key', { selector: 'button' }));
+
+      expect(await screen.findByText(/at least 8/)).toBeInTheDocument();
+      expect(mockEncryption.setup).not.toHaveBeenCalled();
+    });
+
+    it('calls setup() and shows recovery key on success', async () => {
+      render(<EncryptionKeyModal />);
+      const inputs = screen.getAllByDisplayValue('');
+      fireEvent.change(inputs[0], { target: { value: 'ValidKey#1' } });
+      fireEvent.change(inputs[1], { target: { value: 'ValidKey#1' } });
+      fireEvent.click(screen.getByText('Set Up Vault Key', { selector: 'button' }));
+
+      // Wait for recovery key display
+      expect(await screen.findByText('Save Your Recovery Key')).toBeInTheDocument();
+      expect(mockEncryption.setup).toHaveBeenCalledWith('ValidKey#1');
+      expect(screen.getByTestId('recovery-key-display')).toHaveTextContent('abc123def456abc123def456abc123de');
+    });
+
+    it('shows error on setup failure', async () => {
+      mockEncryption.setup = vi.fn(() => Promise.reject(new Error('Setup failed.')));
+      render(<EncryptionKeyModal />);
+      const inputs = screen.getAllByDisplayValue('');
+      fireEvent.change(inputs[0], { target: { value: 'ValidKey#1' } });
+      fireEvent.change(inputs[1], { target: { value: 'ValidKey#1' } });
+      fireEvent.click(screen.getByText('Set Up Vault Key', { selector: 'button' }));
+
+      expect(await screen.findByText('Setup failed.')).toBeInTheDocument();
+    });
+  });
+
+  // -----------------------------------------------------------------
+  // 19. Recovery interaction — submit calls recoverWithRecoveryKey()
+  // -----------------------------------------------------------------
+  describe('recovery interaction', () => {
+    beforeEach(() => {
+      mockEncryption = {
+        ...defaultEncryption,
+        vaultKeyExists: true,
+        vaultPromptForced: true,
+        recoverWithRecoveryKey: vi.fn(() => Promise.resolve({ recoveryKey: 'newreckey1234567890abcdef12345678' })),
+      };
+    });
+
+    it('shows error when recovery key is empty', async () => {
+      render(<EncryptionKeyModal />);
+      fireEvent.click(screen.getByText('Forgot vault key? Use recovery key'));
+
+      // Submit form directly (bypasses HTML required)
+      const form = screen.getByText('Recover Vault').closest('form');
+      fireEvent.submit(form);
+
+      expect(await screen.findByText('Enter your recovery key.')).toBeInTheDocument();
+      expect(mockEncryption.recoverWithRecoveryKey).not.toHaveBeenCalled();
+    });
+
+    it('calls recoverWithRecoveryKey() and shows new recovery key', async () => {
+      render(<EncryptionKeyModal />);
+      fireEvent.click(screen.getByText('Forgot vault key? Use recovery key'));
+
+      const inputs = screen.getAllByDisplayValue('');
+      fireEvent.change(inputs[0], { target: { value: 'abc123def456abc123def456abc123de' } });
+      fireEvent.change(inputs[1], { target: { value: 'NewVault#1' } });
+      fireEvent.change(inputs[2], { target: { value: 'NewVault#1' } });
+      fireEvent.click(screen.getByText('Recover Vault'));
+
+      expect(await screen.findByText('Save Your Recovery Key')).toBeInTheDocument();
+      expect(mockEncryption.recoverWithRecoveryKey).toHaveBeenCalledWith(
+        'abc123def456abc123def456abc123de', 'NewVault#1'
+      );
+      expect(screen.getByTestId('recovery-key-display')).toHaveTextContent('newreckey1234567890abcdef12345678');
+    });
+
+    it('shows error on recovery failure', async () => {
+      mockEncryption.recoverWithRecoveryKey = vi.fn(() => Promise.reject(new Error('Recovery key is incorrect')));
+      render(<EncryptionKeyModal />);
+      fireEvent.click(screen.getByText('Forgot vault key? Use recovery key'));
+
+      const inputs = screen.getAllByDisplayValue('');
+      fireEvent.change(inputs[0], { target: { value: 'wrongreckeywrongreckeywrongrecke' } });
+      fireEvent.change(inputs[1], { target: { value: 'NewVault#1' } });
+      fireEvent.change(inputs[2], { target: { value: 'NewVault#1' } });
+      fireEvent.click(screen.getByText('Recover Vault'));
+
+      expect(await screen.findByText('Recovery key is incorrect')).toBeInTheDocument();
+    });
+  });
+
+  // -----------------------------------------------------------------
+  // 20. Force change interaction — submit calls changeVaultKey()
+  // -----------------------------------------------------------------
+  describe('force change interaction', () => {
+    beforeEach(() => {
+      mockEncryption = {
+        ...defaultEncryption,
+        isUnlocked: true,
+        vaultKeyExists: true,
+        changeVaultKey: vi.fn(() => Promise.resolve({ success: true })),
+      };
+      mockAuth = {
+        ...defaultAuth,
+        mustChangeVaultKey: true,
+        clearMustChangeVaultKey: vi.fn(),
+      };
+    });
+
+    it('shows error when current key is empty', async () => {
+      render(<EncryptionKeyModal />);
+      fireEvent.change(screen.getByPlaceholderText(/characters/), { target: { value: 'NewForce#1' } });
+      fireEvent.change(screen.getByPlaceholderText('Confirm'), { target: { value: 'NewForce#1' } });
+
+      // Submit form directly (bypasses HTML required on current key input)
+      const form = screen.getByText('Change Vault Key').closest('form');
+      fireEvent.submit(form);
+
+      expect(await screen.findByText('Enter your current vault key.')).toBeInTheDocument();
+      expect(mockEncryption.changeVaultKey).not.toHaveBeenCalled();
+    });
+
+    it('shows error when new key matches current', async () => {
+      render(<EncryptionKeyModal />);
+      fireEvent.change(screen.getByPlaceholderText('Current key'), { target: { value: 'SameKey#1' } });
+      fireEvent.change(screen.getByPlaceholderText(/characters/), { target: { value: 'SameKey#1' } });
+      fireEvent.change(screen.getByPlaceholderText('Confirm'), { target: { value: 'SameKey#1' } });
+      fireEvent.click(screen.getByText('Change Vault Key'));
+
+      expect(await screen.findByText(/must be different/)).toBeInTheDocument();
+      expect(mockEncryption.changeVaultKey).not.toHaveBeenCalled();
+    });
+
+    it('calls changeVaultKey() and clearMustChangeVaultKey() on success', async () => {
+      render(<EncryptionKeyModal />);
+      fireEvent.change(screen.getByPlaceholderText('Current key'), { target: { value: 'OldForce#1' } });
+      fireEvent.change(screen.getByPlaceholderText(/characters/), { target: { value: 'NewForce#1' } });
+      fireEvent.change(screen.getByPlaceholderText('Confirm'), { target: { value: 'NewForce#1' } });
+      fireEvent.click(screen.getByText('Change Vault Key'));
+
+      await vi.waitFor(() => {
+        expect(mockEncryption.changeVaultKey).toHaveBeenCalledWith('OldForce#1', 'NewForce#1');
+        expect(mockAuth.clearMustChangeVaultKey).toHaveBeenCalled();
+      });
+    });
+
+    it('shows error on change failure', async () => {
+      mockEncryption.changeVaultKey = vi.fn(() => Promise.reject(new Error('Current vault key is incorrect')));
+      render(<EncryptionKeyModal />);
+      fireEvent.change(screen.getByPlaceholderText('Current key'), { target: { value: 'WrongOld#1' } });
+      fireEvent.change(screen.getByPlaceholderText(/characters/), { target: { value: 'NewForce#1' } });
+      fireEvent.change(screen.getByPlaceholderText('Confirm'), { target: { value: 'NewForce#1' } });
+      fireEvent.click(screen.getByText('Change Vault Key'));
+
+      expect(await screen.findByText('Current vault key is incorrect')).toBeInTheDocument();
     });
   });
 });
