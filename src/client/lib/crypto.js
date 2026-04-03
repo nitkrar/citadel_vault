@@ -6,7 +6,7 @@
  *
  * Key hierarchy:
  *   Vault Key → PBKDF2 → Wrapping Key → wraps DEK (AES-KW)
- *   DEK (non-extractable CryptoKey) → encrypts all data (AES-256-GCM)
+ *   DEK (extractable CryptoKey) → encrypts all data (AES-256-GCM)
  *   Recovery Key → PBKDF2 → Recovery Wrapping Key → wraps same DEK
  */
 
