@@ -2337,3 +2337,205 @@ td.td-checkbox input[type="checkbox"] {
     display: none;
   }
 }
+
+/* ---------- Export: Format segmented tabs ---------- */
+.format-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 3px;
+  width: fit-content;
+}
+
+.format-tab {
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: var(--color-text-muted);
+  transition: all 0.15s;
+  letter-spacing: 0.04em;
+}
+
+.format-tab.active {
+  background: var(--color-card);
+  color: var(--color-primary);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.format-tab:hover:not(.active) {
+  color: var(--color-text-primary);
+}
+
+/* ---------- Export: Field visibility toggles ---------- */
+.fv-list {
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.fv-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--color-border);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.fv-row:last-child {
+  border-bottom: none;
+}
+
+.fv-row:hover {
+  background: var(--color-bg);
+}
+
+.fv-toggle {
+  position: relative;
+  width: 34px;
+  height: 19px;
+  flex-shrink: 0;
+}
+
+.fv-toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+.fv-track {
+  position: absolute;
+  inset: 0;
+  background: var(--color-border);
+  border-radius: 20px;
+  transition: background 0.2s;
+  cursor: pointer;
+}
+
+.fv-track::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+  transition: transform 0.2s, background 0.2s;
+}
+
+.fv-toggle input:checked + .fv-track {
+  background: var(--color-primary);
+}
+
+.fv-toggle input:checked + .fv-track::after {
+  transform: translateX(15px);
+  background: #fff;
+}
+
+.fv-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.fv-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.fv-desc {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+.fv-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 4px;
+  letter-spacing: 0.04em;
+}
+
+.fv-badge.pdf-only {
+  background: #f5f3ff;
+  color: #7c3aed;
+  border: 1px solid #e9d5ff;
+}
+
+[data-theme="dark"] .fv-badge.pdf-only {
+  background: rgba(124, 58, 237, 0.15);
+  color: #a78bfa;
+  border-color: rgba(124, 58, 237, 0.3);
+}
+
+/* ---------- Export: Entry type chips ---------- */
+.type-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.type-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--color-border);
+  background: var(--color-card);
+  color: var(--color-text-muted);
+  transition: all 0.15s;
+  user-select: none;
+}
+
+.type-chip:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.type-chip.selected {
+  background: var(--color-primary-light, rgba(37, 99, 235, 0.08));
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.chip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+/* ---------- Export: Link button (select all / clear) ---------- */
+.link-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--color-primary);
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.link-btn:hover {
+  color: var(--color-primary-hover, var(--color-primary));
+}

@@ -5,7 +5,7 @@
  * No jsPDF dependency — uses browser's native Print to PDF.
  */
 
-import { cleanEntry, TYPE_LABELS } from './exportHelpers';
+import { cleanEntry, TYPE_LABELS, isSecretField, isMonetaryField, isRateField } from './exportHelpers';
 import { extractValue } from './portfolioAggregator';
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -119,28 +119,23 @@ function buildNetWorthTiles(assets, rateMap, baseCurrency, templates) {
   return `<div class="net-worth"><div class="net-worth__tiles">${tilesHtml}</div>${footnote}</div>`;
 }
 
-// Fields to skip in full detail field grids
+// Fields always excluded from detail field grids (shown via dedicated UI elements)
 const SKIP_KEYS = new Set(['row_id', 'linked_account_id', 'title', 'name', 'currency', 'value', 'current_value', 'face_value', 'integrations', 'subtype']);
 
-// Additional keys to skip in overview mode (monetary, quantity, secret-like)
-const OVERVIEW_SKIP_KEYS = new Set([
-  'balance', 'value', 'current_value', 'face_value', 'purchase_price', 'price_per_share',
-  'price_per_unit', 'premium_amount', 'coverage_amount', 'cash_value', 'credit_limit',
-  'cost_price', 'shares', 'quantity', 'interest_rate', 'employer_match', 'coupon_rate',
-]);
-
-function getExtraFields(clean, templateFields, { overview = false } = {}) {
+function getExtraFields(clean, templateFields, { fieldVisibility } = {}) {
   const meta = {};
   for (const f of templateFields) { const k = f.key ?? f.name; if (k) meta[k] = f; }
+  const fv = fieldVisibility || {};
 
   const fields = [];
   for (const [k, v] of Object.entries(clean)) {
     if (SKIP_KEYS.has(k) || k.startsWith('_') || v === undefined || v === null || v === '') continue;
     const m = meta[k];
-    const isSecret = m?.type === 'secret';
-    const isCurrency = m?.type === 'number' && (m?.portfolio_role === 'value' || m?.portfolio_role === 'price');
-    // In overview mode, skip monetary fields, secrets, and password-like fields
-    if (overview && (isSecret || isCurrency || OVERVIEW_SKIP_KEYS.has(k) || m?.type === 'number')) continue;
+    const isSecret = isSecretField(m);
+    const isCurrency = isMonetaryField(k, m);
+    if (fv.secrets === false && isSecret) continue;
+    if (fv.monetary === false && (isCurrency || isMonetaryField(k, m))) continue;
+    if (fv.rates === false && isRateField(k)) continue;
     const label = m?.label ?? k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     fields.push({ label, value: String(v), isSecret, isCurrency, currency: clean.currency });
   }
@@ -173,8 +168,6 @@ html, body { background:var(--bg-primary); color:var(--text-primary); font-famil
 .doc-header__title { font-size:20px; font-weight:700; letter-spacing:0.05em; }
 .doc-header__meta { font-size:12px; color:var(--text-muted); margin-top:3px; }
 .badge { display:inline-block; padding:3px 11px; border-radius:999px; font-size:11px; font-weight:600; letter-spacing:0.04em; white-space:nowrap; flex-shrink:0; margin-top:3px; }
-.badge--overview { background:var(--color-primary); color:#fff; }
-.badge--full { background:var(--color-danger); color:#fff; }
 .warning-banner { margin-top:10px; background:#fef2f2; border:1px solid #fecaca; color:var(--color-danger); padding:7px 12px; border-radius:6px; font-size:12px; font-weight:600; }
 .section { background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:8px; padding:14px 16px; margin-bottom:12px; break-inside:avoid; }
 .section__header { display:flex; align-items:center; gap:8px; padding-bottom:10px; margin-bottom:12px; border-bottom:1px solid var(--border-color); }
@@ -205,12 +198,6 @@ html, body { background:var(--bg-primary); color:var(--text-primary); font-famil
 .unlinked-list__name { color:var(--text-primary); font-weight:600; }
 .unlinked-list__type { color:var(--text-muted); font-size:11.5px; }
 .unlinked-list__val { margin-left:auto; color:var(--color-success); font-weight:600; white-space:nowrap; }
-.ov-list { list-style:none; }
-.ov-list__item { display:flex; gap:6px; padding:3px 0; font-size:13px; border-bottom:1px solid var(--border-color); }
-.ov-list__item:last-child { border-bottom:none; }
-.ov-list__num { color:var(--text-faint); min-width:18px; flex-shrink:0; }
-.ov-list__name { color:var(--text-primary); font-weight:600; }
-.ov-list__meta { color:var(--text-muted); font-size:12px; }
 .acct-card { background:var(--bg-primary); border:1px solid var(--border-strong); border-left:3px solid var(--color-primary); border-radius:6px; margin-bottom:10px; overflow:hidden; break-inside:avoid; }
 .acct-card:last-child { margin-bottom:0; }
 .acct-card__head { display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:var(--bg-tertiary); border-bottom:1px solid var(--border-color); }
@@ -252,10 +239,9 @@ html, body { background:var(--bg-primary); color:var(--text-primary); font-famil
 
 // ── HTML builders ────────────────────────────────────────────────────────
 
-function buildHeader(mode, dateSuffix) {
-  const badgeClass = mode === 'full' ? 'badge--full' : 'badge--overview';
-  const badgeLabel = mode === 'full' ? 'Full Detail' : 'Overview';
-  const warning = mode === 'full'
+function buildHeader(dateSuffix, fieldVisibility) {
+  const fv = fieldVisibility || {};
+  const warning = fv.secrets !== false
     ? `<div class="warning-banner">&#9888;&#xFE0E;&nbsp; Contains unmasked sensitive data — keep this document secure</div>`
     : '';
   return `<div class="doc-header">
@@ -264,100 +250,7 @@ function buildHeader(mode, dateSuffix) {
         <div class="doc-header__title">CITADEL VAULT EXPORT</div>
         <div class="doc-header__meta">Exported on ${esc(dateSuffix)}</div>
       </div>
-      <span class="badge ${badgeClass}">${badgeLabel}</span>
     </div>${warning}
-  </div>`;
-}
-
-function buildOverviewAccountsAssets(accounts, assets) {
-  if (accounts.length === 0 && assets.length === 0) return '';
-
-  const linkedIds = new Set();
-  let accountsHtml = '';
-
-  for (const acct of accounts) {
-    const c = cleanEntry(acct);
-    const title = esc(c.title ?? c.name ?? '(untitled)');
-    const meta = [c.subtype, c.currency].filter(Boolean).join(' · ');
-
-    const linked = assets.filter(a => String(a.linked_account_id) === String(acct.row_id));
-    let treeHtml = '';
-    if (linked.length === 0) {
-      treeHtml = `<div class="tree__empty">no linked assets</div>`;
-    } else {
-      treeHtml = linked.map(a => {
-        linkedIds.add(a.row_id);
-        const ac = cleanEntry(a);
-        const val = getEntryValue(ac, templates);
-        return `<div class="tree__item">
-          <span class="tree__name">${esc(ac.title ?? ac.name)}</span>
-          ${ac.subtype ? `<span class="tree__type">${esc(ac.subtype)}</span>` : ''}
-          ${val ? `<span class="tree__value">${esc(fmtVal(val, ac.currency))}</span>` : ''}
-        </div>`;
-      }).join('');
-    }
-
-    accountsHtml += `<div class="account-block">
-      <div class="account-row">
-        <span class="account-row__num">${acct.row_id}.</span>
-        <span class="account-row__name">${title}</span>
-        ${meta ? `<span class="account-row__meta">${esc(meta)}</span>` : ''}
-      </div>
-      <div class="tree">${treeHtml}</div>
-    </div>`;
-  }
-
-  const unlinked = assets.filter(a => !linkedIds.has(a.row_id));
-  let unlinkedHtml = '';
-  if (unlinked.length > 0) {
-    const items = unlinked.map((a, i) => {
-      const ac = cleanEntry(a);
-      const val = getEntryValue(ac, templates);
-      return `<li class="unlinked-list__item">
-        <span class="unlinked-list__num">${i + 1}.</span>
-        <span class="unlinked-list__name">${esc(ac.title ?? ac.name)}</span>
-        ${ac.subtype ? `<span class="unlinked-list__type">${esc(ac.subtype)}</span>` : ''}
-        ${val ? `<span class="unlinked-list__val">${esc(fmtVal(val, ac.currency))}</span>` : ''}
-      </li>`;
-    }).join('');
-    unlinkedHtml = `<hr class="unlinked-divider"/><div class="unlinked-label">Unlinked Assets</div><ul class="unlinked-list">${items}</ul>`;
-  }
-
-  const { subtotalStr } = computeSubtotals(assets, templates);
-  return `<div class="section">
-    <div class="section__header">
-      <span class="section__title">Accounts &amp; Assets</span>
-      <span class="count-badge">${accounts.length} account${accounts.length !== 1 ? 's' : ''} · ${assets.length} asset${assets.length !== 1 ? 's' : ''}</span>
-      ${subtotalStr ? `<span class="section__subtotal">${esc(subtotalStr)}</span>` : ''}
-    </div>
-    ${accountsHtml}${unlinkedHtml}
-  </div>`;
-}
-
-function buildOverviewSimpleSection(type, entries) {
-  if (entries.length === 0) return '';
-  const label = TYPE_LABELS[type] ?? type;
-
-  const items = entries.map(e => {
-    const c = cleanEntry(e);
-    const title = esc(c.title ?? c.name ?? '(untitled)');
-    let meta = '';
-    if (type === 'license') {
-      const exp = c.expiry_date;
-      if (exp) meta = `<span class="ov-list__meta">&nbsp;— expires ${esc(exp)}</span>`;
-    } else if (type === 'insurance') {
-      const parts = [c.provider, c.expiry_date || c.maturity_date ? `expires ${c.expiry_date || c.maturity_date}` : ''].filter(Boolean);
-      if (parts.length) meta = `<span class="ov-list__meta">&nbsp;— ${esc(parts.join(' · '))}</span>`;
-    }
-    return `<li class="ov-list__item"><span class="ov-list__num">${e.row_id}.</span><span class="ov-list__name">${title}</span>${meta}</li>`;
-  }).join('');
-
-  return `<div class="section">
-    <div class="section__header">
-      <span class="section__title">${esc(label)}</span>
-      <span class="count-badge">${entries.length} entr${entries.length !== 1 ? 'ies' : 'y'}</span>
-    </div>
-    <ul class="ov-list">${items}</ul>
   </div>`;
 }
 
@@ -368,8 +261,9 @@ function buildFieldGrid(fields) {
   }).join('');
 }
 
-function buildFullAccountsAssets(accounts, assets, templates, { overview = false } = {}) {
+function buildFullAccountsAssets(accounts, assets, templates, { fieldVisibility } = {}) {
   if (accounts.length === 0 && assets.length === 0) return '';
+  const fv = fieldVisibility || {};
 
   const acctFields = parseFields(findTemplate(templates, 'account')?.fields);
   const assetFieldsDef = parseFields(findTemplate(templates, 'asset')?.fields);
@@ -380,7 +274,7 @@ function buildFullAccountsAssets(accounts, assets, templates, { overview = false
     const c = cleanEntry(acct);
     const title = esc(c.title ?? c.name ?? '(untitled)');
     const tags = [c.subtype, c.currency].filter(Boolean).map(t => `<span class="tag">${esc(t)}</span>`).join('');
-    const fields = getExtraFields(c, acctFields, { overview });
+    const fields = getExtraFields(c, acctFields, { fieldVisibility: fv });
     const fieldGridHtml = fields.length > 0 ? `<div class="field-grid">${buildFieldGrid(fields)}</div>` : '';
 
     const linked = assets.filter(a => String(a.linked_account_id) === String(acct.row_id));
@@ -389,8 +283,9 @@ function buildFullAccountsAssets(accounts, assets, templates, { overview = false
       const assetRows = linked.map(a => {
         linkedIds.add(a.row_id);
         const ac = cleanEntry(a);
-        const val = overview ? null : getEntryValue(ac, templates);
-        const aFields = getExtraFields(ac, assetFieldsDef, { overview });
+        const showValue = fv.monetary !== false;
+        const val = showValue ? getEntryValue(ac, templates) : null;
+        const aFields = getExtraFields(ac, assetFieldsDef, { fieldVisibility: fv });
         const chips = aFields.map(f => {
           const cls = f.isSecret ? 'chip__value--mono' : (f.isCurrency ? 'chip__value--currency' : 'chip__value');
           return `<span class="chip"><span class="chip__label">${esc(f.label)}:</span><span class="${cls}">${esc(f.value)}</span></span>`;
@@ -422,7 +317,7 @@ function buildFullAccountsAssets(accounts, assets, templates, { overview = false
     const cards = unlinked.map((a, i) => {
       const ac = cleanEntry(a);
       const tags = [ac.subtype, ac.currency].filter(Boolean).map(t => `<span class="tag">${esc(t)}</span>`).join('');
-      const fields = getExtraFields(ac, assetFieldsDef, { overview });
+      const fields = getExtraFields(ac, assetFieldsDef, { fieldVisibility: fv });
       const fieldGridHtml = fields.length > 0 ? `<div class="field-grid">${buildFieldGrid(fields)}</div>` : '';
       return `<div class="acct-card" style="border-left-color:var(--text-faint)">
         <div class="acct-card__head">
@@ -435,7 +330,7 @@ function buildFullAccountsAssets(accounts, assets, templates, { overview = false
     unlinkedHtml = `<div class="unlinked-panel"><div class="unlinked-label">Unlinked Assets</div>${cards}</div>`;
   }
 
-  const subtotalHtml = overview ? '' : (() => {
+  const subtotalHtml = fv.monetary === false ? '' : (() => {
     const { subtotalStr } = computeSubtotals(assets, templates);
     return subtotalStr ? `<span class="section__subtotal">${esc(subtotalStr)}</span>` : '';
   })();
@@ -449,7 +344,7 @@ function buildFullAccountsAssets(accounts, assets, templates, { overview = false
   </div>`;
 }
 
-function buildFullEntryCards(type, entries, templates, { overview = false } = {}) {
+function buildFullEntryCards(type, entries, templates, { fieldVisibility } = {}) {
   if (entries.length === 0) return '';
   const label = TYPE_LABELS[type] ?? type;
   const fieldsDef = parseFields(findTemplate(templates, type)?.fields);
@@ -458,7 +353,7 @@ function buildFullEntryCards(type, entries, templates, { overview = false } = {}
     const c = cleanEntry(e);
     const title = esc(c.title ?? c.name ?? '(untitled)');
     const tag = c.vendor || c.provider || c.institution || '';
-    const fields = getExtraFields(c, fieldsDef, { overview });
+    const fields = getExtraFields(c, fieldsDef, { fieldVisibility });
     const fieldsHtml = fields.map(f => {
       const cls = f.isSecret ? 'mono' : '';
       return `<span class="entry-card__label">${esc(f.label)}</span><span class="entry-card__value ${cls}">${esc(f.value)}</span>`;
@@ -489,40 +384,33 @@ function buildFullEntryCards(type, entries, templates, { overview = false } = {}
  * Export vault data to PDF via browser print.
  * @param {Object} grouped - Output of assignRowIdsAndRemap()
  * @param {Object[]} templates - Template objects from IndexedDB
- * @param {'overview'|'full'} mode
  * @param {string} dateSuffix - e.g. "2026-03-20"
  * @param {Object} [rateMap] - Currency code → exchange_rate_to_base (for net worth tiles)
  * @param {string} [baseCurrency] - Base currency code (default 'GBP')
+ * @param {{ secrets?: boolean, monetary?: boolean, rates?: boolean, netWorth?: boolean }} [fieldVisibility]
  */
-export async function exportPdf(grouped, templates, mode, dateSuffix, rateMap, baseCurrency = 'GBP') {
+export async function exportPdf(grouped, templates, dateSuffix, rateMap, baseCurrency = 'GBP', fieldVisibility) {
   _templateFieldsCache = {}; // reset per export
+  const fv = fieldVisibility || {};
   const accounts = grouped.account ?? [];
   const assets = grouped.asset ?? [];
   const standardTypes = ['password', 'license', 'insurance', 'custom'];
 
   let body = '';
 
-  // Net worth tiles (if rate data available)
-  if (rateMap && assets.length > 0) {
+  // Net worth tiles (if rate data available and not hidden)
+  if (fv.netWorth !== false && rateMap && assets.length > 0) {
     body += buildNetWorthTiles(assets, rateMap, baseCurrency, templates);
   }
 
-  if (mode === 'overview') {
-    // Overview uses the same card styling as full, but strips monetary/secret fields
-    body += buildFullAccountsAssets(accounts, assets, templates, { overview: true });
-    for (const type of standardTypes) {
-      body += buildFullEntryCards(type, grouped[type] ?? [], templates, { overview: true });
-    }
-  } else {
-    body += buildFullAccountsAssets(accounts, assets, templates);
-    for (const type of standardTypes) {
-      body += buildFullEntryCards(type, grouped[type] ?? [], templates);
-    }
+  body += buildFullAccountsAssets(accounts, assets, templates, { fieldVisibility: fv });
+  for (const type of standardTypes) {
+    body += buildFullEntryCards(type, grouped[type] ?? [], templates, { fieldVisibility: fv });
   }
 
-  const title = `citadel-export-${dateSuffix}-${mode}`;
+  const title = `citadel-export-${dateSuffix}`;
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${title}</title><style>${getCSS()}</style></head>
-<body><div class="page">${buildHeader(mode, dateSuffix)}${body}</div></body></html>`;
+<body><div class="page">${buildHeader(dateSuffix, fv)}${body}</div></body></html>`;
 
   // Render in hidden iframe and print
   const iframe = document.createElement('iframe');
