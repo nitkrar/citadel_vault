@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect, useCallback, useMemo } 
 import api from '../api/client';
 import { apiData } from '../lib/checks';
 import { entryStore } from '../lib/entryStore';
+import { AAD_VAULT_ENTRY } from '../lib/crypto';
 import { useEncryption } from './EncryptionContext';
 
 const VaultDataContext = createContext();
@@ -11,7 +12,7 @@ export function useVaultEntries() {
 }
 
 export function VaultDataProvider({ children }) {
-  const { isUnlocked, encrypt, decrypt } = useEncryption();
+  const { isUnlocked, encrypt, decryptWithFallback } = useEncryption();
 
   const [entries, setEntries] = useState([]);
   const [decryptedCache, setDecryptedCache] = useState({});
@@ -30,7 +31,7 @@ export function VaultDataProvider({ children }) {
       const raw = await entryStore.getAll();
       const cache = {};
       for (const entry of raw) {
-        try { cache[entry.id] = await decrypt(entry.encrypted_data); } catch { cache[entry.id] = null; }
+        try { cache[entry.id] = await decryptWithFallback(entry.encrypted_data, AAD_VAULT_ENTRY); } catch { cache[entry.id] = null; }
       }
       setEntries(raw);
       setDecryptedCache(cache);
@@ -39,7 +40,7 @@ export function VaultDataProvider({ children }) {
     } finally {
       setLoading(false);
     }
-  }, [isUnlocked, decrypt]);
+  }, [isUnlocked, decryptWithFallback]);
 
   useEffect(() => { loadEntries(); }, [loadEntries]);
 
@@ -51,11 +52,11 @@ export function VaultDataProvider({ children }) {
     await entryStore.putAll(raw);
     const cache = {};
     for (const entry of raw) {
-      try { cache[entry.id] = await decrypt(entry.encrypted_data); } catch { cache[entry.id] = null; }
+      try { cache[entry.id] = await decryptWithFallback(entry.encrypted_data, AAD_VAULT_ENTRY); } catch { cache[entry.id] = null; }
     }
     setEntries(raw);
     setDecryptedCache(cache);
-  }, [isUnlocked, decrypt]);
+  }, [isUnlocked, decryptWithFallback]);
 
   // ── Cross-tab sync: refetch when tab regains focus ────────────
   useEffect(() => {
@@ -86,7 +87,7 @@ export function VaultDataProvider({ children }) {
 
   // ── CRUD: Create ──────────────────────────────────────────────
   const createEntry = useCallback(async (entryType, templateId, formData) => {
-    const blob = await encrypt(formData);
+    const blob = await encrypt(formData, AAD_VAULT_ENTRY);
     const { data: resp } = await api.post('/vault.php', {
       entry_type: entryType,
       template_id: templateId,
@@ -141,7 +142,7 @@ export function VaultDataProvider({ children }) {
 
   // ── CRUD: Update local (for inline edits, Plaid refresh) ─────
   const updateEntryLocal = useCallback(async (entryId, newDecryptedData) => {
-    const blob = await encrypt(newDecryptedData);
+    const blob = await encrypt(newDecryptedData, AAD_VAULT_ENTRY);
     await api.put(`/vault.php?id=${entryId}`, { encrypted_data: blob });
     setEntries(prev => {
       const existing = prev.find(e => e.id === entryId);

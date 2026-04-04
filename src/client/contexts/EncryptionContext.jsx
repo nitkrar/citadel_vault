@@ -312,14 +312,19 @@ export function EncryptionProvider({ children, user }) {
   // ------------------------------------------------------------------
   // Encrypt / Decrypt convenience wrappers
   // ------------------------------------------------------------------
-  const encrypt = useCallback(async (data) => {
+  const encrypt = useCallback(async (data, aad) => {
     if (!crypto.isUnlocked()) throw new Error('Vault is locked.');
-    return crypto.encryptEntry(data, crypto._getDekForContext());
+    return crypto.encryptEntry(data, crypto._getDekForContext(), aad);
   }, []);
 
-  const decrypt = useCallback(async (blob) => {
+  const decrypt = useCallback(async (blob, aad) => {
     if (!crypto.isUnlocked()) throw new Error('Vault is locked.');
-    return crypto.decryptEntry(blob, crypto._getDekForContext());
+    return crypto.decryptEntry(blob, crypto._getDekForContext(), aad);
+  }, []);
+
+  const decryptWithFallback = useCallback(async (blob, aad) => {
+    if (!crypto.isUnlocked()) throw new Error('Vault is locked.');
+    return crypto.decryptEntryWithFallback(blob, crypto._getDekForContext(), aad);
   }, []);
 
   // ------------------------------------------------------------------
@@ -427,6 +432,7 @@ export function EncryptionProvider({ children, user }) {
     regenerateRecoveryKey,
     encrypt,
     decrypt,
+    decryptWithFallback,
     skipVault,
     promptVault,
     saveSession,

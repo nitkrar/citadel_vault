@@ -13,6 +13,12 @@
 export const PBKDF2_ITERATIONS = 100000;
 export const PBKDF2_ITERATIONS_RECOMMENDED = 600000;
 
+// AAD purpose strings — bind ciphertext to its context, preventing cross-purpose swaps
+export const AAD_VAULT_ENTRY = 'citadel.vault.v1';
+export const AAD_SNAPSHOT_META = 'citadel.snapshot.meta.v1';
+export const AAD_SNAPSHOT_ENTRY = 'citadel.snapshot.entry.v1';
+export const AAD_RECOVERY_KEY = 'citadel.recovery.v1';
+
 /**
  * Resolve the user's current KDF iteration count from preferences.
  * Single source of truth — all callers use this instead of manual parseInt + fallback.
@@ -142,15 +148,18 @@ export async function unwrapDek(wrappedBase64, wrappingKey) {
 /**
  * Encrypt plaintext string with AES-256-GCM.
  * Output format: base64(12-byte-IV + ciphertext+tag)
+ *
+ * @param {string} plaintext
+ * @param {CryptoKey} key
+ * @param {string} [aad] - Additional Authenticated Data (purpose string, e.g. "citadel.vault.v1").
+ *   Binds ciphertext to its context — decrypt with a different AAD fails.
  */
-export async function encrypt(plaintext, key) {
+export async function encrypt(plaintext, key, aad) {
     const encoder = new TextEncoder();
     const iv = crypto.getRandomValues(new Uint8Array(12));
-    const ciphertext = await crypto.subtle.encrypt(
-        { name: 'AES-GCM', iv },
-        key,
-        encoder.encode(plaintext)
-    );
+    const algo = { name: 'AES-GCM', iv };
+    if (aad) algo.additionalData = encoder.encode(aad);
+    const ciphertext = await crypto.subtle.encrypt(algo, key, encoder.encode(plaintext));
     // Concatenate IV + ciphertext (which includes auth tag)
     const combined = new Uint8Array(iv.length + ciphertext.byteLength);
     combined.set(iv);
@@ -160,17 +169,19 @@ export async function encrypt(plaintext, key) {
 
 /**
  * Decrypt a blob back to plaintext. Returns null on failure.
+ *
+ * @param {string} blob - base64(IV + ciphertext+tag)
+ * @param {CryptoKey} key
+ * @param {string} [aad] - Must match the AAD used during encryption.
  */
-export async function decrypt(blob, key) {
+export async function decrypt(blob, key, aad) {
     try {
         const data = fromBase64(blob);
         const iv = data.slice(0, 12);
         const ciphertext = data.slice(12);
-        const plainBuffer = await crypto.subtle.decrypt(
-            { name: 'AES-GCM', iv },
-            key,
-            ciphertext
-        );
+        const algo = { name: 'AES-GCM', iv };
+        if (aad) algo.additionalData = new TextEncoder().encode(aad);
+        const plainBuffer = await crypto.subtle.decrypt(algo, key, ciphertext);
         return new TextDecoder().decode(plainBuffer);
     } catch {
         return null;
@@ -180,24 +191,44 @@ export async function decrypt(blob, key) {
 /**
  * Encrypt a JSON object. Serializes to JSON, then encrypts.
  */
-export async function encryptEntry(obj, key) {
+export async function encryptEntry(obj, key, aad) {
     if (obj === null || obj === undefined) {
         throw new Error('Cannot encrypt null or undefined data');
     }
-    return encrypt(JSON.stringify(obj), key);
+    return encrypt(JSON.stringify(obj), key, aad);
 }
 
 /**
  * Decrypt a blob back to a parsed JSON object. Returns null on failure.
  */
-export async function decryptEntry(blob, key) {
-    const plaintext = await decrypt(blob, key);
+export async function decryptEntry(blob, key, aad) {
+    const plaintext = await decrypt(blob, key, aad);
     if (plaintext === null) return null;
     try {
         return JSON.parse(plaintext);
     } catch {
         return null;
     }
+}
+
+/**
+ * Decrypt with AAD, falling back to no-AAD for legacy blobs.
+ * Returns null if both attempts fail.
+ */
+export async function decryptWithFallback(blob, key, aad) {
+    const result = await decrypt(blob, key, aad);
+    if (result !== null) return result;
+    return decrypt(blob, key);
+}
+
+/**
+ * Decrypt a JSON blob with AAD, falling back to no-AAD for legacy blobs.
+ * Returns null if both attempts fail.
+ */
+export async function decryptEntryWithFallback(blob, key, aad) {
+    const result = await decryptEntry(blob, key, aad);
+    if (result !== null) return result;
+    return decryptEntry(blob, key);
 }
 
 // ── RSA / Sharing ───────────────────────────────────────────────────────
@@ -240,15 +271,17 @@ export async function importPublicKey(base64Spki) {
     );
 }
 
+const AAD_RSA_PRIVATE = 'citadel.rsa.private.v1';
+
 /**
  * Encrypt RSA private key with the DEK for server storage.
- * Export PKCS8, then AES-GCM encrypt.
+ * Export PKCS8, then AES-GCM encrypt with AAD.
  */
 export async function encryptPrivateKey(privateKey, dek) {
     const pkcs8 = await crypto.subtle.exportKey('pkcs8', privateKey);
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const ciphertext = await crypto.subtle.encrypt(
-        { name: 'AES-GCM', iv },
+        { name: 'AES-GCM', iv, additionalData: new TextEncoder().encode(AAD_RSA_PRIVATE) },
         dek,
         pkcs8
     );
@@ -260,24 +293,34 @@ export async function encryptPrivateKey(privateKey, dek) {
 
 /**
  * Decrypt RSA private key from server blob using DEK. Returns null on failure.
+ * Tries with AAD first, falls back to no-AAD for legacy blobs.
  */
 export async function decryptPrivateKey(blob, dek) {
+    const data = fromBase64(blob);
+    const iv = data.slice(0, 12);
+    const ciphertext = data.slice(12);
+
+    const importKey = (pkcs8) => crypto.subtle.importKey(
+        'pkcs8', pkcs8,
+        { name: 'RSA-OAEP', hash: 'SHA-256' },
+        true, ['decrypt', 'unwrapKey']
+    );
+
+    // Try with AAD first (new format)
     try {
-        const data = fromBase64(blob);
-        const iv = data.slice(0, 12);
-        const ciphertext = data.slice(12);
         const pkcs8 = await crypto.subtle.decrypt(
-            { name: 'AES-GCM', iv },
-            dek,
-            ciphertext
+            { name: 'AES-GCM', iv, additionalData: new TextEncoder().encode(AAD_RSA_PRIVATE) },
+            dek, ciphertext
         );
-        return crypto.subtle.importKey(
-            'pkcs8',
-            pkcs8,
-            { name: 'RSA-OAEP', hash: 'SHA-256' },
-            true,
-            ['decrypt', 'unwrapKey']
+        return await importKey(pkcs8);
+    } catch { /* fall through to legacy */ }
+
+    // Fallback: no AAD (legacy blobs)
+    try {
+        const pkcs8 = await crypto.subtle.decrypt(
+            { name: 'AES-GCM', iv }, dek, ciphertext
         );
+        return await importKey(pkcs8);
     } catch {
         return null;
     }
@@ -409,7 +452,7 @@ export async function setupVault(vaultKey) {
     const encryptedDekRecovery = await wrapDek(dek, recoveryWrappingKey);
 
     // 4. Encrypt recovery key with DEK (for "View Recovery Key" feature)
-    const recoveryKeyEncrypted = await encrypt(recoveryKey, dek);
+    const recoveryKeyEncrypted = await encrypt(recoveryKey, dek, AAD_RECOVERY_KEY);
 
     // 5. Generate RSA key pair
     const keyPair = await generateKeyPair();
@@ -528,7 +571,7 @@ export async function recoverWithRecoveryKey(recoveryBlobs, recoveryKey, newVaul
     const newEncryptedDekRecovery = await wrapDek(dek, newRecoveryWrappingKey);
 
     // Encrypt new recovery key with DEK (for viewing later)
-    const newRecoveryKeyEncrypted = await encrypt(newRecoveryKey, dek);
+    const newRecoveryKeyEncrypted = await encrypt(newRecoveryKey, dek, AAD_RECOVERY_KEY);
 
     return {
         vault_key_salt: newVaultSalt,
@@ -560,7 +603,7 @@ export async function verifyRecoveryKeyAndRotate(recoveryBlobs, recoveryKey, rec
     const newRecoverySalt = generateSalt();
     const newRecoveryWrappingKey = await deriveWrappingKey(newRecoveryKey, newRecoverySalt);
     const newEncryptedDekRecovery = await wrapDek(dek, newRecoveryWrappingKey);
-    const newRecoveryKeyEncrypted = await encrypt(newRecoveryKey, dek);
+    const newRecoveryKeyEncrypted = await encrypt(newRecoveryKey, dek, AAD_RECOVERY_KEY);
 
     return {
         newRecoveryKey,
@@ -584,7 +627,7 @@ export async function regenerateRecoveryKey() {
     const newSalt = generateSalt();
     const wrappingKey = await deriveWrappingKey(newRecoveryKey, newSalt);
     const encryptedDekRecovery = await wrapDek(_dek, wrappingKey);
-    const recoveryKeyEncrypted = await encrypt(newRecoveryKey, _dek);
+    const recoveryKeyEncrypted = await encrypt(newRecoveryKey, _dek, AAD_RECOVERY_KEY);
 
     return {
         recoveryKey: newRecoveryKey,
@@ -597,8 +640,9 @@ export async function regenerateRecoveryKey() {
 /**
  * View the recovery key (requires vault to be unlocked).
  * Decrypts the recovery_key_encrypted blob stored on server.
+ * Falls back to no-AAD for legacy blobs.
  */
 export async function viewRecoveryKey(recoveryKeyEncryptedBlob) {
     if (!_dek) throw new Error('Vault must be unlocked to view recovery key');
-    return decrypt(recoveryKeyEncryptedBlob, _dek);
+    return decryptWithFallback(recoveryKeyEncryptedBlob, _dek, AAD_RECOVERY_KEY);
 }

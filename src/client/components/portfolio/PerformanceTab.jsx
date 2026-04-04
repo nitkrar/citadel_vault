@@ -16,6 +16,7 @@ import {
   CHART_COLORS, NET_WORTH_COLOR, POSITIVE_COLOR, NEGATIVE_COLOR,
   getBreakdownColor, abbreviateNumber,
 } from '../../lib/chartColors';
+import { AAD_SNAPSHOT_ENTRY } from '../../lib/crypto';
 
 /**
  * Cross-chart hover sync plugin (instance-level, not global).
@@ -130,7 +131,7 @@ export default function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies,
       for (const s of raw) {
         if (!s.entries || s.entries.length === 0) continue;
         const entryBlobs = s.entries.map(e => e.encrypted_data);
-        const decryptedEntries = await workerDispatcher.decryptBatch(entryBlobs, null);
+        const decryptedEntries = await workerDispatcher.decryptBatch(entryBlobs, null, AAD_SNAPSHOT_ENTRY);
         const entries = [];
         for (let j = 0; j < decryptedEntries.length; j++) {
           if (decryptedEntries[j]) {
@@ -172,7 +173,7 @@ export default function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies,
               const { entry_id, ...blob } = entries[j];
               return blob;
             });
-            const encryptedBlobs = await workerDispatcher.encryptBatch(blobsToEncrypt, null);
+            const encryptedBlobs = await workerDispatcher.encryptBatch(blobsToEncrypt, null, AAD_SNAPSHOT_ENTRY);
             const updatePayload = entriesToUpdate.map((j, idx) => ({
               entry_id: entries[j].entry_id,
               encrypted_data: encryptedBlobs[idx],

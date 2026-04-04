@@ -141,7 +141,7 @@ function InlineNumberField({ label, value, currency, isEditing, editValue, savin
 
 
 export default function VaultPage() {
-  const { isUnlocked, encrypt, decrypt } = useEncryption();
+  const { isUnlocked, encrypt, decryptWithFallback } = useEncryption();
   const { hideAmounts } = useHideAmounts();
   const { entries, decryptedCache, setDecryptedCache, loading, refetch, createEntry, updateEntry, deleteEntry, updateEntryLocal } = useVaultEntries();
 
@@ -619,7 +619,7 @@ export default function VaultPage() {
 
     setSaving(true);
     try {
-      const blob = await encrypt(form);
+      const blob = await encrypt(form, cryptoLib.AAD_VAULT_ENTRY);
       const savedType = formType;
       const updated = await updateEntry(editEntry, blob, { ...form }, {
         allowTemplateChange: true,
@@ -697,7 +697,7 @@ export default function VaultPage() {
       const decrypted = [];
       for (const entry of raw) {
         try {
-          const d = await decrypt(entry.encrypted_data);
+          const d = await decryptWithFallback(entry.encrypted_data, cryptoLib.AAD_VAULT_ENTRY);
           decrypted.push({ ...entry, _decrypted: d });
         } catch {
           decrypted.push({ ...entry, _decrypted: null });
