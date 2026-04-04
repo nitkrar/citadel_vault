@@ -1464,7 +1464,7 @@ html.dark .modal-overlay {
 
 .mobile-native-header-title {
   flex: 1;
-  text-align: center;
+  text-align: left;
   font-size: 17px;
   font-weight: 600;
   color: var(--text);
