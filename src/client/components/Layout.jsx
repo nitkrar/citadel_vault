@@ -42,6 +42,7 @@ import {
   ChevronLeft,
   ChevronRight,
   MoreHorizontal,
+  Send,
   Smartphone,
   Monitor,
   DollarSign,
@@ -85,6 +86,11 @@ function MobileHeader({ routeMeta, navigate, location, isUnlocked, vaultKeyExist
         {location.pathname === '/vault' && (
           <button className="mobile-native-header-btn" onClick={() => window.dispatchEvent(new CustomEvent('vault:add'))} aria-label="Add entry">
             <Plus size={22} />
+          </button>
+        )}
+        {location.pathname === '/sharing' && (
+          <button className="mobile-native-header-btn" onClick={() => window.dispatchEvent(new CustomEvent('sharing:add'))} aria-label="Share entry">
+            <Send size={20} />
           </button>
         )}
         {['/vault', '/portfolio'].includes(location.pathname) && (

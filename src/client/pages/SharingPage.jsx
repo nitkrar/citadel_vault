@@ -9,6 +9,7 @@ import SortTh from '../components/SortableTh';
 import FieldDisplay from '../components/FieldDisplay';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { useVaultEntries } from '../contexts/VaultDataContext';
+import useLayoutMode from '../hooks/useLayoutMode';
 import * as cryptoLib from '../lib/crypto';
 import useVaultData from '../hooks/useVaultData';
 import usePortfolioData from '../hooks/usePortfolioData';
@@ -87,9 +88,17 @@ export default function SharingPage() {
   const { isUnlocked, decryptWithFallback } = useEncryption();
   const { entries, decryptedCache } = useVaultEntries();
   const { portfolio, displayCurrency, baseCurrency, currencies } = usePortfolioData();
+  const { isMobile } = useLayoutMode();
   const [tab, setTab] = useState('with-me');
   const [showShareModal, setShowShareModal] = useState(false);
   const [viewItem, setViewItem] = useState(null);
+
+  // Mobile header event
+  useEffect(() => {
+    const handleShareAdd = () => openShareModal();
+    window.addEventListener('sharing:add', handleShareAdd);
+    return () => window.removeEventListener('sharing:add', handleShareAdd);
+  }, []);
 
   // Sort state — Shared By Me
   const [sentSortKey, setSentSortKey] = useState('created_at');
@@ -436,15 +445,25 @@ export default function SharingPage() {
 
   return (
     <div className="page-content">
-      <div className="page-header">
-        <div><h1 className="page-title">Sharing</h1><p className="page-subtitle">Share entries securely with other users</p></div>
-        <button className="btn btn-primary" onClick={openShareModal}><Send size={16} /> Share Entry</button>
-      </div>
-
-      <div className="flex gap-2 mb-4">
-        <button className={`btn btn-sm ${tab === 'with-me' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setTab('with-me')}><Users size={14} /> Shared With Me</button>
-        <button className={`btn btn-sm ${tab === 'by-me' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setTab('by-me')}><Share2 size={14} /> Shared By Me</button>
-      </div>
+      {isMobile ? (
+        <div className="flex gap-2 mb-4">
+          <button className={`btn btn-sm ${tab === 'with-me' ? 'btn-primary' : 'btn-ghost'}`}
+            onClick={() => setTab('with-me')}><Users size={14} /> With Me</button>
+          <button className={`btn btn-sm ${tab === 'by-me' ? 'btn-primary' : 'btn-ghost'}`}
+            onClick={() => setTab('by-me')}><Share2 size={14} /> By Me</button>
+        </div>
+      ) : (
+        <>
+          <div className="page-header">
+            <div><h1 className="page-title">Sharing</h1><p className="page-subtitle">Share entries securely with other users</p></div>
+            <button className="btn btn-primary" onClick={openShareModal}><Send size={16} /> Share Entry</button>
+          </div>
+          <div className="flex gap-2 mb-4">
+            <button className={`btn btn-sm ${tab === 'with-me' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setTab('with-me')}><Users size={14} /> Shared With Me</button>
+            <button className={`btn btn-sm ${tab === 'by-me' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setTab('by-me')}><Share2 size={14} /> Shared By Me</button>
+          </div>
+        </>
+      )}
 
       {/* ── Shared With Me table ──────────────────────────────────── */}
       {tab === 'with-me' && (

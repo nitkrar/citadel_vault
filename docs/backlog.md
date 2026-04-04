@@ -44,9 +44,9 @@ Full audit report: `docs/SECURITY_AUDIT_2026-03-27.md`. All critical (C1-C7) and
 - **Mobile layout shell** — Bottom tab bar, native header, More sheet, layout toggle (auto/mobile/classic). Files: `useLayoutMode.js`, `Layout.jsx`, `styles.css`.
 - **VaultPage mobile** — Compact tabs row (Accounts/Assets + More dropdown), overflow menu for actions, currency picker via header icon.
 - **PortfolioPage mobile** — Compact tabs row with overflow menu (Refresh All + Snapshot), currency picker via header icon, PerformanceTab toolbar compacted (Breakdown + Val/% visible, filters/YoY/tooltip/rate settings in overflow).
+- **SharingPage mobile** — Compact tabs row (With Me / By Me) with Share Entry in overflow menu, tables scroll horizontally.
 
 ### Remaining (Phase 0)
-- **SharingPage mobile** — Review toolbar compactness, hide redundant elements.
 - **DashboardPage mobile** — Review layout density, quick actions grid sizing.
 - **Sub-pages mobile polish** — SecurityPage, ProfilePage, ImportExportPage, TemplatesPage — minor tweaks for mobile compactness.
 - **Live with PWA 2-4 weeks** — Decision gate: does improved PWA satisfy mobile needs? If not → Capacitor.
