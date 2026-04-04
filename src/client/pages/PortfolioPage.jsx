@@ -499,7 +499,8 @@ function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies, countries, dis
   const [loadingRates, setLoadingRates] = useState(false);
   const [selectedSnapshot, setSelectedSnapshot] = useState(null);
   const [expandedTypes, setExpandedTypes] = useState({});
-  const [groupFilter, setGroupFilter] = useState('all'); // 'all' | specific group key
+  const [filterType, setFilterType] = useState('all');       // asset class filter
+  const [filterCountry, setFilterCountry] = useState('all'); // country filter
   const [breakdown, setBreakdown] = useState(() => sessionStorage.getItem('pv_portfolio_breakdown') || 'type');
   const [dateRange, setDateRange] = useState('all'); // 'all' | '3m' | '6m' | '1y' | 'ytd'
   const [showPercent, setShowPercent] = useState(false);
@@ -666,10 +667,83 @@ function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies, countries, dis
     return map;
   }, [filteredSnapshots, rateMode, historicalRatesCache, currentRateMap, displayCurrency]);
 
-  // Collect all unique group keys with labels from snapshotSummaryMap
+  // Collect all unique asset class keys across all snapshots (for filter dropdown)
+  const allTypes = useMemo(() => {
+    const types = new Map();
+    for (const summary of snapshotSummaryMap.values()) {
+      for (const [key, val] of Object.entries(summary.by_type || {})) {
+        if (!types.has(key)) types.set(key, val.label || key);
+      }
+    }
+    return types;
+  }, [snapshotSummaryMap]);
+
+  // Collect all unique country keys across all snapshots (for filter dropdown)
+  const allCountries = useMemo(() => {
+    const ctries = new Map();
+    for (const summary of snapshotSummaryMap.values()) {
+      for (const [key, val] of Object.entries(summary.by_country || {})) {
+        if (!ctries.has(key)) ctries.set(key, countryMap[key] || val.label || key);
+      }
+    }
+    return ctries;
+  }, [snapshotSummaryMap, countryMap]);
+
+  // Auto-reset filters when selected option is no longer available
+  useEffect(() => {
+    if (filterType !== 'all' && !allTypes.has(filterType)) setFilterType('all');
+  }, [allTypes, filterType]);
+  useEffect(() => {
+    if (filterCountry !== 'all' && !allCountries.has(filterCountry)) setFilterCountry('all');
+  }, [allCountries, filterCountry]);
+
+  // Re-aggregate snapshots with independent filters applied
+  const filteredSummaryMap = useMemo(() => {
+    if (filterType === 'all' && filterCountry === 'all') return snapshotSummaryMap;
+    const map = new Map();
+    for (const [key, summary] of snapshotSummaryMap) {
+      const filtered = (summary.entries || []).filter(e => {
+        if (filterType !== 'all') {
+          const typeKey = (e.subtype || e.entry_type || e.template_name || 'other').toLowerCase();
+          if (typeKey !== filterType) return false;
+        }
+        if (filterCountry !== 'all') {
+          if ((e.country || 'Unknown') !== filterCountry) return false;
+        }
+        return true;
+      });
+      if (filtered.length === 0) {
+        map.set(key, { date: summary.date, total_assets: 0, total_liabilities: 0, net_worth: 0, asset_count: 0, by_type: {}, by_currency: {}, by_country: {}, by_account: {}, entries: [] });
+      } else {
+        let totalAssets = 0, totalLiabilities = 0;
+        const byType = {}, byCurrency = {}, byCountry = {}, byAccount = {};
+        for (const e of filtered) {
+          const v = e.displayValue;
+          if (e.is_liability) totalLiabilities += Math.abs(v);
+          else totalAssets += v;
+          const tk = (e.subtype || e.entry_type || e.template_name || 'other').toLowerCase();
+          if (!byType[tk]) byType[tk] = { total: 0, count: 0, label: e.template_name || tk };
+          byType[tk].total += v; byType[tk].count++;
+          const curr = e.currency || displayCurrency;
+          if (!byCurrency[curr]) byCurrency[curr] = { total: 0, count: 0, label: curr };
+          byCurrency[curr].total += v; byCurrency[curr].count++;
+          const ctry = e.country || 'Unknown';
+          if (!byCountry[ctry]) byCountry[ctry] = { total: 0, count: 0, label: ctry };
+          byCountry[ctry].total += v; byCountry[ctry].count++;
+          const acctKey = e.linked_account?.id ? String(e.linked_account.id) : '_unlinked';
+          if (!byAccount[acctKey]) byAccount[acctKey] = { total: 0, count: 0, label: e.linked_account?.name || 'Not linked to an account' };
+          byAccount[acctKey].total += v; byAccount[acctKey].count++;
+        }
+        map.set(key, { date: summary.date, total_assets: totalAssets, total_liabilities: totalLiabilities, net_worth: totalAssets - totalLiabilities, asset_count: filtered.length, by_type: byType, by_currency: byCurrency, by_country: byCountry, by_account: byAccount, entries: filtered });
+      }
+    }
+    return map;
+  }, [snapshotSummaryMap, filterType, filterCountry, displayCurrency]);
+
+  // Collect all unique group keys with labels from filteredSummaryMap
   const allGroupKeys = useMemo(() => {
     const keys = new Map();
-    for (const summary of snapshotSummaryMap.values()) {
+    for (const summary of filteredSummaryMap.values()) {
       let source;
       if (breakdown === 'type') source = summary.by_type;
       else if (breakdown === 'country') source = summary.by_country;
@@ -699,22 +773,22 @@ function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies, countries, dis
       }
     }
     return keys;
-  }, [snapshotSummaryMap, breakdown, symbolMap, countryMap]);
+  }, [filteredSummaryMap, breakdown, symbolMap, countryMap]);
 
   // Chart data: date + netWorth + byGroup totals per snapshot
   const chartData = useMemo(() =>
-    [...snapshotSummaryMap.values()].map(s => ({
+    [...filteredSummaryMap.values()].map(s => ({
       date: s.date,
       netWorth: s.net_worth,
       byGroup: Object.fromEntries(
         Object.entries(getGroupTotals(s, breakdown)).map(([k, v]) => [k, v.total])
       ),
     })).sort((a, b) => a.date.localeCompare(b.date)),
-  [snapshotSummaryMap, breakdown]);
+  [filteredSummaryMap, breakdown]);
 
   // Percentage data: each group as % of sum of absolute group totals
   const percentageData = useMemo(() =>
-    [...snapshotSummaryMap.values()].map(s => {
+    [...filteredSummaryMap.values()].map(s => {
       const groups = getGroupTotals(s, breakdown);
       const absSum = Object.values(groups).reduce((acc, g) => acc + Math.abs(g.total), 0);
       if (absSum === 0) return { date: s.date, groups: {} };
@@ -725,11 +799,11 @@ function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies, countries, dis
         ),
       };
     }).sort((a, b) => a.date.localeCompare(b.date)),
-  [snapshotSummaryMap, breakdown]);
+  [filteredSummaryMap, breakdown]);
 
   // Delta data: consecutive diffs per group — absolute + percentage (first snapshot omitted)
   const deltaData = useMemo(() => {
-    const data = [...snapshotSummaryMap.values()].sort((a, b) => a.date.localeCompare(b.date));
+    const data = [...filteredSummaryMap.values()].sort((a, b) => a.date.localeCompare(b.date));
     return data.slice(1).map((s, i) => {
       const prev = data[i];
       const delta = s.net_worth - prev.net_worth;
@@ -745,7 +819,7 @@ function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies, countries, dis
       }
       return { date: s.date, delta, pctDelta, byGroup };
     });
-  }, [snapshotSummaryMap, breakdown]);
+  }, [filteredSummaryMap, breakdown]);
 
   // ── Early returns (after all hooks) ──
 
@@ -767,16 +841,19 @@ function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies, countries, dis
   const textColor = getComputedStyle(document.documentElement).getPropertyValue('--color-text-muted').trim() || '#6b7280';
   const borderColor = getComputedStyle(document.documentElement).getPropertyValue('--color-border').trim() || '#e5e7eb';
 
-  // Determine which group keys to show in hero chart
-  const visibleGroupKeys = groupFilter === 'all'
-    ? [...allGroupKeys.keys()]
-    : allGroupKeys.has(groupFilter) ? [groupFilter] : [];
+  // All group keys are visible (filters already narrowed the data)
+  const visibleGroupKeys = [...allGroupKeys.keys()];
+  const hasActiveFilter = filterType !== 'all' || filterCountry !== 'all';
+  const filterDesc = [
+    filterType !== 'all' ? allTypes.get(filterType) : null,
+    filterCountry !== 'all' ? allCountries.get(filterCountry) : null,
+  ].filter(Boolean).join(' + ');
 
   // Hero line chart datasets (normal mode)
   const heroLineData = {
     labels: chartData.map(d => d.date),
     datasets: [
-      ...(groupFilter === 'all' ? [{
+      ...(!hasActiveFilter ? [{
         label: 'Net Worth',
         data: chartData.map(d => d.netWorth),
         borderColor: NET_WORTH_COLOR,
@@ -859,33 +936,32 @@ function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies, countries, dis
   // Delta bar chart — per-group bars when breakdown active, or single net worth bar
   const deltaChartData = {
     labels: deltaData.map(d => d.date),
-    datasets: visibleGroupKeys.length > 0 && groupFilter !== 'all'
-      // Single filtered group — one dataset
-      ? [{
-          label: allGroupKeys.get(groupFilter) || groupFilter,
+    datasets: visibleGroupKeys.length > 1
+      // Multiple groups — stacked bars per group
+      ? visibleGroupKeys.map((key, idx) => ({
+          label: allGroupKeys.get(key) || key,
           data: deltaData.map(d => {
-            const g = d.byGroup[groupFilter];
+            const g = d.byGroup[key];
             return showPercent ? (g?.pctDelta || 0) : (g?.delta || 0);
           }),
-          backgroundColor: deltaData.map(d => {
-            const v = showPercent ? (d.byGroup[groupFilter]?.pctDelta || 0) : (d.byGroup[groupFilter]?.delta || 0);
-            return v >= 0 ? POSITIVE_COLOR : NEGATIVE_COLOR;
-          }),
-          borderRadius: 4,
-        }]
-      // All groups — stacked bars per group
-      : visibleGroupKeys.length > 1
-        ? visibleGroupKeys.map((key, idx) => ({
-            label: allGroupKeys.get(key) || key,
+          backgroundColor: getBreakdownColor(key, breakdown, idx),
+          borderRadius: 2,
+          stack: 'delta',
+        }))
+      // Single group or fallback — single bar with positive/negative coloring
+      : visibleGroupKeys.length === 1
+        ? [{
+            label: allGroupKeys.get(visibleGroupKeys[0]) || visibleGroupKeys[0],
             data: deltaData.map(d => {
-              const g = d.byGroup[key];
+              const g = d.byGroup[visibleGroupKeys[0]];
               return showPercent ? (g?.pctDelta || 0) : (g?.delta || 0);
             }),
-            backgroundColor: getBreakdownColor(key, breakdown, idx),
-            borderRadius: 2,
-            stack: 'delta',
-          }))
-        // Fallback: single net worth bar (no breakdown or only 1 group)
+            backgroundColor: deltaData.map(d => {
+              const v = showPercent ? (d.byGroup[visibleGroupKeys[0]]?.pctDelta || 0) : (d.byGroup[visibleGroupKeys[0]]?.delta || 0);
+              return v >= 0 ? POSITIVE_COLOR : NEGATIVE_COLOR;
+            }),
+            borderRadius: 4,
+          }]
         : [{
             label: showPercent ? '% Change' : 'Period Change',
             data: deltaData.map(d => showPercent ? d.pctDelta : d.delta),
@@ -935,41 +1011,69 @@ function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies, countries, dis
       {/* Zone 1 — Toolbar (streamlined) */}
       <div className="card mb-4" style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         {/* Breakdown dropdown */}
-        <span style={{ fontSize: 13, fontWeight: 600 }}>Breakdown:</span>
-        <select
-          className="form-control"
-          style={{ width: 'auto', minWidth: 140, fontSize: 13 }}
-          value={breakdown}
-          onChange={e => {
-            const val = e.target.value;
-            setBreakdown(val);
-            setGroupFilter('all');
-            sessionStorage.setItem('pv_portfolio_breakdown', val);
-          }}
-        >
-          <option value="type">By Type</option>
-          <option value="country">By Country</option>
-          <option value="account">By Account</option>
-          <option value="currency">By Currency</option>
-          <option value="asset">By Asset</option>
-        </select>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>Breakdown:</span>
+          <select
+            className="form-control"
+            aria-label="Breakdown"
+            style={{ width: 'auto', minWidth: 140, fontSize: 13 }}
+            value={breakdown}
+            onChange={e => {
+              setBreakdown(e.target.value);
+              sessionStorage.setItem('pv_portfolio_breakdown', e.target.value);
+            }}
+          >
+            <option value="type">By Asset Class</option>
+            <option value="country">By Country</option>
+            <option value="account">By Account</option>
+            <option value="currency">By Currency</option>
+            <option value="asset">By Asset</option>
+          </select>
+        </div>
 
-        {/* Group filter dropdown */}
-        {allGroupKeys.size > 1 && (
-          <>
-            <span style={{ fontSize: 13, fontWeight: 600 }}>Filter:</span>
+        {/* Independent asset class filter */}
+        {allTypes.size > 1 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>Asset Class:</span>
             <select
               className="form-control"
+              aria-label="Asset class filter"
               style={{ width: 'auto', minWidth: 120, fontSize: 13, padding: '2px 24px 2px 8px' }}
-              value={groupFilter}
-              onChange={e => setGroupFilter(e.target.value)}
+              value={filterType}
+              onChange={e => setFilterType(e.target.value)}
             >
               <option value="all">All</option>
-              {[...allGroupKeys.entries()].map(([key, label]) => (
+              {[...allTypes.entries()].map(([key, label]) => (
                 <option key={key} value={key}>{label}</option>
               ))}
             </select>
-          </>
+          </div>
+        )}
+
+        {/* Independent country filter */}
+        {allCountries.size > 1 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>Country:</span>
+            <select
+              className="form-control"
+              aria-label="Country filter"
+              style={{ width: 'auto', minWidth: 120, fontSize: 13, padding: '2px 24px 2px 8px' }}
+              value={filterCountry}
+              onChange={e => setFilterCountry(e.target.value)}
+            >
+              <option value="all">All</option>
+              {[...allCountries.entries()].map(([key, label]) => (
+                <option key={key} value={key}>{label}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* Clear filters button */}
+        {hasActiveFilter && (
+          <button className="btn btn-ghost btn-sm" style={{ fontSize: 12 }} onClick={() => { setFilterType('all'); setFilterCountry('all'); }}>
+            Clear filters
+          </button>
         )}
 
         {/* View mode toggle */}
@@ -1004,7 +1108,7 @@ function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies, countries, dis
             <h4 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>
               {showPercent
                 ? 'Allocation Over Time'
-                : groupFilter !== 'all' ? `${allGroupKeys.get(groupFilter) || groupFilter} Over Time` : 'Portfolio Over Time'}
+                : filterDesc ? `${filterDesc} — Portfolio Over Time` : 'Portfolio Over Time'}
             </h4>
             <SegmentedControl
               options={[
@@ -1063,7 +1167,7 @@ function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies, countries, dis
               <tbody>
                 {[...filteredSnapshots].reverse().map((s, i) => {
                   const snapKey = s.id ?? (filteredSnapshots.length - 1 - i);
-                  const summary = snapshotSummaryMap.get(snapKey);
+                  const summary = filteredSummaryMap.get(snapKey);
                   if (!summary) return null;
                   return (
                     <tr key={snapKey} style={{ cursor: 'pointer' }} onClick={() => { setSelectedSnapshot(s); setExpandedTypes({}); }}>
