@@ -5,7 +5,7 @@
  * Receives typed messages, runs the operation, posts results back.
  * DEK (CryptoKey) is imported once via 'initKey' message and cached.
  */
-import { encryptEntry, decryptEntry } from './crypto';
+import { encryptEntry, decryptEntry, decryptEntryWithFallback } from './crypto';
 import { aggregatePortfolio } from './portfolioAggregator';
 
 let cachedKey = null;
@@ -30,7 +30,9 @@ async function handleDecryptBatch(payload) {
   const results = [];
   for (const blob of payload.entries) {
     try {
-      const decrypted = await decryptEntry(blob, cachedKey);
+      const decrypted = payload.aad
+        ? await decryptEntryWithFallback(blob, cachedKey, payload.aad)
+        : await decryptEntry(blob, cachedKey);
       results.push(decrypted);
     } catch {
       results.push(null);
@@ -43,7 +45,7 @@ async function handleEncryptBatch(payload) {
   if (!cachedKey) throw new Error('Worker key not initialized');
   const results = [];
   for (const item of payload.items) {
-    const encrypted = await encryptEntry(item, cachedKey);
+    const encrypted = await encryptEntry(item, cachedKey, payload.aad);
     results.push(encrypted);
   }
   return results;

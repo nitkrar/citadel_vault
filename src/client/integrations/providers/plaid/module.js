@@ -8,6 +8,7 @@
 import api from '../../../api/client';
 import { apiData } from '../../../lib/checks';
 import { entryStore } from '../../../lib/entryStore';
+import { AAD_VAULT_ENTRY } from '../../../lib/crypto';
 import { getIntegration, setIntegration } from '../../helpers';
 
 export default {
@@ -76,7 +77,7 @@ export default {
         const updatedMeta = { ...meta, last_refreshed: new Date().toISOString() };
         const mergedData = setIntegration({ ...d, value: String(acctBal.balance) }, 'plaid', updatedMeta);
 
-        const blob = await encrypt(mergedData);
+        const blob = await encrypt(mergedData, AAD_VAULT_ENTRY);
         await api.put(`/vault.php?id=${entry.id}`, { encrypted_data: blob });
         await entryStore.put({ ...entry, encrypted_data: blob, updated_at: new Date().toISOString() });
         onEntryUpdated?.(entry.id, mergedData);
@@ -102,7 +103,7 @@ export default {
         const updatedMeta = { ...meta, last_refreshed: new Date().toISOString() };
         const mergedData = setIntegration(d, 'plaid', updatedMeta);
 
-        const blob = await encrypt(mergedData);
+        const blob = await encrypt(mergedData, AAD_VAULT_ENTRY);
         await api.put(`/vault.php?id=${entry.id}`, { encrypted_data: blob });
         await entryStore.put({ ...entry, encrypted_data: blob, updated_at: new Date().toISOString() });
         onEntryUpdated?.(entry.id, mergedData);

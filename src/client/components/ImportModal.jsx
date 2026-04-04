@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback } from 'react';
 import api from '../api/client';
 import Modal from './Modal';
 import { useEncryption } from '../contexts/EncryptionContext';
+import { AAD_VAULT_ENTRY } from '../lib/crypto';
 import { entryStore } from '../lib/entryStore';
 import { apiData } from '../lib/checks';
 import { VALID_ENTRY_TYPES } from '../lib/defaults';
@@ -200,7 +201,7 @@ export default function ImportModal({ isOpen, onClose, defaultType, onImportComp
             // Encrypt all entries
             const encrypted = [];
             for (let i = 0; i < allEntries.length; i++) {
-                const blob = await encrypt(allEntries[i].data);
+                const blob = await encrypt(allEntries[i].data, AAD_VAULT_ENTRY);
                 encrypted.push({
                     entry_type: allEntries[i].type,
                     template_id: allEntries[i].templateId,

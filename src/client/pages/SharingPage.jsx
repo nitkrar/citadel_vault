@@ -84,7 +84,7 @@ const renderTypeBadge = (type) => {
 // ── Component ──────────────────────────────────────────────────────────
 
 export default function SharingPage() {
-  const { isUnlocked, decrypt } = useEncryption();
+  const { isUnlocked, decryptWithFallback } = useEncryption();
   const { entries, decryptedCache } = useVaultEntries();
   const { portfolio, displayCurrency, baseCurrency, currencies } = usePortfolioData();
   const [tab, setTab] = useState('with-me');
@@ -309,14 +309,14 @@ export default function SharingPage() {
         if (snap.entries && snap.entries.length > 0) {
           for (const se of snap.entries) {
             try {
-              const d = await decrypt(se.encrypted_data);
+              const d = await decryptWithFallback(se.encrypted_data, cryptoLib.AAD_SNAPSHOT_ENTRY);
               decryptedEntries.push(d);
             } catch { /* skip */ }
           }
         }
         // Decrypt snapshot meta
         let meta = {};
-        try { meta = await decrypt(snap.data || snap.encrypted_data); } catch { /* skip */ }
+        try { meta = await decryptWithFallback(snap.data || snap.encrypted_data, cryptoLib.AAD_SNAPSHOT_META); } catch { /* skip */ }
         dataToShare = {
           type: 'portfolio_snapshot',
           snapshot_date: snap.snapshot_date,

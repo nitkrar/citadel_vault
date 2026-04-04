@@ -9,6 +9,7 @@ import { describe, it, expect } from 'vitest';
 import {
   toBase64, fromBase64,
   generateDek, encrypt, decrypt, encryptEntry, decryptEntry,
+  decryptWithFallback, decryptEntryWithFallback,
   deriveWrappingKey, wrapDek, unwrapDek,
   setupVault, unlockVault, changeVaultKey, lockVault,
   reWrapDekIterations, getKdfIterations,
@@ -18,6 +19,7 @@ import {
   hybridEncrypt, hybridDecrypt,
   isUnlocked, lock,
   PBKDF2_ITERATIONS, PBKDF2_ITERATIONS_RECOMMENDED,
+  AAD_VAULT_ENTRY, AAD_SNAPSHOT_META, AAD_SNAPSHOT_ENTRY, AAD_RECOVERY_KEY,
 } from '../../src/client/lib/crypto.js';
 import { validateVaultKey } from '../../src/client/lib/defaults.js';
 
@@ -500,6 +502,100 @@ describe('Snapshot encryption round-trip', () => {
     const blob = await encryptEntry(entry, dek1);
     const result = await decryptEntry(blob, dek2);
     expect(result).toBeNull();
+  });
+});
+
+// ── AAD (Additional Authenticated Data) ───────────────────────────────
+
+describe('AES-GCM with AAD', () => {
+  it('round-trips with matching AAD', async () => {
+    const dek = await generateDek();
+    const blob = await encrypt('secret', dek, AAD_VAULT_ENTRY);
+    const result = await decrypt(blob, dek, AAD_VAULT_ENTRY);
+    expect(result).toBe('secret');
+  });
+
+  it('fails to decrypt with mismatched AAD', async () => {
+    const dek = await generateDek();
+    const blob = await encrypt('secret', dek, AAD_VAULT_ENTRY);
+    const result = await decrypt(blob, dek, AAD_SNAPSHOT_META);
+    expect(result).toBeNull();
+  });
+
+  it('fails to decrypt AAD blob without AAD', async () => {
+    const dek = await generateDek();
+    const blob = await encrypt('secret', dek, AAD_VAULT_ENTRY);
+    const result = await decrypt(blob, dek);
+    expect(result).toBeNull();
+  });
+
+  it('fails to decrypt no-AAD blob with AAD', async () => {
+    const dek = await generateDek();
+    const blob = await encrypt('secret', dek);
+    const result = await decrypt(blob, dek, AAD_VAULT_ENTRY);
+    expect(result).toBeNull();
+  });
+
+  it('cross-context rejection: vault blob cannot decrypt as snapshot', async () => {
+    const dek = await generateDek();
+    const blob = await encrypt('vault-data', dek, AAD_VAULT_ENTRY);
+    expect(await decrypt(blob, dek, AAD_SNAPSHOT_META)).toBeNull();
+    expect(await decrypt(blob, dek, AAD_SNAPSHOT_ENTRY)).toBeNull();
+    expect(await decrypt(blob, dek, AAD_RECOVERY_KEY)).toBeNull();
+  });
+
+  it('encryptEntry/decryptEntry round-trips with AAD', async () => {
+    const dek = await generateDek();
+    const obj = { name: 'Test', value: 42 };
+    const blob = await encryptEntry(obj, dek, AAD_VAULT_ENTRY);
+    const result = await decryptEntry(blob, dek, AAD_VAULT_ENTRY);
+    expect(result).toEqual(obj);
+  });
+
+  it('encryptEntry/decryptEntry fails with wrong AAD', async () => {
+    const dek = await generateDek();
+    const blob = await encryptEntry({ x: 1 }, dek, AAD_VAULT_ENTRY);
+    const result = await decryptEntry(blob, dek, AAD_SNAPSHOT_META);
+    expect(result).toBeNull();
+  });
+
+  it('decryptWithFallback prefers AAD, falls back to no-AAD', async () => {
+    const dek = await generateDek();
+    // Legacy blob (no AAD) should still decrypt via fallback
+    const legacyBlob = await encrypt('legacy', dek);
+    const result = await decryptWithFallback(legacyBlob, dek, AAD_VAULT_ENTRY);
+    expect(result).toBe('legacy');
+
+    // New blob (with AAD) should decrypt directly
+    const newBlob = await encrypt('new', dek, AAD_VAULT_ENTRY);
+    const result2 = await decryptWithFallback(newBlob, dek, AAD_VAULT_ENTRY);
+    expect(result2).toBe('new');
+  });
+
+  it('decryptEntryWithFallback works for legacy and new blobs', async () => {
+    const dek = await generateDek();
+    const obj = { name: 'Test' };
+
+    const legacyBlob = await encryptEntry(obj, dek);
+    expect(await decryptEntryWithFallback(legacyBlob, dek, AAD_VAULT_ENTRY)).toEqual(obj);
+
+    const newBlob = await encryptEntry(obj, dek, AAD_VAULT_ENTRY);
+    expect(await decryptEntryWithFallback(newBlob, dek, AAD_VAULT_ENTRY)).toEqual(obj);
+  });
+
+  it('decryptWithFallback returns null when both attempts fail', async () => {
+    const dek1 = await generateDek();
+    const dek2 = await generateDek();
+    const blob = await encrypt('secret', dek1, AAD_VAULT_ENTRY);
+    const result = await decryptWithFallback(blob, dek2, AAD_VAULT_ENTRY);
+    expect(result).toBeNull();
+  });
+
+  it('exports AAD constants', () => {
+    expect(AAD_VAULT_ENTRY).toBe('citadel.vault.v1');
+    expect(AAD_SNAPSHOT_META).toBe('citadel.snapshot.meta.v1');
+    expect(AAD_SNAPSHOT_ENTRY).toBe('citadel.snapshot.entry.v1');
+    expect(AAD_RECOVERY_KEY).toBe('citadel.recovery.v1');
   });
 });
 

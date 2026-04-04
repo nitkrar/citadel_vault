@@ -8,7 +8,7 @@
  * Worker is lazy-initialized on first use above threshold.
  * DEK raw bytes are cached and sent to worker on first init.
  */
-import { encryptEntry, decryptEntry, _getDekForContext } from './crypto';
+import { encryptEntry, decryptEntry, decryptEntryWithFallback, _getDekForContext } from './crypto';
 import { aggregatePortfolio } from './portfolioAggregator';
 
 // ── Configuration ────────────────────────────────────────────────────
@@ -152,16 +152,19 @@ export async function setKey(cryptoKey) {
  * Decrypt an array of encrypted blobs.
  * @param {string[]} entries — array of base64 encrypted blobs
  * @param {CryptoKey} dek — main thread DEK (used if below threshold)
+ * @param {string} [aad] — AAD purpose string for context binding
  * @returns {Promise<Array>} decrypted objects (null for failures)
  */
-export async function decryptBatch(entries, dek) {
+export async function decryptBatch(entries, dek, aad) {
   if (!shouldUseWorker(entries.length)) {
     const key = dek || _getDekForContext();
     const start = performance.now();
     const results = [];
     for (const blob of entries) {
       try {
-        results.push(await decryptEntry(blob, key));
+        results.push(aad
+          ? await decryptEntryWithFallback(blob, key, aad)
+          : await decryptEntry(blob, key));
       } catch {
         results.push(null);
       }
@@ -170,23 +173,24 @@ export async function decryptBatch(entries, dek) {
     return results;
   }
   await ensureWorkerKey();
-  return postAndWait('decryptBatch', { entries });
+  return postAndWait('decryptBatch', { entries, aad });
 }
 
 /**
  * Encrypt an array of objects.
  * @param {object[]} items — array of plain objects to encrypt
  * @param {CryptoKey} dek — main thread DEK (used if below threshold)
+ * @param {string} [aad] — AAD purpose string for context binding
  * @returns {Promise<string[]>} encrypted blobs
  */
-export async function encryptBatch(items, dek) {
+export async function encryptBatch(items, dek, aad) {
   if (!shouldUseWorker(items.length)) {
     const key = dek || _getDekForContext();
     const start = performance.now();
     try {
       const results = [];
       for (const item of items) {
-        results.push(await encryptEntry(item, key));
+        results.push(await encryptEntry(item, key, aad));
       }
       recordTiming(performance.now() - start);
       return results;
@@ -195,7 +199,7 @@ export async function encryptBatch(items, dek) {
     }
   }
   await ensureWorkerKey();
-  return postAndWait('encryptBatch', { items });
+  return postAndWait('encryptBatch', { items, aad });
 }
 
 /**
