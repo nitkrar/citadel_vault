@@ -5,5 +5,9 @@ export default defineConfig({
     include: ['tests/api-js/**/*.test.js'],
     testTimeout: 15000,
     pool: 'forks',
+    globalSetup: './tests/helpers/apiTestServer.js',
+    env: {
+      TEST_API_URL: 'http://localhost:8083/src/api',
+    },
   },
 });
