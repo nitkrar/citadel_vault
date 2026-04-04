@@ -5,7 +5,7 @@ import { useVaultEntries } from '../contexts/VaultDataContext';
 import { entryStore } from '../lib/entryStore';
 import { VALID_ENTRY_TYPES } from '../lib/defaults';
 import { buildRateMap } from '../lib/portfolioAggregator';
-import { groupByType, assignRowIdsAndRemap } from '../lib/exportHelpers';
+import { groupByType, assignRowIdsAndRemap, prepareExportData } from '../lib/exportHelpers';
 import { exportJson } from '../lib/exportJson';
 import { exportCsvZip } from '../lib/exportCsvZip';
 import { exportXlsx } from '../lib/exportXlsx';
@@ -94,18 +94,20 @@ export default function ImportExportPage() {
       const dateSuffix = new Date().toISOString().split('T')[0];
       const templates = await entryStore.getAllTemplates();
 
-      // JSON always exports everything; others respect field visibility
-      const fv = format === 'json' ? null : fieldVisibility;
-
       if (format === 'json') {
+        // JSON is full backup — no field filtering
         exportJson(grouped, dateSuffix);
-      } else if (format === 'csv') {
-        await exportCsvZip(grouped, dateSuffix, templates, fv);
-      } else if (format === 'xlsx') {
-        await exportXlsx(grouped, dateSuffix, templates, fv);
-      } else if (format === 'pdf') {
-        const rateMap = buildRateMap(currencies || []);
-        await exportPdf(grouped, templates, dateSuffix, rateMap, baseCurrency, fv);
+      } else {
+        // Single data pipeline: clean + filter once, all formats consume the same data
+        const processed = prepareExportData(grouped, templates, fieldVisibility);
+        if (format === 'csv') {
+          await exportCsvZip(processed, dateSuffix);
+        } else if (format === 'xlsx') {
+          await exportXlsx(processed, dateSuffix);
+        } else if (format === 'pdf') {
+          const rateMap = buildRateMap(currencies || []);
+          await exportPdf(processed, templates, dateSuffix, rateMap, baseCurrency, fieldVisibility);
+        }
       }
 
       setExported(true);
