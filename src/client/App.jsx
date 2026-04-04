@@ -45,7 +45,7 @@ function ProtectedRoute({ children, adminOnly = false }) {
   }
 
   if (!user) {
-    return <Navigate to="/home" replace />;
+    return <Navigate to="/login" replace />;
   }
 
   if (adminOnly && !isSiteAdmin) {

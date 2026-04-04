@@ -43,6 +43,19 @@ export function AuthProvider({ children }) {
       });
   }, []);
 
+  // Listen for 401 auth-expired events from the Axios interceptor.
+  // Clears session state; ProtectedRoute handles redirect to /login.
+  useEffect(() => {
+    const handleAuthExpired = () => {
+      localStorage.removeItem('pv_has_session');
+      vaultSession.destroy();
+      setUser(null);
+      setPreferences({});
+    };
+    window.addEventListener('citadel:auth-expired', handleAuthExpired);
+    return () => window.removeEventListener('citadel:auth-expired', handleAuthExpired);
+  }, []);
+
   const login = async (username, password) => {
     const res = await api.post('/auth.php?action=login', { username, password });
     const { user: newUser } = res.data.data;
