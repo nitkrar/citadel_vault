@@ -138,7 +138,7 @@ export default function RegisterPage() {
       if (disableIpLogging) {
         try { await api.put('/preferences.php', { audit_ip_mode: 'none' }); } catch {}
       }
-      window.location.href = '/';
+      navigate('/');
     } catch (err) {
       setError(
         err.response?.data?.error ||

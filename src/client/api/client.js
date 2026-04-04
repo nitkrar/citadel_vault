@@ -15,7 +15,8 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// On 401, redirect to login — but not on public pages or auth-check calls
+// On 401, notify the app so AuthContext can handle navigation via React Router.
+// This avoids window.location.href which kills React state and causes full page reloads.
 const PUBLIC_PATHS_401 = ['/login', '/register', '/forgot-password', '/verify-email', '/home', '/features', '/help', '/dev-guide'];
 api.interceptors.response.use(
   (response) => response,
@@ -25,7 +26,7 @@ api.interceptors.response.use(
       const url = error.config?.url || '';
       const isAuthCheck = url.includes('action=me') || url.includes('action=registration-status');
       if (!PUBLIC_PATHS_401.includes(path) && !isAuthCheck) {
-        window.location.href = '/login';
+        window.dispatchEvent(new Event('citadel:auth-expired'));
       }
     }
     return Promise.reject(error);

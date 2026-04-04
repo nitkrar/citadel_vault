@@ -88,7 +88,7 @@ export default function ForgotPasswordPage() {
 
 
   const handleContinue = () => {
-    window.location.href = '/';
+    navigate('/');
   };
 
   // Phase 2: New recovery key display
