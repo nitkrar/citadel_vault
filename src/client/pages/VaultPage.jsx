@@ -242,6 +242,14 @@ export default function VaultPage() {
   // Mobile overflow menus
   const [showActionOverflow, setShowActionOverflow] = useState(false);
   const [showTypeOverflow, setShowTypeOverflow] = useState(false);
+  const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
+
+  // ── Mobile header currency icon triggers picker via custom event ──
+  useEffect(() => {
+    const handleCurrencyToggle = () => setShowCurrencyPicker(v => !v);
+    window.addEventListener('vault:currency-toggle', handleCurrencyToggle);
+    return () => window.removeEventListener('vault:currency-toggle', handleCurrencyToggle);
+  }, []);
 
   // ── Plaid Connect Bank success handler ─────────────────────────────
   const handlePlaidConnectSuccess = useCallback(async ({ itemId, accounts, metadata }) => {
@@ -1221,70 +1229,28 @@ export default function VaultPage() {
   return (
     <div className="page-content">
       {isMobile ? (
-        /* Mobile: Row 1 — currency selector (left), ... menu (right) */
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-sm)' }}>
-          {currencies.length > 0 ? (
-            <select className="form-control"
-              style={{ width: 'auto', minWidth: 70, padding: '4px 24px 4px 6px', fontSize: 13 }}
-              value={baseCurrency}
-              onChange={e => setDisplayCurrency(e.target.value)}
-            >
-              {currencies.filter(c => c.is_active === 1 || c.is_active === '1' || c.is_active === true).map(c => (
-                <option key={c.code} value={c.code}>{c.symbol} {c.code}</option>
-              ))}
-            </select>
-          ) : <div />}
-          {(() => {
-            const plaidItemIds = plaidEnabled ? [...new Set(
-              entries.map(e => {
-                const d = decryptedCache[e.id];
-                return getIntegration(d, getIntegrationType(d))?.item_id;
-              }).filter(Boolean)
-            )] : [];
-            const hasTickers = entries.some(e => {
-              const d = decryptedCache[e.id];
-              const tpl = templates.find(t => t.id === e.template_id) || e.template;
-              return (tpl?.subtype === 'stock' && d?.ticker) || (tpl?.subtype === 'crypto' && d?.coin);
-            });
-            const canRefresh = plaidItemIds.length > 0 || hasTickers;
-            return (
-              <div style={{ position: 'relative' }}>
-                <button className="btn btn-ghost btn-sm" onClick={() => setShowActionOverflow(v => !v)} aria-label="More actions">
-                  <MoreVertical size={18} />
-                </button>
-                {showActionOverflow && (
-                  <>
-                    <div style={{ position: 'fixed', inset: 0, zIndex: 900 }} onClick={() => setShowActionOverflow(false)} />
-                    <div style={{
-                      position: 'fixed', right: 16, top: 'auto', zIndex: 901,
-                      background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 8,
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.15)', minWidth: 180, overflow: 'hidden',
-                    }}>
-                      <button className="btn btn-ghost btn-sm" style={{ width: '100%', justifyContent: 'flex-start', borderRadius: 0, padding: '10px 14px' }}
-                        onClick={() => { loadDeleted(); setShowActionOverflow(false); }}>
-                        <Undo2 size={14} /> Recently Deleted
-                      </button>
-                      {canRefresh && (
-                        <button className="btn btn-ghost btn-sm" style={{ width: '100%', justifyContent: 'flex-start', borderRadius: 0, padding: '10px 14px' }}
-                          disabled={refreshAllInProgress}
-                          onClick={() => { handleRefreshAll(plaidItemIds); setShowActionOverflow(false); }}>
-                          <RefreshCw size={14} className={refreshAllInProgress ? 'spin' : ''} /> {refreshAllInProgress ? 'Refreshing...' : 'Refresh All'}
-                        </button>
-                      )}
-                      {plaidEnabled && (
-                        <button className="btn btn-ghost btn-sm" style={{ width: '100%', justifyContent: 'flex-start', borderRadius: 0, padding: '10px 14px' }}
-                          disabled={plaidConnectLoading}
-                          onClick={() => { openPlaidConnect(); setShowActionOverflow(false); }}>
-                          <Landmark size={14} /> {plaidConnectLoading ? 'Connecting...' : 'Connect Bank'}
-                        </button>
-                      )}
-                    </div>
-                  </>
-                )}
+        <>
+          {/* Mobile: currency picker dropdown (triggered from header icon) */}
+          {showCurrencyPicker && currencies.length > 0 && (
+            <>
+              <div style={{ position: 'fixed', inset: 0, zIndex: 900 }} onClick={() => setShowCurrencyPicker(false)} />
+              <div style={{
+                position: 'fixed', right: 16, top: 'calc(56px + env(safe-area-inset-top) + 4px)', zIndex: 901,
+                background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 8,
+                boxShadow: '0 4px 12px rgba(0,0,0,0.15)', minWidth: 140, overflow: 'hidden',
+              }}>
+                {currencies.filter(c => c.is_active === 1 || c.is_active === '1' || c.is_active === true).map(c => (
+                  <button key={c.code} className="btn btn-ghost btn-sm"
+                    style={{ width: '100%', justifyContent: 'flex-start', borderRadius: 0, padding: '10px 14px',
+                      background: baseCurrency === c.code ? 'var(--hover-bg)' : undefined }}
+                    onClick={() => { setDisplayCurrency(c.code); setShowCurrencyPicker(false); }}>
+                    {c.symbol} {c.code}
+                  </button>
+                ))}
               </div>
-            );
-          })()}
-        </div>
+            </>
+          )}
+        </>
       ) : (
         /* Desktop: full page header */
         <div className="page-header">
@@ -1345,13 +1311,14 @@ export default function VaultPage() {
 
       {/* Type filter tabs */}
       {isMobile ? (
-        /* Mobile row 2: Accounts + Assets tabs + More dropdown */
-        <div className="vault-type-filters flex gap-2 mb-4" style={{ flexWrap: 'nowrap', alignItems: 'center' }}>
+        /* Mobile: tabs row — Accounts, Assets, More types dropdown, spacer, ... menu */
+        <div className="flex gap-2 mb-4" style={{ flexWrap: 'nowrap', alignItems: 'center', overflow: 'hidden' }}>
           {['account', 'asset'].map(type => {
             const meta = TYPE_META[type];
             const Icon = meta?.icon || Layers;
             return (
               <button key={type} className={`btn btn-sm ${activeType === type ? 'btn-primary' : 'btn-ghost'}`}
+                style={{ flexShrink: 1, minWidth: 0, whiteSpace: 'nowrap' }}
                 onClick={() => { setActiveType(type); sessionStorage.setItem('pv_vault_last_tab', type); }}>
                 <Icon size={14} /> {meta?.label || type}
                 {counts[type] > 0 && <span className="badge badge-muted" style={{ marginLeft: 4 }}>{counts[type]}</span>}
@@ -1394,6 +1361,59 @@ export default function VaultPage() {
                           </button>
                         );
                       })}
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })()}
+          {/* Spacer pushes ... to right */}
+          <div style={{ flex: 1 }} />
+          {/* ... overflow menu */}
+          {(() => {
+            const plaidItemIds = plaidEnabled ? [...new Set(
+              entries.map(e => {
+                const d = decryptedCache[e.id];
+                return getIntegration(d, getIntegrationType(d))?.item_id;
+              }).filter(Boolean)
+            )] : [];
+            const hasTickers = entries.some(e => {
+              const d = decryptedCache[e.id];
+              const tpl = templates.find(t => t.id === e.template_id) || e.template;
+              return (tpl?.subtype === 'stock' && d?.ticker) || (tpl?.subtype === 'crypto' && d?.coin);
+            });
+            const canRefresh = plaidItemIds.length > 0 || hasTickers;
+            return (
+              <div style={{ position: 'relative', flexShrink: 0 }}>
+                <button className="btn btn-ghost btn-sm" onClick={() => setShowActionOverflow(v => !v)} aria-label="More actions">
+                  <MoreVertical size={18} />
+                </button>
+                {showActionOverflow && (
+                  <>
+                    <div style={{ position: 'fixed', inset: 0, zIndex: 900 }} onClick={() => setShowActionOverflow(false)} />
+                    <div style={{
+                      position: 'fixed', right: 16, zIndex: 901,
+                      background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 8,
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.15)', minWidth: 180, overflow: 'hidden',
+                    }}>
+                      <button className="btn btn-ghost btn-sm" style={{ width: '100%', justifyContent: 'flex-start', borderRadius: 0, padding: '10px 14px' }}
+                        onClick={() => { loadDeleted(); setShowActionOverflow(false); }}>
+                        <Undo2 size={14} /> Recently Deleted
+                      </button>
+                      {canRefresh && (
+                        <button className="btn btn-ghost btn-sm" style={{ width: '100%', justifyContent: 'flex-start', borderRadius: 0, padding: '10px 14px' }}
+                          disabled={refreshAllInProgress}
+                          onClick={() => { handleRefreshAll(plaidItemIds); setShowActionOverflow(false); }}>
+                          <RefreshCw size={14} className={refreshAllInProgress ? 'spin' : ''} /> {refreshAllInProgress ? 'Refreshing...' : 'Refresh All'}
+                        </button>
+                      )}
+                      {plaidEnabled && (
+                        <button className="btn btn-ghost btn-sm" style={{ width: '100%', justifyContent: 'flex-start', borderRadius: 0, padding: '10px 14px' }}
+                          disabled={plaidConnectLoading}
+                          onClick={() => { openPlaidConnect(); setShowActionOverflow(false); }}>
+                          <Landmark size={14} /> {plaidConnectLoading ? 'Connecting...' : 'Connect Bank'}
+                        </button>
+                      )}
                     </div>
                   </>
                 )}
