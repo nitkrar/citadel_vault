@@ -121,6 +121,7 @@ vi.mock('../../src/client/lib/entryStore', () => ({
   entryStore: {
     putAll: vi.fn(() => Promise.resolve()),
     clear:  vi.fn(() => Promise.resolve()),
+    switchUser: vi.fn(),
   },
 }));
 

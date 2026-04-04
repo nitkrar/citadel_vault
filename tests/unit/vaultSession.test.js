@@ -56,6 +56,7 @@ vi.mock('../../src/client/lib/crypto', () => ({
 vi.mock('../../src/client/lib/entryStore', () => ({
   entryStore: {
     clear: vi.fn().mockResolvedValue(undefined),
+    switchUser: vi.fn(),
   },
 }));
 
