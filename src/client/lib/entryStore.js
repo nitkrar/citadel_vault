@@ -1,4 +1,4 @@
-const DB_NAME = 'citadel_vault';
+const DB_NAME_BASE = 'citadel_vault';
 const DB_VERSION = 1;
 const IS_DEV = import.meta.env?.DEV ?? false;
 
@@ -98,8 +98,31 @@ class EntryStore {
     constructor() {
         this._db = null;
         this._opening = null;
+        this._dbName = DB_NAME_BASE;
+        this._legacyCleaned = false;
         // Cache policy (cachePolicy.js) handles IndexedDB lifecycle.
         // No beforeunload clear — entries persist per cache_mode setting.
+    }
+
+    /**
+     * Scope the IndexedDB to a specific user.
+     * Closes any existing connection and sets the DB name to citadel_vault_<userId>.
+     * Pass null/undefined to reset to the unscoped base name.
+     */
+    switchUser(userId) {
+        // Close existing connection
+        if (this._db) {
+            this._db.close();
+            this._db = null;
+        }
+        this._opening = null;
+        this._dbName = userId ? `${DB_NAME_BASE}_${userId}` : DB_NAME_BASE;
+
+        // One-time cleanup: delete the legacy unscoped database
+        if (userId && !this._legacyCleaned) {
+            this._legacyCleaned = true;
+            indexedDB.deleteDatabase(DB_NAME_BASE);
+        }
     }
 
     _open() {
@@ -107,7 +130,7 @@ class EntryStore {
         if (this._opening) return this._opening;
 
         this._opening = new Promise((resolve, reject) => {
-            const request = indexedDB.open(DB_NAME, DB_VERSION);
+            const request = indexedDB.open(this._dbName, DB_VERSION);
 
             request.onupgradeneeded = (event) => {
                 const db = event.target.result;

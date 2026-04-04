@@ -60,4 +60,7 @@ export async function destroy() {
 
   // 5. IndexedDB (encrypted entries, snapshots, templates, shared items)
   await entryStore.clear().catch(() => {});
+
+  // 6. Reset IndexedDB to unscoped state (no stale user DB reference after logout)
+  entryStore.switchUser(null);
 }

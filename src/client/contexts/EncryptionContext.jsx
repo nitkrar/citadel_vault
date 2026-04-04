@@ -22,6 +22,11 @@ export function EncryptionProvider({ children, user }) {
   const activityTimerRef = useRef(null);
   const prevUserIdRef = useRef(user?.id);
 
+  // Scope IndexedDB to current user (security: isolate cached entries per user)
+  useEffect(() => {
+    if (user?.id) entryStore.switchUser(user.id);
+  }, [user?.id]);
+
   // Full teardown on user switch (security: don't leak entries across users)
   useEffect(() => {
     const prevId = prevUserIdRef.current;
