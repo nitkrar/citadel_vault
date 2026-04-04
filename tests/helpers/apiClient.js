@@ -6,8 +6,8 @@
 const BASE_URL = process.env.TEST_API_URL || 'http://localhost:8081/src/api';
 
 const TEST_USERS = {
-  admin: { username: 'initial_user', password: 'Initial#12$' },
-  regular: { username: 'test_regular_user', password: 'TestRegular#1' },
+  admin: { username: 'initial_user', password: 'TestAdmin123' },
+  regular: { username: 'test_regular_user', password: 'TestRegular1' },
 };
 
 /**
@@ -24,7 +24,7 @@ async function ensureRegularUser() {
 
   const adminToken = await getToken('admin');
   const { username, password } = TEST_USERS.regular;
-  const tempPassword = 'TempSetup#99';
+  const tempPassword = 'TempSetup99';
 
   // Try to create with temp password — 409 means already exists
   const resp = await fetch(`${BASE_URL}/users.php`, {
