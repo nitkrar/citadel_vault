@@ -847,14 +847,21 @@ export default function VaultPage() {
     setFormError('');
   };
 
-  const openAdd = (type = 'password') => {
+  const openAdd = useCallback((type = 'password') => {
     setFormType(type);
     const tpl = templates.find(t => t.template_key === type && !t.owner_id && !t.country_code && !t.subtype);
     setFormTemplateId(tpl?.id || null);
     setForm({ title: '' });
     setShowAdd(true);
     setFormError('');
-  };
+  }, [templates]);
+
+  // ── Mobile header "+" button triggers add modal via custom event ──
+  useEffect(() => {
+    const handleVaultAdd = () => openAdd(activeType && activeType !== 'all' ? activeType : 'password');
+    window.addEventListener('vault:add', handleVaultAdd);
+    return () => window.removeEventListener('vault:add', handleVaultAdd);
+  }, [activeType, openAdd]);
 
   // ── Handle template selection (with country pre-population) ────────
   const handleTemplateChange = (templateId) => {

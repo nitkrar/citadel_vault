@@ -9,6 +9,7 @@ import SyncToast from './SyncToast';
 import useKeyboardShortcuts from '../hooks/useKeyboardShortcuts';
 import { isWebAuthnSupported, registerPasskey } from './WebAuthnLogin';
 import api from '../api/client';
+import useLayoutMode from '../hooks/useLayoutMode';
 import {
   LayoutDashboard,
   Landmark,
@@ -37,6 +38,12 @@ import {
   Menu,
   X,
   RefreshCw,
+  Plus,
+  ChevronLeft,
+  ChevronRight,
+  MoreHorizontal,
+  Smartphone,
+  Monitor,
 } from 'lucide-react';
 import { PBKDF2_ITERATIONS_RECOMMENDED, getKdfIterations } from '../lib/crypto';
 
@@ -45,6 +52,192 @@ const HideAmountsContext = createContext();
 
 export function useHideAmounts() {
   return useContext(HideAmountsContext);
+}
+
+const ROUTE_META = {
+  '/': { title: 'Home', isTab: true },
+  '/vault': { title: 'Vault', isTab: true },
+  '/portfolio': { title: 'Portfolio', isTab: true },
+  '/sharing': { title: 'Sharing', isTab: true },
+  '/security': { title: 'Security', isTab: false },
+  '/profile': { title: 'Profile', isTab: false },
+  '/import-export': { title: 'Import / Export', isTab: false },
+  '/templates': { title: 'Templates', isTab: false },
+  '/admin/users': { title: 'Users', isTab: false },
+  '/admin/reference': { title: 'Reference Data', isTab: false },
+  '/admin/settings': { title: 'System Settings', isTab: false },
+};
+
+// ── Mobile Native Header ──
+function MobileHeader({ routeMeta, navigate, location, isUnlocked, vaultKeyExists, lockVault, promptVault, toggleHideAmounts, hideAmounts }) {
+  const meta = routeMeta[location.pathname] || { title: 'Citadel', isTab: true };
+
+  return (
+    <header className="mobile-native-header">
+      <div className="mobile-native-header-left">
+        {!meta.isTab && (
+          <button className="mobile-native-header-btn" onClick={() => navigate(-1)} aria-label="Go back">
+            <ChevronLeft size={22} />
+          </button>
+        )}
+      </div>
+      <span className="mobile-native-header-title">{meta.title}</span>
+      <div className="mobile-native-header-right">
+        {location.pathname === '/vault' && (
+          <button className="mobile-native-header-btn" onClick={() => window.dispatchEvent(new CustomEvent('vault:add'))} aria-label="Add entry">
+            <Plus size={22} />
+          </button>
+        )}
+        {['/', '/vault', '/portfolio', '/sharing'].includes(location.pathname) && (
+          <>
+            <button className={`mobile-native-header-btn hide-btn${hideAmounts ? ' active' : ''}`} onClick={toggleHideAmounts} aria-label={hideAmounts ? 'Show amounts' : 'Hide amounts'}>
+              {hideAmounts ? <Eye size={20} /> : <EyeOff size={20} />}
+            </button>
+            {isUnlocked ? (
+              <button className="mobile-native-header-btn lock-btn" onClick={lockVault} aria-label="Lock vault">
+                <Lock size={20} />
+              </button>
+            ) : isTruthy(vaultKeyExists) ? (
+              <button className="mobile-native-header-btn lock-btn" onClick={promptVault} aria-label="Unlock vault">
+                <KeyRound size={20} />
+              </button>
+            ) : null}
+          </>
+        )}
+      </div>
+    </header>
+  );
+}
+
+function MobileTabBar({ onMoreClick }) {
+  const tabs = [
+    { path: '/', label: 'Home', icon: LayoutDashboard },
+    { path: '/vault', label: 'Vault', icon: KeyRound },
+    { path: '/portfolio', label: 'Portfolio', icon: PieChart },
+    { path: '/sharing', label: 'Sharing', icon: Share2 },
+  ];
+
+  return (
+    <nav className="mobile-tab-bar">
+      {tabs.map(({ path, label, icon: Icon }) => (
+        <NavLink key={path} to={path} end={path === '/'} className={({ isActive }) => `mobile-tab-item${isActive ? ' active' : ''}`}>
+          <Icon size={24} />
+          {label}
+        </NavLink>
+      ))}
+      <button className="mobile-tab-item" onClick={onMoreClick}>
+        <MoreHorizontal size={24} />
+        More
+      </button>
+    </nav>
+  );
+}
+
+function MoreSheet({ open, onClose, navigate, isSiteAdmin, darkMode, toggleDarkMode, hideAmounts, toggleHideAmounts, isUnlocked, vaultKeyExists, lockVault, promptVault, logout, preference, setPreference }) {
+  // Swipe-down to dismiss
+  const [touchStartY, setTouchStartY] = useState(null);
+
+  const handleNav = (path) => {
+    navigate(path);
+    onClose();
+  };
+
+  return (
+    <>
+      <div className={`more-sheet-overlay${open ? ' visible' : ''}`} onClick={onClose} />
+      <div
+        className={`more-sheet${open ? ' visible' : ''}`}
+        onTouchStart={(e) => setTouchStartY(e.touches[0].clientY)}
+        onTouchMove={(e) => {
+          if (touchStartY !== null && e.touches[0].clientY - touchStartY > 60) {
+            onClose();
+            setTouchStartY(null);
+          }
+        }}
+        onTouchEnd={() => setTouchStartY(null)}
+      >
+        <div className="more-sheet-handle" />
+        <div className="more-sheet-content">
+          {/* Navigation */}
+          <div className="more-sheet-group">
+            <button className="more-sheet-item" onClick={() => handleNav('/security')}>
+              <ShieldCheck size={20} className="more-icon" />
+              <span>Security</span>
+              <ChevronRight size={16} className="more-chevron" />
+            </button>
+            <button className="more-sheet-item" onClick={() => handleNav('/profile')}>
+              <User size={20} className="more-icon" />
+              <span>Profile</span>
+              <ChevronRight size={16} className="more-chevron" />
+            </button>
+            <button className="more-sheet-item" onClick={() => handleNav('/import-export')}>
+              <FileDown size={20} className="more-icon" />
+              <span>Import / Export</span>
+              <ChevronRight size={16} className="more-chevron" />
+            </button>
+            <button className="more-sheet-item" onClick={() => handleNav('/templates')}>
+              <FileText size={20} className="more-icon" />
+              <span>Templates</span>
+              <ChevronRight size={16} className="more-chevron" />
+            </button>
+          </div>
+
+          {/* Admin — only for site admins */}
+          {isSiteAdmin && (
+            <div className="more-sheet-group">
+              <button className="more-sheet-item" onClick={() => handleNav('/admin/users')}>
+                <Users size={20} className="more-icon" />
+                <span>Users</span>
+                <ChevronRight size={16} className="more-chevron" />
+              </button>
+              <button className="more-sheet-item" onClick={() => handleNav('/admin/reference')}>
+                <Database size={20} className="more-icon" />
+                <span>Reference Data</span>
+                <ChevronRight size={16} className="more-chevron" />
+              </button>
+              <button className="more-sheet-item" onClick={() => handleNav('/admin/settings')}>
+                <Settings size={20} className="more-icon" />
+                <span>System Settings</span>
+                <ChevronRight size={16} className="more-chevron" />
+              </button>
+            </div>
+          )}
+
+          {/* Toggles */}
+          <div className="more-sheet-group">
+            <button className="more-sheet-item" onClick={toggleHideAmounts}>
+              {hideAmounts ? <Eye size={20} className="more-icon" /> : <EyeOff size={20} className="more-icon" />}
+              <span>{hideAmounts ? 'Show Amounts' : 'Hide Amounts'}</span>
+            </button>
+            <button className="more-sheet-item" onClick={toggleDarkMode}>
+              {darkMode ? <Sun size={20} className="more-icon" /> : <Moon size={20} className="more-icon" />}
+              <span>{darkMode ? 'Light Mode' : 'Dark Mode'}</span>
+            </button>
+            <button className="more-sheet-item" onClick={() => { isUnlocked ? lockVault() : promptVault(); onClose(); }}>
+              <Lock size={20} className="more-icon" />
+              <span>{isUnlocked ? 'Lock Vault' : isTruthy(vaultKeyExists) ? 'Unlock Vault' : 'Setup Vault'}</span>
+            </button>
+          </div>
+
+          {/* Layout switch */}
+          <div className="more-sheet-group">
+            <button className="more-sheet-item" onClick={() => { setPreference('classic'); onClose(); }}>
+              <Monitor size={20} className="more-icon" />
+              <span>Switch to Classic Layout</span>
+            </button>
+          </div>
+
+          {/* Sign out */}
+          <div className="more-sheet-group">
+            <button className="more-sheet-item danger" onClick={logout}>
+              <LogOut size={20} className="more-icon" />
+              <span>Sign Out</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
 }
 
 export default function Layout() {
@@ -62,6 +255,8 @@ export default function Layout() {
   });
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const { isMobile, preference, setPreference } = useLayoutMode();
+  const [moreSheetOpen, setMoreSheetOpen] = useState(false);
 
   const [pendingShareCount, setPendingShareCount] = useState(0);
   const [showPasskeyBanner, setShowPasskeyBanner] = useState(false);
@@ -179,9 +374,10 @@ export default function Layout() {
 
   const location = useLocation();
 
-  // Close mobile sidebar on navigation
+  // Close mobile sidebar and more sheet on navigation
   useEffect(() => {
     setSidebarOpen(false);
+    setMoreSheetOpen(false);
   }, [location.pathname]);
 
   const appName = import.meta.env.VITE_APP_NAME || 'Personal Vault';
@@ -191,57 +387,91 @@ export default function Layout() {
 
   return (
     <HideAmountsContext.Provider value={{ hideAmounts, toggleHideAmounts }}>
-      <div className="app-layout">
-        {/* Mobile header — visible ≤768px only */}
-        <header className="mobile-header">
-          <button className="icon-btn" onClick={() => setSidebarOpen(prev => !prev)} aria-label="Toggle menu">
-            {sidebarOpen ? <X size={22} /> : <Menu size={22} />}
-          </button>
-          <span className="mobile-header-title">
-            <Shield size={20} />
-            {appName}
-          </span>
-          <div className="mobile-header-actions">
-            <button className="icon-btn" title="Refresh app"
-              onClick={async () => {
-                if ('serviceWorker' in navigator) {
-                  const regs = await navigator.serviceWorker.getRegistrations();
-                  await Promise.all(regs.map(r => r.unregister()));
-                }
-                if ('caches' in window) {
-                  const keys = await caches.keys();
-                  await Promise.all(keys.map(k => caches.delete(k)));
-                }
-                window.location.reload();
-              }}>
-              <RefreshCw size={18} />
-            </button>
-            <button className="icon-btn" onClick={toggleDarkMode} title={darkMode ? 'Light mode' : 'Dark mode'}>
-              {darkMode ? <Sun size={18} /> : <Moon size={18} />}
-            </button>
-            {isUnlocked ? (
-              <button className="icon-btn" onClick={lockVault} title="Lock vault">
-                <Lock size={18} />
+      <div className={`app-layout${isMobile ? ' mobile-layout-active' : ''}`}>
+        {isMobile ? (
+          <>
+            <MobileHeader
+              routeMeta={ROUTE_META}
+              navigate={navigate}
+              location={location}
+              isUnlocked={isUnlocked}
+              vaultKeyExists={vaultKeyExists}
+              lockVault={lockVault}
+              promptVault={promptVault}
+              toggleHideAmounts={toggleHideAmounts}
+              hideAmounts={hideAmounts}
+            />
+            <MobileTabBar onMoreClick={() => setMoreSheetOpen(true)} />
+            <MoreSheet
+              open={moreSheetOpen}
+              onClose={() => setMoreSheetOpen(false)}
+              navigate={navigate}
+              isSiteAdmin={isSiteAdmin}
+              darkMode={darkMode}
+              toggleDarkMode={toggleDarkMode}
+              hideAmounts={hideAmounts}
+              toggleHideAmounts={toggleHideAmounts}
+              isUnlocked={isUnlocked}
+              vaultKeyExists={vaultKeyExists}
+              lockVault={lockVault}
+              promptVault={promptVault}
+              logout={logout}
+              preference={preference}
+              setPreference={setPreference}
+            />
+          </>
+        ) : (
+          <>
+            {/* Mobile header — visible ≤768px only */}
+            <header className="mobile-header">
+              <button className="icon-btn" onClick={() => setSidebarOpen(prev => !prev)} aria-label="Toggle menu">
+                {sidebarOpen ? <X size={22} /> : <Menu size={22} />}
               </button>
-            ) : isTruthy(vaultKeyExists) ? (
-              <button className="icon-btn" onClick={promptVault} title="Unlock vault">
-                <KeyRound size={18} />
-              </button>
-            ) : null}
-            <button className="icon-btn" onClick={toggleHideAmounts} title={hideAmounts ? 'Show amounts' : 'Hide amounts'}>
-              {hideAmounts ? <EyeOff size={18} /> : <Eye size={18} />}
-            </button>
-          </div>
-        </header>
+              <span className="mobile-header-title">
+                <Shield size={20} />
+                {appName}
+              </span>
+              <div className="mobile-header-actions">
+                <button className="icon-btn" title="Refresh app"
+                  onClick={async () => {
+                    if ('serviceWorker' in navigator) {
+                      const regs = await navigator.serviceWorker.getRegistrations();
+                      await Promise.all(regs.map(r => r.unregister()));
+                    }
+                    if ('caches' in window) {
+                      const keys = await caches.keys();
+                      await Promise.all(keys.map(k => caches.delete(k)));
+                    }
+                    window.location.reload();
+                  }}>
+                  <RefreshCw size={18} />
+                </button>
+                <button className="icon-btn" onClick={toggleDarkMode} title={darkMode ? 'Light mode' : 'Dark mode'}>
+                  {darkMode ? <Sun size={18} /> : <Moon size={18} />}
+                </button>
+                {isUnlocked ? (
+                  <button className="icon-btn" onClick={lockVault} title="Lock vault">
+                    <Lock size={18} />
+                  </button>
+                ) : isTruthy(vaultKeyExists) ? (
+                  <button className="icon-btn" onClick={promptVault} title="Unlock vault">
+                    <KeyRound size={18} />
+                  </button>
+                ) : null}
+                <button className="icon-btn" onClick={toggleHideAmounts} title={hideAmounts ? 'Show amounts' : 'Hide amounts'}>
+                  {hideAmounts ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+            </header>
 
-        {/* Backdrop — visible when mobile sidebar is open */}
-        <div
-          className={`sidebar-backdrop${sidebarOpen ? ' visible' : ''}`}
-          onClick={() => setSidebarOpen(false)}
-        />
+            {/* Backdrop — visible when mobile sidebar is open */}
+            <div
+              className={`sidebar-backdrop${sidebarOpen ? ' visible' : ''}`}
+              onClick={() => setSidebarOpen(false)}
+            />
 
-        {/* Sidebar */}
-        <aside className={`sidebar${sidebarOpen ? ' open' : ''}`}>
+            {/* Sidebar */}
+            <aside className={`sidebar${sidebarOpen ? ' open' : ''}`}>
           <div className="sidebar-header">
             <div className="sidebar-logo">
               <Shield size={28} />
@@ -397,8 +627,17 @@ export default function Layout() {
                 <LogOut size={16} /> Sign Out
               </button>
             </div>
+            <button
+              className="btn btn-sm btn-outline"
+              onClick={() => setPreference('mobile')}
+              style={{ fontSize: 11, padding: '3px 8px', marginTop: 4, opacity: 0.7, width: '100%' }}
+            >
+              <Smartphone size={12} /> Switch to Mobile Layout
+            </button>
           </div>
         </aside>
+          </>
+        )}
 
         {/* Main Content */}
         <main className="main-content">
