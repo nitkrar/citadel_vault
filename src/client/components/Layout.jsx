@@ -76,11 +76,9 @@ function MobileHeader({ routeMeta, navigate, location, isUnlocked, vaultKeyExist
   return (
     <header className="mobile-native-header">
       <div className="mobile-native-header-left">
-        {!meta.isTab && (
-          <button className="mobile-native-header-btn" onClick={() => navigate(-1)} aria-label="Go back">
-            <ChevronLeft size={22} />
-          </button>
-        )}
+        <button className="mobile-native-header-btn" onClick={() => navigate(-1)} aria-label="Go back">
+          <ChevronLeft size={22} />
+        </button>
       </div>
       <span className="mobile-native-header-title">{meta.title}</span>
       <div className="mobile-native-header-right">
