@@ -5,7 +5,6 @@ import * as workerDispatcher from '../lib/workerDispatcher';
 import useCurrencies from './useCurrencies';
 import useTemplates from './useTemplates';
 import useAppConfig from './useAppConfig';
-import useRefreshPrices from './useRefreshPrices';
 import api from '../api/client';
 
 const PRICE_CACHE_KEY = 'pv_ticker_prices';
@@ -97,9 +96,6 @@ export default function usePortfolioData() {
     api.put('/preferences.php', { display_currency: code }).catch(() => {});
   }, []);
 
-  // Centralized price refresh — fetches AND applies to entries
-  const { refreshAndApplyPrices } = useRefreshPrices();
-
   return {
     portfolio,
     loading: refLoading || entriesLoading,
@@ -110,6 +106,5 @@ export default function usePortfolioData() {
     baseCurrency,
     currencies,
     ratesLastUpdated: portfolio?.rates_last_updated || null,
-    refreshAndApplyPrices,
   };
 }
