@@ -11,7 +11,8 @@ export function AuthProvider({ children }) {
   const [mustChangePassword, setMustChangePassword] = useState(false);
   const [mustChangeVaultKey, setMustChangeVaultKey] = useState(false);
   const [adminActionMessage, setAdminActionMessage] = useState(null);
-  const [preferences, setPreferences] = useState({});
+  const [preferences, setPreferences] = useState(null);
+  const [preferencesLoaded, setPreferencesLoaded] = useState(false);
 
   // On mount, try to restore session only if a prior login left a hint.
   // The httpOnly cookie is invisible to JS, so we use a localStorage flag
@@ -28,10 +29,7 @@ export function AuthProvider({ children }) {
         setMustChangePassword(!!u?.must_change_password);
         setMustChangeVaultKey(!!u?.must_change_vault_key);
         setAdminActionMessage(u?.admin_action_message || null);
-        try {
-          const prefsRes = await api.get('/preferences.php');
-          setPreferences(prefsRes.data?.data || prefsRes.data || {});
-        } catch {}
+        await fetchPreferences();
       })
       .catch(() => {
         // Cookie expired or invalid — clean up the hint
@@ -50,11 +48,21 @@ export function AuthProvider({ children }) {
       localStorage.removeItem('pv_has_session');
       vaultSession.destroy();
       setUser(null);
-      setPreferences({});
+      setPreferences(null);
+      setPreferencesLoaded(false);
     };
     window.addEventListener('citadel:auth-expired', handleAuthExpired);
     return () => window.removeEventListener('citadel:auth-expired', handleAuthExpired);
   }, []);
+
+  // Fetch preferences immediately — vault unlock depends on this
+  const fetchPreferences = async () => {
+    try {
+      const res = await api.get('/preferences.php');
+      setPreferences(res.data?.data || res.data || {});
+    } catch {}
+    setPreferencesLoaded(true);
+  };
 
   const login = async (username, password) => {
     const res = await api.post('/auth.php?action=login', { username, password });
@@ -64,16 +72,18 @@ export function AuthProvider({ children }) {
     setMustChangePassword(!!newUser?.must_change_password);
     setMustChangeVaultKey(!!newUser?.must_change_vault_key);
     setAdminActionMessage(newUser?.admin_action_message || null);
+    await fetchPreferences();
     return res.data.data;
   };
 
-  const loginWithToken = (data) => {
+  const loginWithToken = async (data) => {
     const { user: newUser } = data;
     localStorage.setItem('pv_has_session', '1');
     setUser(newUser);
     setMustChangePassword(!!newUser?.must_change_password);
     setMustChangeVaultKey(!!newUser?.must_change_vault_key);
     setAdminActionMessage(newUser?.admin_action_message || null);
+    await fetchPreferences();
   };
 
   const loginWithPasskey = async () => {
@@ -109,7 +119,8 @@ export function AuthProvider({ children }) {
     setMustChangePassword(false);
     setMustChangeVaultKey(false);
     setAdminActionMessage(null);
-    setPreferences({});
+    setPreferences(null);
+    setPreferencesLoaded(false);
   };
 
   const clearMustChangePassword = () => {
@@ -132,12 +143,7 @@ export function AuthProvider({ children }) {
     } catch {}
   };
 
-  const refreshPreferences = async () => {
-    try {
-      const res = await api.get('/preferences.php');
-      setPreferences(res.data?.data || res.data || {});
-    } catch {}
-  };
+  const refreshPreferences = fetchPreferences;
 
   const value = {
     user,
@@ -158,6 +164,7 @@ export function AuthProvider({ children }) {
     clearAdminActionMessage,
     refreshUser,
     preferences,
+    preferencesLoaded,
     refreshPreferences,
   };
 

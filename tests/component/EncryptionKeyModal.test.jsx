@@ -81,6 +81,7 @@ const defaultAuth = {
   clearMustChangeVaultKey: vi.fn(),
   adminActionMessage: null,
   preferences: {},
+  preferencesLoaded: true,
 };
 
 beforeEach(() => {
