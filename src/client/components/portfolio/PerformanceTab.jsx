@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { ChevronDown, ChevronRight, Settings, Clock, AlertTriangle } from 'lucide-react';
+import { ChevronDown, ChevronRight, Settings, Clock, AlertTriangle, MoreVertical } from 'lucide-react';
 import { Line as CJSLine, Bar as CJSBar } from 'react-chartjs-2';
 import { Chart as ChartJS } from 'chart.js';
 import zoomPlugin from 'chartjs-plugin-zoom';
@@ -73,7 +73,7 @@ function getGroupTotals(summary, breakdown) {
   return {};
 }
 
-export default function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies, countries, displayCurrency, baseCurrency, snapshotPrompt, setSnapshotPrompt, doSaveSnapshot, snapshotSaving, decryptedCache, portfolio }) {
+export default function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies, countries, displayCurrency, baseCurrency, snapshotPrompt, setSnapshotPrompt, doSaveSnapshot, snapshotSaving, decryptedCache, portfolio, isMobile }) {
   const [snapshots, setSnapshots] = useState([]);
   const [loadingSnap, setLoadingSnap] = useState(true);
   const [rateMode, setRateMode] = useState('current'); // 'current' | 'snapshot'
@@ -95,6 +95,7 @@ export default function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies,
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState(null);
+  const [showToolbarOverflow, setShowToolbarOverflow] = useState(false);
   const heroChartRef = useRef(null);
   const deltaChartRef = useRef(null);
 
@@ -739,120 +740,241 @@ export default function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies,
 
   return (
     <>
-      {/* Zone 1 — Toolbar (streamlined) */}
-      <div className="card mb-4" style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        {/* Breakdown dropdown */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <span style={{ fontSize: 13, fontWeight: 600 }}>Breakdown:</span>
+      {/* Zone 1 — Toolbar */}
+      {isMobile ? (
+        <div className="card mb-4" style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap', overflow: 'hidden' }}>
+          {/* Breakdown dropdown (always visible) */}
           <select
             className="form-control"
             aria-label="Breakdown"
-            style={{ width: 'auto', minWidth: 140, fontSize: 13 }}
+            style={{ width: 'auto', minWidth: 0, flex: '0 1 auto', fontSize: 13 }}
             value={breakdown}
-            onChange={e => {
-              setBreakdown(e.target.value);
-              sessionStorage.setItem('pv_portfolio_breakdown', e.target.value);
-            }}
+            onChange={e => { setBreakdown(e.target.value); sessionStorage.setItem('pv_portfolio_breakdown', e.target.value); }}
           >
-            <option value="type">By Asset Class</option>
+            <option value="type">By Class</option>
             <option value="country">By Country</option>
             <option value="account">By Account</option>
             <option value="currency">By Currency</option>
             <option value="asset">By Asset</option>
           </select>
+
+          {/* Values / % toggle (always visible) */}
+          <SegmentedControl
+            options={[{ value: 'values', label: 'Val' }, { value: 'percent', label: '%' }]}
+            value={showPercent ? 'percent' : 'values'}
+            onChange={v => { if (!yoyMode) setShowPercent(v === 'percent'); }}
+          />
+
+          {/* Active filter indicator */}
+          {hasActiveFilter && (
+            <span style={{ fontSize: 11, color: 'var(--color-primary)', whiteSpace: 'nowrap', flexShrink: 0 }}>
+              Filtered
+            </span>
+          )}
+
+          <div style={{ flex: 1 }} />
+
+          {/* Overflow menu */}
+          <div style={{ position: 'relative', flexShrink: 0 }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => setShowToolbarOverflow(v => !v)} aria-label="More options">
+              <MoreVertical size={18} />
+            </button>
+            {showToolbarOverflow && (
+              <>
+                <div style={{ position: 'fixed', inset: 0, zIndex: 900 }} onClick={() => setShowToolbarOverflow(false)} />
+                <div style={{
+                  position: 'fixed', right: 16, zIndex: 901,
+                  background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 8,
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.15)', minWidth: 220, overflow: 'hidden', padding: '8px 0',
+                }}>
+                  {/* Asset class filter */}
+                  {allTypes.size > 1 && (
+                    <div style={{ padding: '6px 14px' }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-muted)' }}>Asset Class</span>
+                      <select className="form-control" aria-label="Asset class filter"
+                        style={{ width: '100%', fontSize: 13, marginTop: 4 }}
+                        value={filterType} onChange={e => setFilterType(e.target.value)}>
+                        <option value="all">All</option>
+                        {[...allTypes.entries()].map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  {/* Country filter */}
+                  {allCountries.size > 1 && (
+                    <div style={{ padding: '6px 14px' }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-muted)' }}>Country</span>
+                      <select className="form-control" aria-label="Country filter"
+                        style={{ width: '100%', fontSize: 13, marginTop: 4 }}
+                        value={filterCountry} onChange={e => setFilterCountry(e.target.value)}>
+                        <option value="all">All</option>
+                        {[...allCountries.entries()].map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  {/* Clear filters */}
+                  {hasActiveFilter && (
+                    <button className="btn btn-ghost btn-sm"
+                      style={{ width: '100%', justifyContent: 'flex-start', borderRadius: 0, padding: '10px 14px', fontSize: 12 }}
+                      onClick={() => { setFilterType('all'); setFilterCountry('all'); setShowToolbarOverflow(false); }}>
+                      Clear filters
+                    </button>
+                  )}
+                  {(allTypes.size > 1 || allCountries.size > 1) && <div style={{ borderTop: '1px solid var(--border)', margin: '4px 0' }} />}
+                  {/* YoY toggle */}
+                  <button className="btn btn-ghost btn-sm"
+                    style={{ width: '100%', justifyContent: 'flex-start', borderRadius: 0, padding: '10px 14px',
+                      background: yoyMode ? 'var(--hover-bg)' : undefined }}
+                    disabled={showPercent}
+                    onClick={() => {
+                      const next = !yoyMode;
+                      setYoyMode(next);
+                      if (next && showPercent) setShowPercent(false);
+                      setShowToolbarOverflow(false);
+                    }}>
+                    Year-over-Year {yoyMode ? '(on)' : ''}
+                  </button>
+                  {/* Tooltip mode */}
+                  <div style={{ padding: '6px 14px' }}>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-muted)' }}>Tooltip</span>
+                    <div style={{ marginTop: 4 }}>
+                      <SegmentedControl
+                        options={[{ value: 'index', label: 'Combined' }, { value: 'nearest', label: 'Single' }]}
+                        value={tooltipMode}
+                        onChange={v => { setTooltipMode(v); setShowToolbarOverflow(false); }}
+                      />
+                    </div>
+                  </div>
+                  {/* Rate mode */}
+                  <div style={{ padding: '6px 14px' }}>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-muted)' }}>Rate Mode</span>
+                    <div style={{ marginTop: 4 }}>
+                      <SegmentedControl
+                        options={[{ value: 'current', label: 'Current' }, { value: 'snapshot', label: loadingRates ? 'Loading...' : 'Snapshot' }]}
+                        value={rateMode}
+                        onChange={v => { handleRateModeChange(v); setShowToolbarOverflow(false); }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         </div>
-
-        {/* Independent asset class filter */}
-        {allTypes.size > 1 && (
+      ) : (
+        <div className="card mb-4" style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          {/* Breakdown dropdown */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ fontSize: 13, fontWeight: 600 }}>Asset Class:</span>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>Breakdown:</span>
             <select
               className="form-control"
-              aria-label="Asset class filter"
-              style={{ width: 'auto', minWidth: 120, fontSize: 13, padding: '2px 24px 2px 8px' }}
-              value={filterType}
-              onChange={e => setFilterType(e.target.value)}
+              aria-label="Breakdown"
+              style={{ width: 'auto', minWidth: 140, fontSize: 13 }}
+              value={breakdown}
+              onChange={e => {
+                setBreakdown(e.target.value);
+                sessionStorage.setItem('pv_portfolio_breakdown', e.target.value);
+              }}
             >
-              <option value="all">All</option>
-              {[...allTypes.entries()].map(([key, label]) => (
-                <option key={key} value={key}>{label}</option>
-              ))}
+              <option value="type">By Asset Class</option>
+              <option value="country">By Country</option>
+              <option value="account">By Account</option>
+              <option value="currency">By Currency</option>
+              <option value="asset">By Asset</option>
             </select>
           </div>
-        )}
 
-        {/* Independent country filter */}
-        {allCountries.size > 1 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ fontSize: 13, fontWeight: 600 }}>Country:</span>
-            <select
-              className="form-control"
-              aria-label="Country filter"
-              style={{ width: 'auto', minWidth: 120, fontSize: 13, padding: '2px 24px 2px 8px' }}
-              value={filterCountry}
-              onChange={e => setFilterCountry(e.target.value)}
-            >
-              <option value="all">All</option>
-              {[...allCountries.entries()].map(([key, label]) => (
-                <option key={key} value={key}>{label}</option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        {/* Clear filters button */}
-        {hasActiveFilter && (
-          <button className="btn btn-ghost btn-sm" style={{ fontSize: 12 }} onClick={() => { setFilterType('all'); setFilterCountry('all'); }}>
-            Clear filters
-          </button>
-        )}
-
-        {/* View mode toggle */}
-        <SegmentedControl
-          options={[{ value: 'values', label: 'Values' }, { value: 'percent', label: '% Allocation' }]}
-          value={showPercent ? 'percent' : 'values'}
-          onChange={v => { if (!yoyMode) setShowPercent(v === 'percent'); }}
-        />
-
-        {/* Year-over-year toggle */}
-        <button
-          className={`btn btn-sm ${yoyMode ? 'btn-primary' : 'btn-ghost'}`}
-          onClick={() => {
-            const next = !yoyMode;
-            setYoyMode(next);
-            if (next && showPercent) setShowPercent(false);
-          }}
-          disabled={showPercent}
-          title="Compare with previous year"
-          style={{ fontSize: 12 }}
-        >
-          YoY
-        </button>
-
-        {/* Tooltip mode toggle */}
-        <SegmentedControl
-          options={[{ value: 'index', label: 'Combined' }, { value: 'nearest', label: 'Single' }]}
-          value={tooltipMode}
-          onChange={setTooltipMode}
-        />
-
-        {/* Rate mode — gear icon popover */}
-        <div style={{ position: 'relative', marginLeft: 'auto' }}>
-          <button className="btn btn-ghost btn-sm" onClick={() => setShowRateSettings(prev => !prev)} title="Rate settings">
-            <Settings size={16} />
-          </button>
-          {showRateSettings && (
-            <div className="card" style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, padding: '10px 14px', zIndex: 20, minWidth: 180, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
-              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-muted)', display: 'block', marginBottom: 6 }}>Rate Mode</span>
-              <SegmentedControl
-                options={[{ value: 'current', label: 'Current' }, { value: 'snapshot', label: loadingRates ? 'Loading...' : 'Snapshot' }]}
-                value={rateMode}
-                onChange={v => { handleRateModeChange(v); setShowRateSettings(false); }}
-              />
+          {/* Independent asset class filter */}
+          {allTypes.size > 1 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>Asset Class:</span>
+              <select
+                className="form-control"
+                aria-label="Asset class filter"
+                style={{ width: 'auto', minWidth: 120, fontSize: 13, padding: '2px 24px 2px 8px' }}
+                value={filterType}
+                onChange={e => setFilterType(e.target.value)}
+              >
+                <option value="all">All</option>
+                {[...allTypes.entries()].map(([key, label]) => (
+                  <option key={key} value={key}>{label}</option>
+                ))}
+              </select>
             </div>
           )}
+
+          {/* Independent country filter */}
+          {allCountries.size > 1 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>Country:</span>
+              <select
+                className="form-control"
+                aria-label="Country filter"
+                style={{ width: 'auto', minWidth: 120, fontSize: 13, padding: '2px 24px 2px 8px' }}
+                value={filterCountry}
+                onChange={e => setFilterCountry(e.target.value)}
+              >
+                <option value="all">All</option>
+                {[...allCountries.entries()].map(([key, label]) => (
+                  <option key={key} value={key}>{label}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Clear filters button */}
+          {hasActiveFilter && (
+            <button className="btn btn-ghost btn-sm" style={{ fontSize: 12 }} onClick={() => { setFilterType('all'); setFilterCountry('all'); }}>
+              Clear filters
+            </button>
+          )}
+
+          {/* View mode toggle */}
+          <SegmentedControl
+            options={[{ value: 'values', label: 'Values' }, { value: 'percent', label: '% Allocation' }]}
+            value={showPercent ? 'percent' : 'values'}
+            onChange={v => { if (!yoyMode) setShowPercent(v === 'percent'); }}
+          />
+
+          {/* Year-over-year toggle */}
+          <button
+            className={`btn btn-sm ${yoyMode ? 'btn-primary' : 'btn-ghost'}`}
+            onClick={() => {
+              const next = !yoyMode;
+              setYoyMode(next);
+              if (next && showPercent) setShowPercent(false);
+            }}
+            disabled={showPercent}
+            title="Compare with previous year"
+            style={{ fontSize: 12 }}
+          >
+            YoY
+          </button>
+
+          {/* Tooltip mode toggle */}
+          <SegmentedControl
+            options={[{ value: 'index', label: 'Combined' }, { value: 'nearest', label: 'Single' }]}
+            value={tooltipMode}
+            onChange={setTooltipMode}
+          />
+
+          {/* Rate mode — gear icon popover */}
+          <div style={{ position: 'relative', marginLeft: 'auto' }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => setShowRateSettings(prev => !prev)} title="Rate settings">
+              <Settings size={16} />
+            </button>
+            {showRateSettings && (
+              <div className="card" style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, padding: '10px 14px', zIndex: 20, minWidth: 180, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-muted)', display: 'block', marginBottom: 6 }}>Rate Mode</span>
+                <SegmentedControl
+                  options={[{ value: 'current', label: 'Current' }, { value: 'snapshot', label: loadingRates ? 'Loading...' : 'Snapshot' }]}
+                  value={rateMode}
+                  onChange={v => { handleRateModeChange(v); setShowRateSettings(false); }}
+                />
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Zone 2 — Hero Chart (with date range inside) */}
       {chartData.length >= 1 && (
