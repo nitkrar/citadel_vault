@@ -954,12 +954,12 @@ describe('PBKDF2 iteration migration', () => {
 // ── getKdfIterations ─────────────────────────────────────────────────────
 
 describe('getKdfIterations', () => {
-  it('returns 100K when preferences is null', () => {
-    expect(getKdfIterations(null)).toBe(100000);
+  it('throws when preferences is null (not loaded)', () => {
+    expect(() => getKdfIterations(null)).toThrow('preferences not loaded');
   });
 
-  it('returns 100K when preferences is undefined', () => {
-    expect(getKdfIterations(undefined)).toBe(100000);
+  it('throws when preferences is undefined (not loaded)', () => {
+    expect(() => getKdfIterations(undefined)).toThrow('preferences not loaded');
   });
 
   it('returns 100K when kdf_iterations key is missing', () => {

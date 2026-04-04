@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { KeyRound, AlertTriangle, Shield, Download, Eye, EyeOff } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { KeyRound, AlertTriangle, Shield, Download, Eye, EyeOff, Loader } from 'lucide-react';
 import RecoveryKeyCopyBlock from './RecoveryKeyCopyBlock';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -29,7 +29,7 @@ export default function EncryptionKeyModal() {
     skipVault,
   } = useEncryption();
 
-  const { mustChangePassword, mustChangeVaultKey, clearMustChangeVaultKey, adminActionMessage, preferences } = useAuth();
+  const { mustChangePassword, mustChangeVaultKey, clearMustChangeVaultKey, adminActionMessage, preferences, preferencesLoaded } = useAuth();
 
   // ------------------------------------------------------------------
   // Local state (must be declared before any early returns — Rules of Hooks)
@@ -54,10 +54,29 @@ export default function EncryptionKeyModal() {
   const [oldVaultKey, setOldVaultKey] = useState('');
   const [showVaultKey, setShowVaultKey] = useState(false);
 
+  // Sync keyType when preferences arrive (initial load or refresh)
+  useEffect(() => {
+    if (preferencesLoaded) {
+      const saved = getUserPreference(preferences, 'vault_key_type');
+      setKeyType(saved);
+    }
+  }, [preferencesLoaded, preferences]);
+
   // Block vault modal while loading (prevents flash of setup modal on refresh)
   if (isLoading) return null;
   // Block vault modal if password change is required first
   if (mustChangePassword) return null;
+  // Block vault modal until preferences are loaded (KDF iterations, key type depend on it)
+  if (!preferencesLoaded) {
+    return (
+      <Modal isOpen={true} title="Preparing Vault" onClose={null}>
+        <div style={{ textAlign: 'center', padding: '24px 0' }}>
+          <Loader size={32} className="spin" style={{ color: 'var(--color-primary)', marginBottom: 12 }} />
+          <p style={{ color: 'var(--color-text-muted)', fontSize: 14 }}>Loading security settings...</p>
+        </div>
+      </Modal>
+    );
+  }
 
   // ------------------------------------------------------------------
   // Determine visibility & effective mode

@@ -22,9 +22,15 @@ export const AAD_RECOVERY_KEY = 'citadel.recovery.v1';
 /**
  * Resolve the user's current KDF iteration count from preferences.
  * Single source of truth — all callers use this instead of manual parseInt + fallback.
+ * IMPORTANT: Preferences MUST be loaded before calling this. The default fallback
+ * (PBKDF2_ITERATIONS) is only used when the user has never set a preference — NOT
+ * as a substitute for unloaded preferences. Callers must gate on preferencesLoaded.
  */
 export function getKdfIterations(preferences) {
-    const raw = preferences?.kdf_iterations;
+    if (preferences === null || preferences === undefined) {
+        throw new Error('Cannot derive KDF iterations: preferences not loaded. Gate on preferencesLoaded before calling.');
+    }
+    const raw = preferences.kdf_iterations;
     const parsed = parseInt(raw, 10);
     return parsed > 0 ? parsed : PBKDF2_ITERATIONS;
 }
