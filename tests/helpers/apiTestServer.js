@@ -3,7 +3,8 @@
  * with .env.test for full isolation from the dev environment.
  *
  * Used as vitest globalSetup for API tests.
- * Seeds ghost user, reference data, and admin user for test authentication.
+ * Rebuilds test DB from schema + seed, seeds admin user,
+ * and starts an isolated PHP server with relaxed rate limits.
  */
 import { spawn, execSync } from 'child_process';
 import { resolve } from 'path';
@@ -22,14 +23,14 @@ export async function setup() {
     execSync(`lsof -ti:${PORT} | xargs kill 2>/dev/null`, { stdio: 'ignore' });
   } catch {}
 
-  // 1. Truncate all tables for a clean slate
-  truncateTestDb();
+  // 1. Apply full schema (drops + recreates all tables)
+  execSync(`mysql -u ${DB_USER} ${DB_NAME} < "${resolve(ROOT, 'database', '01-schema.sql')}"`, { stdio: 'ignore' });
 
-  // 2. Seed reference data (ghost user, templates, currencies, countries, exchanges)
-  seedTestDb();
+  // 2. Seed reference data (ghost user, templates, currencies, countries, exchanges, system settings)
+  execSync(`mysql -u ${DB_USER} ${DB_NAME} < "${resolve(ROOT, 'database', '02-seed.sql')}"`, { stdio: 'ignore' });
 
-  // 3. Create admin user with known credentials
-  seedAdminUser();
+  // 3. Seed admin user via PHP (avoids shell escaping issues with passwords)
+  execSync(`php "${resolve(ROOT, 'tests', 'helpers', '_seed_test_data.php')}" "${DB_NAME}" "${DB_USER}"`, { stdio: 'ignore' });
 
   // 4. Start PHP server with test config
   serverProcess = spawn('php', ['-S', `localhost:${PORT}`, 'router.php'], {
@@ -55,30 +56,4 @@ export async function teardown() {
     serverProcess.kill('SIGTERM');
     serverProcess = null;
   }
-}
-
-function truncateTestDb() {
-  // Get all table names dynamically to avoid missing any
-  const result = execSync(
-    `mysql -u ${DB_USER} ${DB_NAME} -N -e "SHOW TABLES"`,
-    { encoding: 'utf-8' },
-  ).trim();
-  const tables = result.split('\n').filter(Boolean);
-  if (tables.length === 0) return;
-
-  const sql = 'SET FOREIGN_KEY_CHECKS=0; '
-    + tables.map(t => `TRUNCATE TABLE ${t};`).join(' ')
-    + ' SET FOREIGN_KEY_CHECKS=1;';
-  execSync(`mysql -u ${DB_USER} ${DB_NAME} -e "${sql}"`, { stdio: 'ignore' });
-}
-
-function seedTestDb() {
-  const seedFile = resolve(ROOT, 'database', '02-seed.sql');
-  execSync(`mysql -u ${DB_USER} ${DB_NAME} < "${seedFile}"`, { stdio: 'ignore' });
-}
-
-function seedAdminUser() {
-  // Generate bcrypt hash for 'Initial#12$' via PHP (avoids shell escaping issues)
-  const phpScript = resolve(ROOT, 'tests', 'helpers', '_seed_admin.php');
-  execSync(`php "${phpScript}" "${DB_NAME}" "${DB_USER}"`, { stdio: 'ignore' });
 }
