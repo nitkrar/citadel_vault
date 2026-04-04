@@ -25,11 +25,13 @@ function fmtVal(val, currency) {
 let _templateFieldsCache = {};
 function getEntryValue(entry, templates) {
   const type = entry._entryType || entry.entry_type || entry.template_key;
-  if (!_templateFieldsCache[type]) {
-    const tmpl = templates?.find(t => t.template_key === type && !t.owner_id);
-    _templateFieldsCache[type] = tmpl ? parseFields(tmpl.fields) : [];
+  const subtype = entry.subtype;
+  const cacheKey = subtype ? `${type}:${subtype}` : type;
+  if (!_templateFieldsCache[cacheKey]) {
+    const tmpl = findTemplate(templates, type, subtype);
+    _templateFieldsCache[cacheKey] = tmpl ? parseFields(tmpl.fields) : [];
   }
-  const val = extractValue(entry, _templateFieldsCache[type]);
+  const val = extractValue(entry, _templateFieldsCache[cacheKey]);
   return val || null;
 }
 function esc(s) { return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
@@ -40,8 +42,17 @@ function parseFields(raw) {
   try { const p = JSON.parse(raw); return Array.isArray(p) ? p : []; } catch { return []; }
 }
 
-function findTemplate(templates, type) {
-  return templates.find(t => t.template_key === type && !t.owner_id) ?? null;
+function findTemplate(templates, type, subtype) {
+  // Prefer subtype-specific template, fall back to generic
+  if (subtype) {
+    const specific = templates.find(t => t.template_key === type && !t.owner_id && t.subtype === subtype);
+    if (specific) return specific;
+  }
+  return templates.find(t => t.template_key === type && !t.owner_id && !t.subtype && !t.country_code) ?? null;
+}
+
+function getTemplateFields(templates, type, subtype) {
+  return parseFields(findTemplate(templates, type, subtype)?.fields);
 }
 
 /**
@@ -265,8 +276,6 @@ function buildFullAccountsAssets(accounts, assets, templates, { fieldVisibility 
   if (accounts.length === 0 && assets.length === 0) return '';
   const fv = fieldVisibility || {};
 
-  const acctFields = parseFields(findTemplate(templates, 'account')?.fields);
-  const assetFieldsDef = parseFields(findTemplate(templates, 'asset')?.fields);
   const linkedIds = new Set();
   let cardsHtml = '';
 
@@ -274,6 +283,7 @@ function buildFullAccountsAssets(accounts, assets, templates, { fieldVisibility 
     const c = cleanEntry(acct);
     const title = esc(c.title ?? c.name ?? '(untitled)');
     const tags = [c.subtype, c.currency].filter(Boolean).map(t => `<span class="tag">${esc(t)}</span>`).join('');
+    const acctFields = getTemplateFields(templates, 'account', c.subtype);
     const fields = getExtraFields(c, acctFields, { fieldVisibility: fv });
     const fieldGridHtml = fields.length > 0 ? `<div class="field-grid">${buildFieldGrid(fields)}</div>` : '';
 
@@ -285,6 +295,7 @@ function buildFullAccountsAssets(accounts, assets, templates, { fieldVisibility 
         const ac = cleanEntry(a);
         const showValue = fv.monetary !== false;
         const val = showValue ? getEntryValue(ac, templates) : null;
+        const assetFieldsDef = getTemplateFields(templates, 'asset', ac.subtype);
         const aFields = getExtraFields(ac, assetFieldsDef, { fieldVisibility: fv });
         const chips = aFields.map(f => {
           const cls = f.isSecret ? 'chip__value--mono' : (f.isCurrency ? 'chip__value--currency' : 'chip__value');
@@ -317,7 +328,8 @@ function buildFullAccountsAssets(accounts, assets, templates, { fieldVisibility 
     const cards = unlinked.map((a, i) => {
       const ac = cleanEntry(a);
       const tags = [ac.subtype, ac.currency].filter(Boolean).map(t => `<span class="tag">${esc(t)}</span>`).join('');
-      const fields = getExtraFields(ac, assetFieldsDef, { fieldVisibility: fv });
+      const unlinkedAssetFields = getTemplateFields(templates, 'asset', ac.subtype);
+      const fields = getExtraFields(ac, unlinkedAssetFields, { fieldVisibility: fv });
       const fieldGridHtml = fields.length > 0 ? `<div class="field-grid">${buildFieldGrid(fields)}</div>` : '';
       return `<div class="acct-card" style="border-left-color:var(--text-faint)">
         <div class="acct-card__head">
@@ -347,12 +359,12 @@ function buildFullAccountsAssets(accounts, assets, templates, { fieldVisibility 
 function buildFullEntryCards(type, entries, templates, { fieldVisibility } = {}) {
   if (entries.length === 0) return '';
   const label = TYPE_LABELS[type] ?? type;
-  const fieldsDef = parseFields(findTemplate(templates, type)?.fields);
 
   const cards = entries.map(e => {
     const c = cleanEntry(e);
     const title = esc(c.title ?? c.name ?? '(untitled)');
     const tag = c.vendor || c.provider || c.institution || '';
+    const fieldsDef = getTemplateFields(templates, type, c.subtype);
     const fields = getExtraFields(c, fieldsDef, { fieldVisibility });
     const fieldsHtml = fields.map(f => {
       const cls = f.isSecret ? 'mono' : '';
