@@ -119,6 +119,26 @@ export function downloadBlob(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
+// ── Template helpers ───────────────────────────────────────────────────
+
+export function parseFields(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  try { const p = JSON.parse(raw); return Array.isArray(p) ? p : []; } catch { return []; }
+}
+
+export function findTemplate(templates, type, subtype) {
+  if (subtype) {
+    const specific = templates?.find(t => t.template_key === type && !t.owner_id && t.subtype === subtype);
+    if (specific) return specific;
+  }
+  return templates?.find(t => t.template_key === type && !t.owner_id && !t.subtype && !t.country_code) ?? null;
+}
+
+export function getTemplateFields(templates, type, subtype) {
+  return parseFields(findTemplate(templates, type, subtype)?.fields);
+}
+
 // ── Field visibility filtering ─────────────────────────────────────────
 
 /** Fields with type 'secret' — passwords, API keys, recovery keys, PINs */
@@ -167,6 +187,28 @@ export function applyFieldVisibility(entry, templateFields, visibility) {
     filtered[k] = v;
   }
   return filtered;
+}
+
+/**
+ * Prepare export data: clean + filter all entries using subtype-aware templates.
+ * Returns a new grouped object — same shape as input but with processed entries.
+ *
+ * @param {Object} grouped - Output of assignRowIdsAndRemap()
+ * @param {Object[]} templates - Template objects from IndexedDB
+ * @param {{ secrets?: boolean, monetary?: boolean, rates?: boolean }} [fieldVisibility]
+ * @returns {Object} New grouped object with cleaned+filtered entries
+ */
+export function prepareExportData(grouped, templates, fieldVisibility) {
+  const result = {};
+  for (const [type, entries] of Object.entries(grouped)) {
+    result[type] = (entries || []).map(entry => {
+      const clean = cleanEntry(entry);
+      if (!fieldVisibility) return clean;
+      const tmplFields = getTemplateFields(templates, type, clean.subtype);
+      return applyFieldVisibility(clean, tmplFields, fieldVisibility);
+    });
+  }
+  return result;
 }
 
 export { TYPE_LABELS, VALID_ENTRY_TYPES, MONETARY_KEYS, RATE_KEYS, isSecretField, isMonetaryField, isRateField };

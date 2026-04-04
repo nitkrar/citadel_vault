@@ -5,7 +5,7 @@
  * No jsPDF dependency — uses browser's native Print to PDF.
  */
 
-import { cleanEntry, TYPE_LABELS, isSecretField, isMonetaryField, isRateField } from './exportHelpers';
+import { cleanEntry, TYPE_LABELS, isSecretField, isMonetaryField, isRateField, parseFields, findTemplate, getTemplateFields } from './exportHelpers';
 import { extractValue } from './portfolioAggregator';
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -23,37 +23,18 @@ function fmtVal(val, currency) {
 
 /** Cached template fields lookup — avoids repeated find+parse per entry */
 let _templateFieldsCache = {};
-function getEntryValue(entry, templates) {
-  const type = entry._entryType || entry.entry_type || entry.template_key;
+function getEntryValue(entry, templates, type) {
+  const entryType = type || entry._entryType || entry.entry_type || entry.template_key;
   const subtype = entry.subtype;
-  const cacheKey = subtype ? `${type}:${subtype}` : type;
+  const cacheKey = subtype ? `${entryType}:${subtype}` : entryType;
   if (!_templateFieldsCache[cacheKey]) {
-    const tmpl = findTemplate(templates, type, subtype);
+    const tmpl = findTemplate(templates, entryType, subtype);
     _templateFieldsCache[cacheKey] = tmpl ? parseFields(tmpl.fields) : [];
   }
   const val = extractValue(entry, _templateFieldsCache[cacheKey]);
   return val || null;
 }
 function esc(s) { return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
-
-function parseFields(raw) {
-  if (!raw) return [];
-  if (Array.isArray(raw)) return raw;
-  try { const p = JSON.parse(raw); return Array.isArray(p) ? p : []; } catch { return []; }
-}
-
-function findTemplate(templates, type, subtype) {
-  // Prefer subtype-specific template, fall back to generic
-  if (subtype) {
-    const specific = templates.find(t => t.template_key === type && !t.owner_id && t.subtype === subtype);
-    if (specific) return specific;
-  }
-  return templates.find(t => t.template_key === type && !t.owner_id && !t.subtype && !t.country_code) ?? null;
-}
-
-function getTemplateFields(templates, type, subtype) {
-  return parseFields(findTemplate(templates, type, subtype)?.fields);
-}
 
 /**
  * Compute subtotals by currency from a list of entries.
@@ -63,11 +44,11 @@ function getTemplateFields(templates, type, subtype) {
  * Compute totals per currency from asset entries.
  * Returns { byCurrency: { GBP: 350825, USD: 21000 }, subtotalStr: "£350,825 GBP · $21,000 USD" }
  */
-function computeSubtotals(entries, templates) {
+function computeSubtotals(entries, templates, type) {
   const byCurrency = {};
   for (const e of entries) {
     const c = cleanEntry(e);
-    const val = Number(getEntryValue(c, templates));
+    const val = Number(getEntryValue(c, templates, type));
     if (isNaN(val) || !c.currency) continue;
     byCurrency[c.currency] = (byCurrency[c.currency] || 0) + val;
   }
@@ -82,7 +63,7 @@ function computeSubtotals(entries, templates) {
  * Shows per-currency native totals + grand total in base currency.
  */
 function buildNetWorthTiles(assets, rateMap, baseCurrency, templates) {
-  const { byCurrency } = computeSubtotals(assets, templates);
+  const { byCurrency } = computeSubtotals(assets, templates, 'asset');
   if (Object.keys(byCurrency).length === 0) return '';
 
   const baseRate = (cur) => rateMap?.[cur] || (cur === baseCurrency ? 1 : 0);
@@ -294,7 +275,7 @@ function buildFullAccountsAssets(accounts, assets, templates, { fieldVisibility 
         linkedIds.add(a.row_id);
         const ac = cleanEntry(a);
         const showValue = fv.monetary !== false;
-        const val = showValue ? getEntryValue(ac, templates) : null;
+        const val = showValue ? getEntryValue(ac, templates, 'asset') : null;
         const assetFieldsDef = getTemplateFields(templates, 'asset', ac.subtype);
         const aFields = getExtraFields(ac, assetFieldsDef, { fieldVisibility: fv });
         const chips = aFields.map(f => {
@@ -343,7 +324,7 @@ function buildFullAccountsAssets(accounts, assets, templates, { fieldVisibility 
   }
 
   const subtotalHtml = fv.monetary === false ? '' : (() => {
-    const { subtotalStr } = computeSubtotals(assets, templates);
+    const { subtotalStr } = computeSubtotals(assets, templates, 'asset');
     return subtotalStr ? `<span class="section__subtotal">${esc(subtotalStr)}</span>` : '';
   })();
   return `<div class="section">
