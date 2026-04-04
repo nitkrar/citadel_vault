@@ -215,6 +215,7 @@ export function aggregatePortfolio(entries, currencies, baseCurrency, displayCur
   const byType = {};
   const byAccount = {};
   const byCurrency = {};
+  const byTicker = {};
 
   // First pass: identify accounts (containers)
   const accountMap = {};
@@ -262,6 +263,14 @@ export function aggregatePortfolio(entries, currencies, baseCurrency, displayCur
     // Convert to base currency for internal totals
     const baseValue = convertCurrency(signedValue, currency, baseCurrency, rateMap);
 
+    // Extract quantity/price fields for ticker view
+    let shares = null;
+    let pricePerShare = null;
+    for (const field of templateFields) {
+      if (field.portfolio_role === 'quantity') shares = parseFloat(d[field.key]) || null;
+      if (field.portfolio_role === 'price') pricePerShare = parseFloat(d[field.key]) || null;
+    }
+
     const assetItem = {
       id: entry.id,
       name: d.title || 'Untitled',
@@ -277,6 +286,9 @@ export function aggregatePortfolio(entries, currencies, baseCurrency, displayCur
       icon: template?.icon || 'circle',
       template_name: template?.name || entryType,
       integrations: d.integrations || null,
+      ticker: d.ticker || null,
+      shares,
+      pricePerShare,
     };
 
     // Add gain/loss if cost_price is available
@@ -315,6 +327,25 @@ export function aggregatePortfolio(entries, currencies, baseCurrency, displayCur
 
     // Group by currency
     accumulateGroup(byCurrency, currency, displayValue, { symbol: symbolMap[currency] || currency });
+
+    // Group by ticker
+    if (d.ticker) {
+      const tickerKey = d.ticker.toUpperCase();
+      const tg = accumulateGroup(byTicker, tickerKey, displayValue, {
+        items: [], label: tickerKey, totalShares: 0, totalCost: 0, costCount: 0,
+      });
+      tg.items.push(assetItem);
+      if (shares) tg.totalShares += shares;
+      if (assetItem.costPrice && shares) {
+        tg.totalCost += assetItem.costPrice * shares;
+        tg.costCount += shares;
+      }
+    } else {
+      const otherGroup = accumulateGroup(byTicker, '_other', displayValue, {
+        items: [], label: 'Other Assets', totalShares: 0, totalCost: 0, costCount: 0,
+      });
+      otherGroup.items.push(assetItem);
+    }
   }
 
   // Find rates_last_updated from currencies
@@ -344,6 +375,7 @@ export function aggregatePortfolio(entries, currencies, baseCurrency, displayCur
     by_type: byType,
     by_account: byAccount,
     by_currency: byCurrency,
+    by_ticker: byTicker,
     rates_last_updated: ratesLastUpdated,
     accounts: accountMap,
   };

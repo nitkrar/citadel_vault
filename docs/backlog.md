@@ -33,11 +33,9 @@ Full audit report: `docs/SECURITY_AUDIT_2026-03-27.md`. All critical (C1-C7) and
 ## Feature Requests
 
 - **#5b Asset type updatable** — Template type is currently immutable after creation (by design). Consider controlled type migration with field mapping.
-- **#7 Portfolio expandable stock holdings** — Stock/equity section should have expandable rows showing aggregated ticker/position data.
 - **#9 PDF export field selector modal** — Add modal before export to include/exclude specific field categories.
 - **#10 CSV export as single ZIP** — Add "Download All CSVs as ZIP" button on import/export page.
 - **#11 JSON import with versioned format** — Support importing same JSON format we export, with schema versioning.
-- **#13 Snapshot account grouping** — Save `linked_account_id` per entry + account names in snapshot meta. Collapsible account view in snapshot detail.
 
 ## Mobile App / PWA
 
