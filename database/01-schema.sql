@@ -14,6 +14,12 @@ SET time_zone = "+00:00";
 SET FOREIGN_KEY_CHECKS = 0;
 
 -- Drop all tables (FK checks disabled for clean re-creation)
+DROP TABLE IF EXISTS `account_detail_templates`;
+DROP TABLE IF EXISTS `account_types`;
+DROP TABLE IF EXISTS `asset_types`;
+DROP TABLE IF EXISTS `invite_requests`;
+DROP TABLE IF EXISTS `invitations`;
+DROP TABLE IF EXISTS `portfolio_snapshot_entries`;
 DROP TABLE IF EXISTS `currency_rate_history`;
 DROP TABLE IF EXISTS `portfolio_snapshots`;
 DROP TABLE IF EXISTS `audit_log`;
@@ -27,6 +33,10 @@ DROP TABLE IF EXISTS `webauthn_challenges`;
 DROP TABLE IF EXISTS `user_credentials_webauthn`;
 DROP TABLE IF EXISTS `rate_limits`;
 DROP TABLE IF EXISTS `password_history`;
+DROP TABLE IF EXISTS `plaid_items`;
+DROP TABLE IF EXISTS `ticker_price_history`;
+DROP TABLE IF EXISTS `ticker_prices`;
+DROP TABLE IF EXISTS `exchanges`;
 DROP TABLE IF EXISTS `countries`;
 DROP TABLE IF EXISTS `currencies`;
 DROP TABLE IF EXISTS `users`;
@@ -173,6 +183,7 @@ CREATE TABLE `shared_items` (
     `created_at`                TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updated_at`                TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_share_sender_entry_recipient` (`sender_id`, `source_entry_id`, `recipient_id`),
     KEY `idx_shared_sender_entry` (`sender_id`, `source_entry_id`),
     KEY `idx_shared_recipient` (`recipient_id`),
     KEY `idx_shared_identifier` (`recipient_identifier`),
@@ -180,6 +191,39 @@ CREATE TABLE `shared_items` (
     CONSTRAINT `fk_shared_recipient` FOREIGN KEY (`recipient_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
     CONSTRAINT `fk_shared_entry` FOREIGN KEY (`source_entry_id`) REFERENCES `vault_entries` (`id`) ON DELETE CASCADE,
     CONSTRAINT `fk_shared_template` FOREIGN KEY (`template_id`) REFERENCES `entry_templates` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================================================
+-- 6b. INVITATIONS
+-- =============================================================================
+CREATE TABLE `invitations` (
+    `id`            INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `token`         VARCHAR(128) NOT NULL,
+    `email`         VARCHAR(255) NOT NULL,
+    `invited_by`    INT UNSIGNED NOT NULL,
+    `expires_at`    TIMESTAMP NOT NULL,
+    `used_at`       TIMESTAMP NULL DEFAULT NULL,
+    `created_at`    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_invitations_token` (`token`),
+    KEY `idx_invitations_email` (`email`),
+    CONSTRAINT `fk_invitations_invited_by` FOREIGN KEY (`invited_by`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================================================
+-- 6c. INVITE REQUESTS
+-- =============================================================================
+CREATE TABLE `invite_requests` (
+    `id`            INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `email`         VARCHAR(255) NOT NULL,
+    `name`          VARCHAR(255) DEFAULT NULL,
+    `ip_hash`       VARCHAR(128) DEFAULT NULL,
+    `status`        ENUM('pending','approved','rejected','ignored') NOT NULL DEFAULT 'pending',
+    `created_at`    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_invite_request_email` (`email`),
+    KEY `idx_invite_request_ip` (`ip_hash`),
+    KEY `idx_invite_request_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================================================
@@ -194,6 +238,20 @@ CREATE TABLE `portfolio_snapshots` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_snapshots_user_date` (`user_id`, `snapshot_date`),
     CONSTRAINT `fk_snapshots_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================================================
+-- 7b. PORTFOLIO SNAPSHOT ENTRIES (per-entry data for split snapshots)
+-- =============================================================================
+CREATE TABLE `portfolio_snapshot_entries` (
+    `id`                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `snapshot_id`       INT UNSIGNED NOT NULL,
+    `entry_id`          INT UNSIGNED DEFAULT NULL,
+    `encrypted_data`    TEXT NOT NULL,
+    PRIMARY KEY (`id`),
+    KEY `idx_snapshot_entries` (`snapshot_id`),
+    CONSTRAINT `fk_snapshot_entry_snapshot` FOREIGN KEY (`snapshot_id`) REFERENCES `portfolio_snapshots` (`id`) ON DELETE CASCADE,
+    CONSTRAINT `fk_snapshot_entry_vault` FOREIGN KEY (`entry_id`) REFERENCES `vault_entries` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================================================
@@ -375,6 +433,58 @@ CREATE TABLE `rate_limits` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_rate_limits_action_id` (`action`, `identifier`),
     KEY `idx_rate_limits_window` (`window_start`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================================================
+-- REFERENCE DATA TABLES
+-- =============================================================================
+
+-- Account types (bank, savings, brokerage, etc.)
+CREATE TABLE `account_types` (
+    `id`            INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `name`          VARCHAR(100) NOT NULL,
+    `description`   TEXT DEFAULT NULL,
+    `icon`          VARCHAR(50) DEFAULT 'bank',
+    `is_system`     TINYINT(1) NOT NULL DEFAULT 0,
+    `created_by`    INT UNSIGNED DEFAULT NULL,
+    `created_at`    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_account_types_created_by` (`created_by`),
+    CONSTRAINT `fk_account_types_created_by` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Asset types (stock, bond, crypto, real estate, etc.)
+CREATE TABLE `asset_types` (
+    `id`            INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `name`          VARCHAR(100) NOT NULL,
+    `category`      VARCHAR(50) NOT NULL,
+    `json_schema`   TEXT DEFAULT NULL,
+    `icon`          VARCHAR(50) DEFAULT 'circle',
+    `is_system`     TINYINT(1) NOT NULL DEFAULT 0,
+    `created_by`    INT UNSIGNED DEFAULT NULL,
+    `created_at`    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_asset_types_created_by` (`created_by`),
+    CONSTRAINT `fk_asset_types_created_by` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Account detail templates (field customization per account type/country)
+CREATE TABLE `account_detail_templates` (
+    `id`                INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `user_id`           INT UNSIGNED NOT NULL,
+    `account_type_id`   INT UNSIGNED NOT NULL,
+    `subtype`           VARCHAR(50) NOT NULL DEFAULT '',
+    `country_id`        INT UNSIGNED NOT NULL,
+    `is_global`         TINYINT(1) NOT NULL DEFAULT 0,
+    `field_keys`        JSON NOT NULL,
+    `created_at`        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_user_template_combo` (`user_id`, `account_type_id`, `subtype`, `country_id`, `is_global`),
+    KEY `idx_template_country` (`country_id`),
+    CONSTRAINT `fk_template_account_type` FOREIGN KEY (`account_type_id`) REFERENCES `account_types` (`id`) ON DELETE CASCADE,
+    CONSTRAINT `fk_template_country` FOREIGN KEY (`country_id`) REFERENCES `countries` (`id`) ON DELETE CASCADE,
+    CONSTRAINT `fk_template_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================================================

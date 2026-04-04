@@ -723,3 +723,22 @@ UPDATE `countries` SET `default_currency_id` = (SELECT `id` FROM `currencies` WH
 UPDATE `countries` SET `default_currency_id` = (SELECT `id` FROM `currencies` WHERE `code` = 'YER') WHERE `code` = 'YE';
 UPDATE `countries` SET `default_currency_id` = (SELECT `id` FROM `currencies` WHERE `code` = 'ZMW') WHERE `code` = 'ZM';
 UPDATE `countries` SET `default_currency_id` = (SELECT `id` FROM `currencies` WHERE `code` = 'ZWL') WHERE `code` = 'ZW';
+
+-- =============================================================================
+-- SYSTEM SETTINGS — Application defaults
+-- =============================================================================
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `type`, `category`, `description`) VALUES
+    ('self_registration',           'false',          'gatekeeper', 'auth',        'Allow public self-registration'),
+    ('require_email_verification',  'true',           'config',     'auth',        'Require email verification after registration'),
+    ('auth_check_interval',         '300',            'config',     'auth',        'Auth check interval in seconds'),
+    ('lockout_tier3_duration',      '7776000',        'config',     'auth',        'Tier 3 lockout duration in seconds (90 days)'),
+    ('invite_expiry_days',          '7',              'config',     'invitations', 'Invite link expiry in days'),
+    ('invite_requests_enabled',     'false',          'gatekeeper', 'invitations', 'Enable public invite request form'),
+    ('plaid_enabled',               'false',          'gatekeeper', 'integrations','Enable Plaid bank integration'),
+    ('ticker_price_ttl',            '86400',          'config',     'prices',      'Price cache TTL in seconds'),
+    ('cache_mode',                  'instant_unlock',  'config',    'vault',       'Vault cache mode'),
+    ('cache_ttl_hours',             '0',              'config',     'vault',       'Vault cache TTL in hours'),
+    ('default_vault_tab',           'account',        'config',     'vault',       'Default active tab on vault page'),
+    ('worker_mode',                 'count',          'config',     'workers',     'Worker dispatch mode'),
+    ('worker_threshold',            '50',             'config',     'workers',     'Worker dispatch threshold'),
+    ('worker_adaptive_ms',          '100',            'config',     'workers',     'Worker adaptive time in milliseconds');
