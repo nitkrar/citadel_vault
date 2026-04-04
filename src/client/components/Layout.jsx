@@ -44,6 +44,7 @@ import {
   MoreHorizontal,
   Smartphone,
   Monitor,
+  DollarSign,
 } from 'lucide-react';
 import { PBKDF2_ITERATIONS_RECOMMENDED, getKdfIterations } from '../lib/crypto';
 
@@ -86,6 +87,11 @@ function MobileHeader({ routeMeta, navigate, location, isUnlocked, vaultKeyExist
         {location.pathname === '/vault' && (
           <button className="mobile-native-header-btn" onClick={() => window.dispatchEvent(new CustomEvent('vault:add'))} aria-label="Add entry">
             <Plus size={22} />
+          </button>
+        )}
+        {['/vault', '/portfolio'].includes(location.pathname) && (
+          <button className="mobile-native-header-btn" onClick={() => window.dispatchEvent(new CustomEvent('vault:currency-toggle'))} aria-label="Change currency">
+            <DollarSign size={20} />
           </button>
         )}
         {['/', '/vault', '/portfolio', '/sharing'].includes(location.pathname) && (
