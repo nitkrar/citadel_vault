@@ -119,4 +119,54 @@ export function downloadBlob(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
-export { TYPE_LABELS, VALID_ENTRY_TYPES };
+// ── Field visibility filtering ─────────────────────────────────────────
+
+/** Fields with type 'secret' — passwords, API keys, recovery keys, PINs */
+const isSecretField = (meta) => meta?.type === 'secret';
+
+/** Monetary value fields — balances, prices, valuations */
+const MONETARY_KEYS = new Set([
+  'balance', 'value', 'current_value', 'face_value', 'purchase_price',
+  'price_per_share', 'price_per_unit', 'premium_amount', 'coverage_amount',
+  'cash_value', 'credit_limit', 'cost_price',
+]);
+const isMonetaryField = (key, meta) =>
+  MONETARY_KEYS.has(key) ||
+  (meta?.type === 'number' && (meta?.portfolio_role === 'value' || meta?.portfolio_role === 'price'));
+
+/** Rate & quantity fields */
+const RATE_KEYS = new Set([
+  'interest_rate', 'employer_match', 'coupon_rate', 'shares', 'quantity',
+]);
+const isRateField = (key) => RATE_KEYS.has(key);
+
+/**
+ * Strip fields from a cleaned entry based on visibility toggles.
+ * Returns a new object (does not mutate input).
+ *
+ * @param {Object} entry - Cleaned entry (output of cleanEntry)
+ * @param {Object[]} templateFields - Parsed template field definitions
+ * @param {{ secrets?: boolean, monetary?: boolean, rates?: boolean }} visibility
+ * @returns {Object} Filtered entry
+ */
+export function applyFieldVisibility(entry, templateFields, visibility) {
+  if (!visibility) return entry;
+
+  const meta = {};
+  for (const f of (templateFields || [])) {
+    const k = f.key ?? f.name;
+    if (k) meta[k] = f;
+  }
+
+  const filtered = {};
+  for (const [k, v] of Object.entries(entry)) {
+    const m = meta[k];
+    if (visibility.secrets === false && isSecretField(m)) continue;
+    if (visibility.monetary === false && isMonetaryField(k, m)) continue;
+    if (visibility.rates === false && isRateField(k)) continue;
+    filtered[k] = v;
+  }
+  return filtered;
+}
+
+export { TYPE_LABELS, VALID_ENTRY_TYPES, MONETARY_KEYS, RATE_KEYS, isSecretField, isMonetaryField, isRateField };

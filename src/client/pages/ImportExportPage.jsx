@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { FileDown, Upload, Lock, AlertTriangle, Check, CheckCircle } from 'lucide-react';
+import { FileDown, Upload, Lock, AlertTriangle, Check, CheckCircle, Info } from 'lucide-react';
 import { useEncryption } from '../contexts/EncryptionContext';
 import { useVaultEntries } from '../contexts/VaultDataContext';
 import { entryStore } from '../lib/entryStore';
@@ -15,9 +15,12 @@ import useAppConfig from '../hooks/useAppConfig';
 import ImportModal from '../components/ImportModal';
 
 const FORMAT_OPTIONS = ['json', 'csv', 'xlsx', 'pdf'];
-const PDF_MODES = [
-  { value: 'overview', label: 'Overview', desc: 'Details only — no amounts, secrets, or passwords' },
-  { value: 'full', label: 'Full Detail', desc: 'Every field, secrets included' },
+
+const FIELD_VISIBILITY_OPTIONS = [
+  { key: 'secrets', label: 'Secrets', desc: 'Passwords, API keys, recovery keys, PINs' },
+  { key: 'monetary', label: 'Monetary values', desc: 'Balances, prices, valuations, coverage amounts' },
+  { key: 'rates', label: 'Rates & quantities', desc: 'Interest rates, employer match, shares, quantities' },
+  { key: 'netWorth', label: 'Net worth summary', desc: 'Currency totals and portfolio valuation header', pdfOnly: true },
 ];
 
 export default function ImportExportPage() {
@@ -42,7 +45,9 @@ export default function ImportExportPage() {
   // Export
   const [selectedTypes, setSelectedTypes] = useState(new Set(VALID_ENTRY_TYPES));
   const [format, setFormat] = useState('json');
-  const [pdfMode, setPdfMode] = useState('overview');
+  const [fieldVisibility, setFieldVisibility] = useState({
+    secrets: true, monetary: true, rates: true, netWorth: true,
+  });
   const [exporting, setExporting] = useState(false);
   const [exported, setExported] = useState(false);
 
@@ -54,16 +59,12 @@ export default function ImportExportPage() {
     });
   };
 
-  const handlePdfModeChange = (mode) => {
-    setPdfMode(mode);
-    if (mode === 'overview') {
-      setSelectedTypes(prev => {
-        const next = new Set(prev);
-        next.delete('password');
-        next.delete('license');
-        return next;
-      });
-    }
+  const selectAllTypes = (all) => {
+    setSelectedTypes(all ? new Set(VALID_ENTRY_TYPES) : new Set());
+  };
+
+  const toggleVisibility = (key) => {
+    setFieldVisibility(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
   const handleExport = async () => {
@@ -91,17 +92,20 @@ export default function ImportExportPage() {
       // Group by type, assign row IDs, remap linkage
       const grouped = assignRowIdsAndRemap(groupByType(decrypted));
       const dateSuffix = new Date().toISOString().split('T')[0];
+      const templates = await entryStore.getAllTemplates();
+
+      // JSON always exports everything; others respect field visibility
+      const fv = format === 'json' ? null : fieldVisibility;
 
       if (format === 'json') {
         exportJson(grouped, dateSuffix);
       } else if (format === 'csv') {
-        await exportCsvZip(grouped, dateSuffix);
+        await exportCsvZip(grouped, dateSuffix, templates, fv);
       } else if (format === 'xlsx') {
-        await exportXlsx(grouped, dateSuffix);
+        await exportXlsx(grouped, dateSuffix, templates, fv);
       } else if (format === 'pdf') {
-        const templates = await entryStore.getAllTemplates();
         const rateMap = buildRateMap(currencies || []);
-        await exportPdf(grouped, templates, pdfMode, dateSuffix, rateMap, baseCurrency);
+        await exportPdf(grouped, templates, dateSuffix, rateMap, baseCurrency, fv);
       }
 
       setExported(true);
@@ -111,6 +115,10 @@ export default function ImportExportPage() {
       setExporting(false);
     }
   };
+
+  const isJson = format === 'json';
+  const isPdf = format === 'pdf';
+  const showSecretsWarning = !isJson && fieldVisibility.secrets;
 
   if (!isUnlocked) {
     return (
@@ -134,7 +142,7 @@ export default function ImportExportPage() {
           All data is encrypted in your browser before being stored.
         </p>
         <button className="btn btn-primary" onClick={() => { setShowImport(true); setImportSuccess(false); }}>
-          <Upload size={16} /> Import from File
+          <Upload size={16} /> Import
         </button>
         {importSuccess && (
           <div className="flex items-center gap-2" style={{ marginTop: 12, color: '#16a34a', fontSize: 13 }}>
@@ -147,63 +155,92 @@ export default function ImportExportPage() {
       <div className="card" style={{ padding: 24 }}>
         <h2 style={{ fontSize: 18, marginBottom: 8 }} className="flex items-center gap-2"><FileDown size={20} /> Export</h2>
 
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 8, padding: '10px 12px', marginBottom: 20, color: '#92400e', fontSize: 13 }}>
-          <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+        <div className="alert alert-warning" style={{ fontSize: 12, padding: '6px 10px', marginBottom: 8 }}>
+          <AlertTriangle size={13} style={{ flexShrink: 0 }} />
           <span>Exported files contain <strong>unencrypted data</strong>. Store them securely.</span>
         </div>
 
-        {format === 'pdf' && pdfMode === 'full' && (
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: 8, padding: '10px 12px', marginBottom: 20, color: '#991b1b', fontSize: 13 }}>
-            <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
-            <span><strong>Full detail</strong> includes all secrets (passwords, keys) in plain text.</span>
+        {showSecretsWarning && (
+          <div className="alert alert-danger" style={{ fontSize: 12, padding: '6px 10px', marginBottom: 8 }}>
+            <AlertTriangle size={13} style={{ flexShrink: 0 }} />
+            <span>Secrets (passwords, API keys) will appear in <strong>plain text</strong>.</span>
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
-          <div>
-            <h3 style={{ marginBottom: 12, fontSize: 14 }}>Entry types</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {VALID_ENTRY_TYPES.map(type => (
-                <label key={type} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                  <input type="checkbox" checked={selectedTypes.has(type)} onChange={() => toggleType(type)} />
-                  <span style={{ textTransform: 'capitalize' }}>{type}s</span>
-                </label>
-              ))}
-            </div>
+        {isJson && (
+          <div className="alert alert-info" style={{ fontSize: 12, padding: '6px 10px', marginBottom: 8 }}>
+            <Info size={13} style={{ flexShrink: 0 }} />
+            <span>JSON is the full-backup format — all fields are always included.</span>
           </div>
+        )}
 
-          <div>
-            <h3 style={{ marginBottom: 12, fontSize: 14 }}>Format</h3>
-            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-              {FORMAT_OPTIONS.map(f => (
-                <button key={f} className={`btn btn-sm ${format === f ? 'btn-primary' : 'btn-ghost'}`}
-                  onClick={() => setFormat(f)}>
-                  {f.toUpperCase()}
-                </button>
-              ))}
-            </div>
-
-            {format === 'pdf' && (
-              <div style={{ marginBottom: 16 }}>
-                <h3 style={{ marginBottom: 8, fontSize: 14 }}>PDF mode</h3>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {PDF_MODES.map(m => (
-                    <label key={m.value} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
-                      <input type="radio" name="pdfMode" checked={pdfMode === m.value}
-                        onChange={() => handlePdfModeChange(m.value)} />
-                      <span><strong>{m.label}</strong> — {m.desc}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <button className="btn btn-primary" onClick={handleExport}
-              disabled={exporting || selectedTypes.size === 0}>
-              {exporting ? 'Exporting...' : exported ? <><Check size={16} /> Exported</> : <><FileDown size={16} /> Export</>}
-            </button>
+        {/* Format selector */}
+        <div style={{ marginBottom: 20, marginTop: 12 }}>
+          <h3 style={{ marginBottom: 8, fontSize: 14 }}>Format</h3>
+          <div className="format-tabs">
+            {FORMAT_OPTIONS.map(f => (
+              <button key={f} className={`format-tab${format === f ? ' active' : ''}`}
+                onClick={() => setFormat(f)}>
+                {f.toUpperCase()}
+              </button>
+            ))}
           </div>
         </div>
+
+        {/* Field visibility toggles */}
+        {!isJson && (
+          <div style={{ marginBottom: 20 }}>
+            <h3 style={{ marginBottom: 8, fontSize: 14 }}>Field visibility</h3>
+            <div className="fv-list">
+              {FIELD_VISIBILITY_OPTIONS
+                .filter(opt => !opt.pdfOnly || isPdf)
+                .map(opt => (
+                  <div key={opt.key} className="fv-row" onClick={() => toggleVisibility(opt.key)}>
+                    <label className="fv-toggle" onClick={e => e.stopPropagation()}>
+                      <input type="checkbox" checked={fieldVisibility[opt.key]}
+                        onChange={() => toggleVisibility(opt.key)} />
+                      <span className="fv-track" />
+                    </label>
+                    <div className="fv-text">
+                      <div className="fv-label">
+                        {opt.label}
+                        {opt.pdfOnly && <span className="fv-badge pdf-only">PDF only</span>}
+                      </div>
+                      <div className="fv-desc">{opt.desc}</div>
+                    </div>
+                  </div>
+                ))}
+            </div>
+          </div>
+        )}
+
+        {/* Entry types */}
+        <div style={{ marginBottom: 20 }}>
+          <div className="flex items-center" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
+            <h3 style={{ fontSize: 14, margin: 0 }}>Entry types</h3>
+            <div className="flex gap-2" style={{ fontSize: 12 }}>
+              <button className="link-btn" onClick={() => selectAllTypes(true)}>Select all</button>
+              <span style={{ color: 'var(--text-faint)' }}>·</span>
+              <button className="link-btn" onClick={() => selectAllTypes(false)}>Clear</button>
+            </div>
+          </div>
+          <div className="type-chips">
+            {VALID_ENTRY_TYPES.map(type => (
+              <button key={type}
+                className={`type-chip${selectedTypes.has(type) ? ' selected' : ''}`}
+                onClick={() => toggleType(type)}>
+                <span className="chip-dot" />
+                <span style={{ textTransform: 'capitalize' }}>{type}s</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Export button */}
+        <button className="btn btn-primary" onClick={handleExport}
+          disabled={exporting || selectedTypes.size === 0}>
+          {exporting ? 'Exporting...' : exported ? <><Check size={16} /> Exported</> : <><FileDown size={16} /> Export</>}
+        </button>
       </div>
 
       <ImportModal isOpen={showImport} onClose={() => setShowImport(false)} onImportComplete={handleImportComplete} />
