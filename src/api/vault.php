@@ -132,14 +132,18 @@ if ($method === 'POST' && $action === 'bulk-create') {
         Response::error('No entries provided.', 400);
     }
 
+    if (count($entries) > 500) {
+        Response::error('Batch size exceeds maximum of 500 entries.', 400);
+    }
+
     // Validate all entries before starting the transaction
     foreach ($entries as $entry) {
         $type = $entry['entry_type'] ?? '';
         if (!in_array($type, $validTypes, true)) {
             Response::error("Invalid entry type: $type", 400);
         }
-        if (empty($entry['encrypted_data'])) {
-            Response::error('Missing encrypted_data.', 400);
+        if (!is_string($entry['encrypted_data'] ?? null) || ($entry['encrypted_data'] ?? '') === '') {
+            Response::error('Each entry requires encrypted_data as a non-empty string.', 400);
         }
     }
 
@@ -214,11 +218,16 @@ if ($method === 'POST') {
     if (!in_array($entryType, $validTypes, true)) {
         Response::error("Invalid entry type: $entryType", 400);
     }
-    if (empty($encryptedData)) {
-        Response::error('Missing encrypted_data.', 400);
+    if (!is_string($encryptedData) || $encryptedData === '') {
+        Response::error('encrypted_data must be a non-empty string.', 400);
     }
 
-    $newId = $storage->createEntry($userId, $entryType, $encryptedData, $templateId);
+    try {
+        $newId = $storage->createEntry($userId, $entryType, $encryptedData, $templateId);
+    } catch (Exception $e) {
+        // FK violation on template_id or other DB constraint
+        Response::error('Failed to create entry: ' . $e->getMessage(), 400);
+    }
     Response::success(['id' => $newId], 201);
 }
 

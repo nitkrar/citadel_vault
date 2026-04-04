@@ -23,10 +23,10 @@ $storage = Storage::adapter();
 if ($method === 'GET') {
     $from = Response::sanitizeDate($_GET['from'] ?? null);
     $to = Response::sanitizeDate($_GET['to'] ?? null);
+    $limit = isset($_GET['limit']) ? max(1, min(200, (int)$_GET['limit'])) : null;
+    $before = Response::sanitizeDate($_GET['before'] ?? null);
 
-    $snapshots = $storage->getSnapshotsWithEntries($userId, $from, $to);
-
-    $result = array_map(function ($s) {
+    $formatSnapshot = function ($s) {
         return [
             'id'            => (int)$s['id'],
             'snapshot_date' => $s['snapshot_date'],
@@ -34,9 +34,21 @@ if ($method === 'GET') {
             'data'          => $s['encrypted_data'],
             'entries'       => $s['entries'] ?? [],
         ];
-    }, $snapshots);
+    };
 
-    Response::success($result);
+    // Paginated mode (when limit is provided)
+    if ($limit !== null) {
+        $result = $storage->getSnapshotsWithEntriesPaginated($userId, $before, $limit);
+        Response::success([
+            'snapshots'   => array_map($formatSnapshot, $result['snapshots']),
+            'has_more'    => $result['has_more'],
+            'next_cursor' => $result['next_cursor'],
+        ]);
+    }
+
+    // Default: return all (backward compatible)
+    $snapshots = $storage->getSnapshotsWithEntries($userId, $from, $to);
+    Response::success(array_map($formatSnapshot, $snapshots));
 }
 
 // ---------------------------------------------------------------------------

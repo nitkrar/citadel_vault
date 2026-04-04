@@ -683,6 +683,72 @@ class MariaDbAdapter implements StorageAdapter {
         return $snapshots;
     }
 
+    public function getSnapshotsWithEntriesPaginated(int $userId, ?string $before = null, int $limit = 50): array {
+        $sql = 'SELECT id, snapshot_date, snapshot_time, encrypted_data
+                FROM portfolio_snapshots
+                WHERE user_id = ?';
+        $params = [$userId];
+
+        if ($before !== null) {
+            $sql .= ' AND snapshot_date < ?';
+            $params[] = $before;
+        }
+
+        $sql .= ' ORDER BY snapshot_date DESC, snapshot_time DESC LIMIT ?';
+        $params[] = $limit + 1;
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+        $snapshots = $stmt->fetchAll();
+
+        $hasMore = count($snapshots) > $limit;
+        if ($hasMore) {
+            array_pop($snapshots);
+        }
+
+        // Reverse to chronological order
+        $snapshots = array_reverse($snapshots);
+
+        if (empty($snapshots)) {
+            return ['snapshots' => [], 'has_more' => false, 'next_cursor' => null];
+        }
+
+        // Fetch entries (same pattern as getSnapshotsWithEntries)
+        $snapshotIds = array_column($snapshots, 'id');
+        $indexed = [];
+        foreach ($snapshots as &$s) {
+            $s['entries'] = [];
+            $indexed[(int)$s['id']] = &$s;
+        }
+        unset($s);
+
+        $placeholders = implode(',', array_fill(0, count($snapshotIds), '?'));
+        $stmt = $this->db->prepare(
+            "SELECT snapshot_id, entry_id, encrypted_data
+             FROM portfolio_snapshot_entries
+             WHERE snapshot_id IN ({$placeholders})
+             ORDER BY id ASC"
+        );
+        $stmt->execute($snapshotIds);
+        foreach ($stmt->fetchAll() as $row) {
+            $sid = (int)$row['snapshot_id'];
+            if (isset($indexed[$sid])) {
+                $indexed[$sid]['entries'][] = [
+                    'entry_id'       => $row['entry_id'] !== null ? (int)$row['entry_id'] : null,
+                    'encrypted_data' => $row['encrypted_data'],
+                ];
+            }
+        }
+
+        $nextCursor = $hasMore ? $snapshots[0]['snapshot_date'] : null;
+
+        return [
+            'snapshots'   => $snapshots,
+            'has_more'    => $hasMore,
+            'next_cursor' => $nextCursor,
+        ];
+    }
+
     // =========================================================================
     // Audit Log
     // =========================================================================

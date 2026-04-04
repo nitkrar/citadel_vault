@@ -32,7 +32,7 @@ async function runSql(sql) {
   try {
     const { execSync } = await import('child_process');
     execSync(
-      `mysql -u nitinkum citadel_vault_db -e "${sql}"`,
+      `mysql -u nitinkum citadel_vault_test_db -e "${sql}"`,
       { timeout: 5000, stdio: 'pipe' },
     );
     return true;

@@ -447,25 +447,18 @@ describe('Vault API', () => {
       expect(resp.status).toBe(400);
     });
 
-    it('accepts non-existent template_id on create (no FK constraint)', async () => {
-      // template_id is client-side only — the server stores it as-is without FK validation.
-      // A non-existent template_id must be accepted (201) and the value must be preserved.
+    it('rejects non-existent template_id on create (FK constraint)', async () => {
+      // template_id has a foreign key constraint to entry_templates.
+      // A non-existent template_id must be rejected with 400.
       const resp = await api.post('/vault.php', {
         json: { entry_type: 'password', template_id: 999999, encrypted_data: 'dGVzdA==' },
       });
-      expect(resp.status).toBe(201);
-      const data = await extractData(resp);
-      expect(data).toHaveProperty('id');
-      expect(typeof data.id).toBe('number');
-      // Cleanup
-      await api.delete(`/vault.php?id=${data.id}`);
+      expect(resp.status).toBe(400);
     });
 
-    it('handles oversized bulk-create array without crashing', { timeout: 30000 }, async () => {
-      // The server has no batch size cap, so 1000 entries will be accepted (200).
-      // The goal is to verify the server does not crash (no 500) and that all
-      // created rows are cleaned up. Cleanup is parallelised to avoid timeout.
-      const entries = Array.from({ length: 1000 }, () => ({
+    it('rejects oversized bulk-create array with 400', async () => {
+      // Server enforces a max batch size of 500 entries.
+      const entries = Array.from({ length: 501 }, () => ({
         entry_type: 'password',
         template_id: 1,
         encrypted_data: 'YnVsay10ZXN0LW92ZXJzaXplZA==',
@@ -473,14 +466,9 @@ describe('Vault API', () => {
       const resp = await api.post('/vault.php?action=bulk-create', {
         json: { entries },
       });
-      expect(resp.status).not.toBe(500);
-      if (resp.status === 200) {
-        const data = await extractData(resp);
-        if (data.ids && data.ids.length > 0) {
-          // Parallel cleanup to stay within the extended timeout
-          await Promise.all(data.ids.map((id) => api.delete(`/vault.php?id=${id}`)));
-        }
-      }
+      expect(resp.status).toBe(400);
+      const body = await resp.json();
+      expect(body.error).toMatch(/maximum/i);
     });
   });
 
