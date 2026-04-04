@@ -52,7 +52,7 @@ Full report: `docs/SECURITY_AUDIT_2026-03-27.md`. 16 agents audited every securi
 - Multiple empty catch blocks swallow errors in EncryptionContext
 
 ### Test Gaps — Zero Coverage
-- ~~**EncryptionContext**~~ DONE — 20 tests in `EncryptionContext.test.jsx` (lock/unlock, session restore, auto-lock, user-switch, encrypt/decrypt guards, vault prompt state)
+- ~~**EncryptionContext**~~ DONE — 25 tests in `EncryptionContext.test.jsx` (lock/unlock, session restore, auto-lock, user-switch + destroy() cleanup, unmount preserveSession, workerDispatcher.setKey, setup(), encrypt/decrypt guards + success path)
 - **RegisterPage** — form handling, error display, password clearing (LoginPage covered: 24 tests)
 - **Forgot-password** happy path end-to-end (client-side crypto + API round-trip; API endpoint tested in auth.test.js)
 - **Email verification** flow (property existence checked; full happy path not tested)
@@ -181,7 +181,7 @@ _Recovery after KDF changes_
 ## Feature Requests (reported 2026-03-29)
 - **#13 Snapshot account grouping** — Save `linked_account_id` per entry + account names in snapshot meta. Show collapsible account view in snapshot detail modal (assets grouped under their parent account, unlinked assets in separate section). Only applies to new snapshots — old ones keep flat type view.
 - **#14 Chart color palette — awaiting Manus design** — Current Wong/IBM colorblind-safe palette is functional but looks harsh in light mode (orange/vermillion/yellow clash). Prompt sent to Manus for a palette that's colorblind-safe AND aesthetically pleasing in both light/dark modes. Once received, swap into `TYPE_COLORS`, `CHART_COLORS`, `EXTRA_COLORS`, plus net worth line and positive/negative bar colors in `PortfolioPage.jsx`.
-- **#15 Extract shared aggregation logic** — `recalculateSnapshot` and `aggregatePortfolio` in `portfolioAggregator.js` have duplicated type-grouping/zero-skip logic. Extract common internal function.
+- ~~**#15 Extract shared aggregation logic**~~ DONE — Extracted `accumulateGroup()` helper in `portfolioAggregator.js`. Replaced 8 repeated grouping blocks across `recalculateSnapshot` and `aggregatePortfolio`.
 - **#16 Chart.js v2 enhancements** — `chartjs-plugin-zoom` (drag-to-zoom, pinch on mobile), cross-chart hover sync, comparison mode (overlay two date ranges), currency breakdown chart, server-side snapshot pagination for 100+ snapshots, extract HistoryTab to separate file.
 
 ## Bugs (reported 2026-03-30)
@@ -198,7 +198,7 @@ _Recovery after KDF changes_
 
 ## Feature Requests (reported 2026-03-30)
 - **#26 Performance tab: filter within type** — When breakdown=type and a specific type is selected in the Filter dropdown, show a secondary filter to pick individual assets within that type (e.g. filter to "Stock" then pick specific tickers). Also consider showing type+subtype hierarchy (e.g. "Asset > Stock", "Account > Bank") as separate chart groups.
-- **#28 Refresh All should show success/failure toast** — Currently "Refresh All" on Portfolio page shows a small inline text result that disappears after 5s. Should use the `SaveToast` component (top-right floating banner) to show success (teal, "Updated 5 prices") or failure (rose, "Refresh failed") consistently on both VaultPage and PortfolioPage.
+- ~~**#28 Refresh All should show success/failure toast**~~ FIXED — SaveToast feedback on Refresh All for both VaultPage and PortfolioPage (commit 4a396c4).
 - **#27 Refresh All via worker with rate thresholds** — `refreshAndApplyPrices` in `useRefreshPrices.js` currently runs on the main thread. Should delegate to the web worker (`workerDispatcher`) and respect existing rate limit thresholds (e.g. don't re-fetch if prices were fetched < N minutes ago, respect per-ticker cooldowns). Check if similar thresholds exist for Plaid balance refresh and align behavior.
 
 ## Feature Requests (reported 2026-03-25)
