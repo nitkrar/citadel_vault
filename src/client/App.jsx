@@ -119,8 +119,18 @@ function ForceChangePasswordModal() {
 }
 
 // --- Offline Banner ---
+function formatAge(ms) {
+  const mins = Math.floor(ms / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
 function OfflineBanner() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [cacheAge, setCacheAge] = useState(null); // null = checking, string = age text, false = no cache
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -133,15 +143,33 @@ function OfflineBanner() {
     };
   }, []);
 
+  useEffect(() => {
+    if (isOnline) return;
+    let rawTs;
+    try { rawTs = sessionStorage.getItem('pv_cache_timestamp'); } catch { /* */ }
+    const ts = parseInt(rawTs || '0', 10);
+    if (ts > 0) {
+      setCacheAge(formatAge(Date.now() - ts));
+    } else {
+      setCacheAge(false);
+    }
+  }, [isOnline]);
+
   if (isOnline) return null;
+
+  const message = cacheAge === false
+    ? 'You are offline. Connect to the internet to load your vault.'
+    : `You are offline — last synced ${cacheAge || '…'}. Changes require a connection.`;
 
   return (
     <div style={{
       position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9999,
-      background: '#f59e0b', color: '#000', textAlign: 'center',
+      background: cacheAge === false ? '#ef4444' : '#f59e0b',
+      color: cacheAge === false ? '#fff' : '#000',
+      textAlign: 'center',
       padding: '6px 12px', fontSize: 13, fontWeight: 600,
     }}>
-      You are offline. Viewing cached data. Changes require an internet connection.
+      {message}
     </div>
   );
 }
