@@ -1,10 +1,11 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import SaveToast from '../components/SaveToast';
 import useRefreshPrices from '../hooks/useRefreshPrices';
+import useLayoutMode from '../hooks/useLayoutMode';
 import { Link } from 'react-router-dom';
 import {
   PieChart as PieChartIcon, TrendingUp, List, Plus,
-  Camera, Lock, AlertTriangle, RefreshCw,
+  Camera, Lock, AlertTriangle, RefreshCw, MoreVertical,
 } from 'lucide-react';
 import { Bar as CJSBar, Doughnut as CJSDoughnut } from 'react-chartjs-2';
 import {
@@ -49,6 +50,7 @@ export default function PortfolioPage() {
   } = usePortfolioData();
   const { handleRefreshAll, refreshing, refreshToast, clearRefreshToast } = useRefreshPrices();
   const { countries } = useCountries();
+  const { isMobile } = useLayoutMode();
 
   const [activeTab, setActiveTab] = useState(() => {
     const saved = sessionStorage.getItem('pv_portfolio_last_tab') || 'overview';
@@ -61,6 +63,10 @@ export default function PortfolioPage() {
   const { config } = useAppConfig();
   const plaidEnabled = config?.plaid_enabled === 'true';
 
+  // Mobile overflow menus
+  const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
+  const [showActionOverflow, setShowActionOverflow] = useState(false);
+
   // Plaid item IDs for the Refresh All handler
   const plaidEntries = useMemo(() => {
     if (!portfolio?.assets) return [];
@@ -71,6 +77,13 @@ export default function PortfolioPage() {
     () => [...new Set(plaidEntries.map(e => getIntegration(e, getIntegrationType(e))?.item_id).filter(Boolean))],
     [plaidEntries]
   );
+
+  // Mobile header events
+  useEffect(() => {
+    const handleCurrencyToggle = () => setShowCurrencyPicker(v => !v);
+    window.addEventListener('vault:currency-toggle', handleCurrencyToggle);
+    return () => window.removeEventListener('vault:currency-toggle', handleCurrencyToggle);
+  }, []);
 
   // Format helper respecting hideAmounts
   const fmt = useCallback((value, symbol = '') => {
@@ -197,55 +210,123 @@ export default function PortfolioPage() {
 
   return (
     <div className="page-content">
-      {/* Header */}
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">Portfolio</h1>
-          <p className="page-subtitle">
-            Financial overview
-            {ratesLastUpdated && (
-              <span className="text-sm" style={{ marginLeft: 8, opacity: 0.7 }}>
-                Rates: {new Date(ratesLastUpdated).toLocaleDateString()}
-              </span>
-            )}
-          </p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* Currency selector */}
-          {currencies && currencies.length > 0 && (
-            <select
-              className="form-control"
-              style={{ width: 'auto', minWidth: 90, padding: '4px 30px 4px 8px', fontSize: 13 }}
-              value={displayCurrency}
-              onChange={(e) => setDisplayCurrency(e.target.value)}
-            >
-              {currencies.filter(c => c.is_active === 1 || c.is_active === '1' || c.is_active === true).map(c => (
-                <option key={c.code} value={c.code}>{c.symbol} {c.code}</option>
-              ))}
-            </select>
+      {isMobile ? (
+        <>
+          {/* Mobile: currency picker dropdown (triggered from header icon) */}
+          {showCurrencyPicker && currencies && currencies.length > 0 && (
+            <>
+              <div style={{ position: 'fixed', inset: 0, zIndex: 900 }} onClick={() => setShowCurrencyPicker(false)} />
+              <div style={{
+                position: 'fixed', right: 16, top: 'calc(56px + env(safe-area-inset-top) + 4px)', zIndex: 901,
+                background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 8,
+                boxShadow: '0 4px 12px rgba(0,0,0,0.15)', minWidth: 140, overflow: 'hidden',
+              }}>
+                {currencies.filter(c => c.is_active === 1 || c.is_active === '1' || c.is_active === true).map(c => (
+                  <button key={c.code} className="btn btn-ghost btn-sm"
+                    style={{ width: '100%', justifyContent: 'flex-start', borderRadius: 0, padding: '10px 14px',
+                      background: displayCurrency === c.code ? 'var(--hover-bg)' : undefined }}
+                    onClick={() => { setDisplayCurrency(c.code); setShowCurrencyPicker(false); }}>
+                    {c.symbol} {c.code}
+                  </button>
+                ))}
+              </div>
+            </>
           )}
-          <button className="btn btn-secondary" onClick={() => handleRefreshAll(plaidItemIds)} disabled={refreshing || isEmpty}>
-            <RefreshCw size={16} className={refreshing ? 'spin' : ''} /> {refreshing ? 'Refreshing...' : 'Refresh All'}
-          </button>
-          <button className="btn btn-primary" onClick={handleSaveSnapshot} disabled={snapshotSaving || isEmpty}>
-            <Camera size={16} /> {snapshotSaving ? 'Saving...' : 'Snapshot'}
-          </button>
-        </div>
-      </div>
 
-      {/* Tabs */}
-      <div className="tabs">
-        {TABS.map(t => (
-          <button
-            key={t.key}
-            className={`tab ${activeTab === t.key ? 'active' : ''}`}
-            onClick={() => { setActiveTab(t.key); sessionStorage.setItem('pv_portfolio_last_tab', t.key); }}
-          >
-            <t.icon size={14} style={{ marginRight: 4, verticalAlign: -2 }} />
-            {t.label}
-          </button>
-        ))}
-      </div>
+          {/* Mobile: tabs row + snapshot overflow */}
+          <div className="flex gap-2 mb-4" style={{ flexWrap: 'nowrap', alignItems: 'center', overflow: 'hidden' }}>
+            {TABS.map(t => (
+              <button key={t.key}
+                className={`btn btn-sm ${activeTab === t.key ? 'btn-primary' : 'btn-ghost'}`}
+                style={{ flexShrink: 1, minWidth: 0, whiteSpace: 'nowrap' }}
+                onClick={() => { setActiveTab(t.key); sessionStorage.setItem('pv_portfolio_last_tab', t.key); }}>
+                <t.icon size={14} /> {t.label}
+              </button>
+            ))}
+            <div style={{ flex: 1 }} />
+            {/* Overflow menu — Snapshot */}
+            <div style={{ position: 'relative', flexShrink: 0 }}>
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowActionOverflow(v => !v)} aria-label="More actions">
+                <MoreVertical size={18} />
+              </button>
+              {showActionOverflow && (
+                <>
+                  <div style={{ position: 'fixed', inset: 0, zIndex: 900 }} onClick={() => setShowActionOverflow(false)} />
+                  <div style={{
+                    position: 'fixed', right: 16, zIndex: 901,
+                    background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 8,
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.15)', minWidth: 180, overflow: 'hidden',
+                  }}>
+                    <button className="btn btn-ghost btn-sm"
+                      style={{ width: '100%', justifyContent: 'flex-start', borderRadius: 0, padding: '10px 14px' }}
+                      disabled={refreshing || isEmpty}
+                      onClick={() => { handleRefreshAll(plaidItemIds); setShowActionOverflow(false); }}>
+                      <RefreshCw size={14} className={refreshing ? 'spin' : ''} /> {refreshing ? 'Refreshing...' : 'Refresh All'}
+                    </button>
+                    <button className="btn btn-ghost btn-sm"
+                      style={{ width: '100%', justifyContent: 'flex-start', borderRadius: 0, padding: '10px 14px' }}
+                      disabled={snapshotSaving || isEmpty}
+                      onClick={() => { handleSaveSnapshot(); setShowActionOverflow(false); }}>
+                      <Camera size={14} /> {snapshotSaving ? 'Saving...' : 'Snapshot'}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </>
+      ) : (
+        <>
+          {/* Desktop: full page header */}
+          <div className="page-header">
+            <div>
+              <h1 className="page-title">Portfolio</h1>
+              <p className="page-subtitle">
+                Financial overview
+                {ratesLastUpdated && (
+                  <span className="text-sm" style={{ marginLeft: 8, opacity: 0.7 }}>
+                    Rates: {new Date(ratesLastUpdated).toLocaleDateString()}
+                  </span>
+                )}
+              </p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              {currencies && currencies.length > 0 && (
+                <select
+                  className="form-control"
+                  style={{ width: 'auto', minWidth: 90, padding: '4px 30px 4px 8px', fontSize: 13 }}
+                  value={displayCurrency}
+                  onChange={(e) => setDisplayCurrency(e.target.value)}
+                >
+                  {currencies.filter(c => c.is_active === 1 || c.is_active === '1' || c.is_active === true).map(c => (
+                    <option key={c.code} value={c.code}>{c.symbol} {c.code}</option>
+                  ))}
+                </select>
+              )}
+              <button className="btn btn-secondary" onClick={() => handleRefreshAll(plaidItemIds)} disabled={refreshing || isEmpty}>
+                <RefreshCw size={16} className={refreshing ? 'spin' : ''} /> {refreshing ? 'Refreshing...' : 'Refresh All'}
+              </button>
+              <button className="btn btn-primary" onClick={handleSaveSnapshot} disabled={snapshotSaving || isEmpty}>
+                <Camera size={16} /> {snapshotSaving ? 'Saving...' : 'Snapshot'}
+              </button>
+            </div>
+          </div>
+
+          {/* Desktop: tabs */}
+          <div className="tabs">
+            {TABS.map(t => (
+              <button
+                key={t.key}
+                className={`tab ${activeTab === t.key ? 'active' : ''}`}
+                onClick={() => { setActiveTab(t.key); sessionStorage.setItem('pv_portfolio_last_tab', t.key); }}
+              >
+                <t.icon size={14} style={{ marginRight: 4, verticalAlign: -2 }} />
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
 
       {/* Tab Content */}
       {isEmpty && activeTab !== 'performance' ? (
@@ -259,7 +340,7 @@ export default function PortfolioPage() {
         <>
           {activeTab === 'overview' && <OverviewTab portfolio={p} fmtD={fmtD} hideAmounts={hideAmounts} />}
           {activeTab === 'assets' && <AssetsTab portfolio={p} fmtD={fmtD} groupBy={assetsGroupBy} setGroupBy={setAssetsGroupBy} expandedGroups={expandedGroups} toggleGroup={toggleGroup} />}
-          {activeTab === 'performance' && <PerformanceTab decrypt={decrypt} fmtD={fmtD} hideAmounts={hideAmounts} currencies={currencies} countries={countries} displayCurrency={displayCurrency} baseCurrency={baseCurrency} snapshotPrompt={snapshotPrompt} setSnapshotPrompt={setSnapshotPrompt} doSaveSnapshot={doSaveSnapshot} snapshotSaving={snapshotSaving} decryptedCache={decryptedCache} portfolio={portfolio} />}
+          {activeTab === 'performance' && <PerformanceTab decrypt={decrypt} fmtD={fmtD} hideAmounts={hideAmounts} currencies={currencies} countries={countries} displayCurrency={displayCurrency} baseCurrency={baseCurrency} snapshotPrompt={snapshotPrompt} setSnapshotPrompt={setSnapshotPrompt} doSaveSnapshot={doSaveSnapshot} snapshotSaving={snapshotSaving} decryptedCache={decryptedCache} portfolio={portfolio} isMobile={isMobile} />}
         </>
       )}
       {refreshToast && (

@@ -244,12 +244,13 @@ export default function VaultPage() {
   const [showTypeOverflow, setShowTypeOverflow] = useState(false);
   const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
 
-  // ── Mobile header currency icon triggers picker via custom event ──
+  // ── Mobile header events ──
   useEffect(() => {
     const handleCurrencyToggle = () => setShowCurrencyPicker(v => !v);
     window.addEventListener('vault:currency-toggle', handleCurrencyToggle);
     return () => window.removeEventListener('vault:currency-toggle', handleCurrencyToggle);
   }, []);
+
 
   // ── Plaid Connect Bank success handler ─────────────────────────────
   const handlePlaidConnectSuccess = useCallback(async ({ itemId, accounts, metadata }) => {
