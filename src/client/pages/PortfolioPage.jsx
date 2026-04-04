@@ -1,4 +1,6 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
+import SaveToast from '../components/SaveToast';
+import useRefreshPrices from '../hooks/useRefreshPrices';
 import { Link } from 'react-router-dom';
 import {
   PieChart as PieChartIcon, TrendingUp, List, Plus,
@@ -26,7 +28,6 @@ import { fmtCurrency, MASKED, apiData } from '../lib/checks';
 import { buildRateMap, buildSymbolMap, recalculateSnapshot } from '../lib/portfolioAggregator';
 import * as workerDispatcher from '../lib/workerDispatcher';
 import { hasAnyIntegration, getIntegration, getIntegrationType } from '../integrations/helpers';
-import { getProvider } from '../integrations/modules';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Filler, Title, CJSTooltip, CJSLegend, TimeScale);
 
@@ -64,13 +65,14 @@ const TAB_MIGRATION = { country: 'assets', account: 'assets', type: 'assets', cu
 
 export default function PortfolioPage() {
   const { isUnlocked, decrypt, encrypt } = useEncryption();
-  const { entries: vaultEntries, decryptedCache } = useVaultEntries();
+  const { decryptedCache } = useVaultEntries();
   const { hideAmounts } = useHideAmounts();
   const {
     portfolio, loading, error, refetch,
     displayCurrency, setDisplayCurrency, baseCurrency, currencies,
-    ratesLastUpdated, refreshAndApplyPrices,
+    ratesLastUpdated,
   } = usePortfolioData();
+  const { handleRefreshAll, refreshing, refreshToast, clearRefreshToast } = useRefreshPrices();
   const { countries } = useCountries();
 
   const [activeTab, setActiveTab] = useState(() => {
@@ -80,66 +82,20 @@ export default function PortfolioPage() {
   const [assetsGroupBy, setAssetsGroupBy] = useState(() => sessionStorage.getItem('pv_portfolio_assets_group') || 'none');
   const [expandedGroups, setExpandedGroups] = useState({});
   const [snapshotSaving, setSnapshotSaving] = useState(false);
-  const [refreshingAll, setRefreshingAll] = useState(false);
-  const [refreshResult, setRefreshResult] = useState(null);
   const [snapshotPrompt, setSnapshotPrompt] = useState(null); // { staleCount }
   const { config } = useAppConfig();
   const plaidEnabled = config?.plaid_enabled === 'true';
 
-  // Find Plaid-connected entries from portfolio data
+  // Plaid item IDs for the Refresh All handler
   const plaidEntries = useMemo(() => {
     if (!portfolio?.assets) return [];
     return portfolio.assets.filter(a => hasAnyIntegration(a));
   }, [portfolio]);
 
-  const hasPlaidEntries = plaidEntries.length > 0;
-
-  const [balanceRefreshingHook, setBalanceRefreshingHook] = useState(false);
-
-  // Combined refresh: prices + balances in parallel
-  const handleRefreshAll = async () => {
-    setRefreshingAll(true);
-    setRefreshResult(null);
-    const results = [];
-
-    try {
-      const promises = [];
-
-      // Refresh prices (stock/crypto)
-      promises.push(
-        refreshAndApplyPrices()
-          .then(r => { if (r.count > 0) results.push(`${r.count} price${r.count !== 1 ? 's' : ''}`); })
-          .catch(() => results.push('prices failed'))
-      );
-
-      // Refresh balances (Plaid)
-      if (hasPlaidEntries) {
-        const itemIds = [...new Set(plaidEntries.map(e => getIntegration(e, getIntegrationType(e))?.item_id).filter(Boolean))];
-        if (itemIds.length > 0) {
-          const provider = getProvider('plaid');
-          if (provider) {
-          setBalanceRefreshingHook(true);
-          promises.push(
-            (async () => {
-              const { updated } = await provider.refresh(itemIds, vaultEntries, decryptedCache, encrypt);
-              if (updated > 0) { results.push(`${updated} balance${updated !== 1 ? 's' : ''}`); refetch(); }
-            })().catch(() => results.push('balances failed'))
-              .finally(() => setBalanceRefreshingHook(false))
-          );
-          }
-        }
-      }
-
-      await Promise.all(promises);
-      setRefreshResult(results.length > 0 ? `Refreshed ${results.join(', ')}` : 'Everything up to date');
-      setTimeout(() => setRefreshResult(null), 5000);
-    } catch {
-      setRefreshResult('Refresh failed');
-      setTimeout(() => setRefreshResult(null), 5000);
-    } finally {
-      setRefreshingAll(false);
-    }
-  };
+  const plaidItemIds = useMemo(
+    () => [...new Set(plaidEntries.map(e => getIntegration(e, getIntegrationType(e))?.item_id).filter(Boolean))],
+    [plaidEntries]
+  );
 
   // Format helper respecting hideAmounts
   const fmt = useCallback((value, symbol = '') => {
@@ -295,8 +251,8 @@ export default function PortfolioPage() {
               ))}
             </select>
           )}
-          <button className="btn btn-secondary" onClick={handleRefreshAll} disabled={refreshingAll || isEmpty}>
-            <RefreshCw size={16} className={refreshingAll ? 'spin' : ''} /> {refreshingAll ? 'Refreshing...' : 'Refresh All'}
+          <button className="btn btn-secondary" onClick={() => handleRefreshAll(plaidItemIds)} disabled={refreshing || isEmpty}>
+            <RefreshCw size={16} className={refreshing ? 'spin' : ''} /> {refreshing ? 'Refreshing...' : 'Refresh All'}
           </button>
           <button className="btn btn-primary" onClick={handleSaveSnapshot} disabled={snapshotSaving || isEmpty}>
             <Camera size={16} /> {snapshotSaving ? 'Saving...' : 'Snapshot'}
@@ -328,10 +284,13 @@ export default function PortfolioPage() {
         </div>
       ) : (
         <>
-          {activeTab === 'overview' && <OverviewTab portfolio={p} fmtD={fmtD} hideAmounts={hideAmounts} refreshResult={refreshResult} />}
+          {activeTab === 'overview' && <OverviewTab portfolio={p} fmtD={fmtD} hideAmounts={hideAmounts} />}
           {activeTab === 'assets' && <AssetsTab portfolio={p} fmtD={fmtD} groupBy={assetsGroupBy} setGroupBy={setAssetsGroupBy} expandedGroups={expandedGroups} toggleGroup={toggleGroup} />}
           {activeTab === 'performance' && <PerformanceTab decrypt={decrypt} encrypt={encrypt} fmtD={fmtD} hideAmounts={hideAmounts} currencies={currencies} countries={countries} displayCurrency={displayCurrency} baseCurrency={baseCurrency} snapshotPrompt={snapshotPrompt} setSnapshotPrompt={setSnapshotPrompt} doSaveSnapshot={doSaveSnapshot} snapshotSaving={snapshotSaving} decryptedCache={decryptedCache} portfolio={portfolio} />}
         </>
+      )}
+      {refreshToast && (
+        <SaveToast key={refreshToast.key} message={refreshToast.message} type={refreshToast.type} onDismiss={clearRefreshToast} />
       )}
     </div>
   );
@@ -341,7 +300,7 @@ export default function PortfolioPage() {
 // Overview Tab
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-function OverviewTab({ portfolio, fmtD, hideAmounts, refreshResult }) {
+function OverviewTab({ portfolio, fmtD, hideAmounts }) {
   const { summary, by_country, by_type } = portfolio;
 
   const countryChartData = useMemo(() =>
@@ -378,11 +337,6 @@ function OverviewTab({ portfolio, fmtD, hideAmounts, refreshResult }) {
 
   return (
     <>
-      {refreshResult && (
-        <div className="text-muted" style={{ fontSize: 12, marginBottom: 8, textAlign: 'right' }}>
-          {refreshResult}
-        </div>
-      )}
       {/* Summary Cards */}
       <div className="portfolio-summary-grid">
         <SummaryCard label="Total Assets" value={fmtD(summary.total_assets)} color="var(--color-info)" />

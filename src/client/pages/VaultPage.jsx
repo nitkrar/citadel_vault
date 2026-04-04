@@ -17,6 +17,7 @@ import useExchanges from '../hooks/useExchanges';
 import useShareData from '../hooks/useShareData';
 import useRefreshPrices from '../hooks/useRefreshPrices';
 import ImportModal from '../components/ImportModal';
+import SaveToast from '../components/SaveToast';
 import SortTh from '../components/SortableTh';
 import { useHideAmounts } from '../components/Layout';
 import { usePlaidLink } from '../integrations/providers/plaid/PlaidConnect';
@@ -149,7 +150,7 @@ export default function VaultPage() {
 
   const { countries } = useCountries();
   const { currencies } = useCurrencies();
-  const { refreshAndApplyPrices } = useRefreshPrices();
+  const { handleRefreshAll, refreshing: refreshAllInProgress, refreshToast, clearRefreshToast } = useRefreshPrices();
   const { templates } = useTemplates();
   const { config } = useAppConfig();
   const { exchanges } = useExchanges();
@@ -1230,38 +1231,9 @@ export default function VaultPage() {
             return (
               <>
                 {canRefresh && (
-                  <button className="btn btn-secondary btn-sm" disabled={integrationRefreshing}
-                    onClick={async () => {
-                      const results = [];
-                      const promises = [];
-                      // Refresh prices (centralized — fetches + applies to entries)
-                      if (hasTickers) {
-                        promises.push(
-                          refreshAndApplyPrices()
-                            .then(r => { if (r.count > 0) results.push(`${r.count} price${r.count !== 1 ? 's' : ''}`); })
-                            .catch(() => results.push('prices failed'))
-                        );
-                      }
-                      // Refresh balances (Plaid)
-                      if (plaidItemIds.length > 0) {
-                        const provider = getProvider('plaid');
-                        if (!provider) { results.push('integration not available'); }
-                        else {
-                        setIntegrationRefreshing(true);
-                        promises.push(
-                          provider.refresh(plaidItemIds, entries, decryptedCache, encrypt,
-                            (id, data) => setDecryptedCache(prev => ({ ...prev, [id]: data })))
-                            .then(({ updated }) => { if (updated > 0) results.push(`${updated} balance${updated !== 1 ? 's' : ''}`); })
-                            .catch(() => results.push('balances failed'))
-                            .finally(() => setIntegrationRefreshing(false))
-                        );
-                        }
-                      }
-                      await Promise.all(promises);
-                      setPlaidMsg(results.length > 0 ? `Refreshed ${results.join(', ')}` : 'Everything up to date');
-                      setTimeout(() => setPlaidMsg(''), 3000);
-                    }}>
-                    <RefreshCw size={14} className={integrationRefreshing ? 'spin' : ''} /> {integrationRefreshing ? 'Refreshing...' : 'Refresh All'}
+                  <button className="btn btn-secondary btn-sm" disabled={refreshAllInProgress}
+                    onClick={() => handleRefreshAll(plaidItemIds)}>
+                    <RefreshCw size={14} className={refreshAllInProgress ? 'spin' : ''} /> {refreshAllInProgress ? 'Refreshing...' : 'Refresh All'}
                   </button>
                 )}
                 {plaidEnabled && (
@@ -1318,6 +1290,10 @@ export default function VaultPage() {
         </div>
       </div>
 
+      {/* Refresh All toast */}
+      {refreshToast && (
+        <SaveToast key={refreshToast.key} message={refreshToast.message} type={refreshToast.type} onDismiss={clearRefreshToast} />
+      )}
       {/* Plaid messages */}
       {integrationMsg && <div className="alert alert-success mb-3"><Check size={16} /><span>{integrationMsg}</span></div>}
       {(plaidConnectError || plaidLinkError) && <div className="alert alert-danger mb-3"><AlertTriangle size={16} /><span>{plaidConnectError || plaidLinkError}</span></div>}

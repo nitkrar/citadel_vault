@@ -1,22 +1,27 @@
-import { useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { useVaultEntries } from '../contexts/VaultDataContext';
+import { useEncryption } from '../contexts/EncryptionContext';
 import useTemplates from './useTemplates';
 import api from '../api/client';
+import { getProvider } from '../integrations/modules';
 
 const PRICE_CACHE_KEY = 'pv_ticker_prices';
 
 /**
- * useRefreshPrices — Centralized hook for fetching latest prices and
- * writing them back to vault entries.
+ * useRefreshPrices — Centralized hook for all "Refresh All" operations.
  *
- * Used by both PortfolioPage and VaultPage to ensure consistent behavior.
- * Fetches prices from /prices.php, then calls updateEntryLocal per entry
- * (which encrypts → API PUT → IndexedDB → React state → cross-tab sync).
- * Clears the sessionStorage price cache after applying.
+ * Handles price refresh (stock/crypto tickers) and Plaid balance refresh,
+ * with consolidated toast feedback state. Both VaultPage and PortfolioPage
+ * call handleRefreshAll(plaidItemIds) and render SaveToast from this hook.
+ *
+ * refreshAndApplyPrices is also exported for callers that only need prices.
  */
 export default function useRefreshPrices() {
-  const { entries, decryptedCache, updateEntryLocal } = useVaultEntries();
+  const { entries, decryptedCache, updateEntryLocal, refetch, setDecryptedCache } = useVaultEntries();
+  const { encrypt } = useEncryption();
   const { templates } = useTemplates();
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshToast, setRefreshToast] = useState(null);
 
   const refreshAndApplyPrices = useCallback(async () => {
     if (!entries?.length || !templates?.length) return { count: 0 };
@@ -63,5 +68,57 @@ export default function useRefreshPrices() {
     return { count };
   }, [entries, decryptedCache, templates, updateEntryLocal]);
 
-  return { refreshAndApplyPrices };
+  /**
+   * handleRefreshAll — Combined price + balance refresh with toast feedback.
+   * @param {string[]} [plaidItemIds] — Plaid item IDs to refresh balances for.
+   */
+  const handleRefreshAll = useCallback(async (plaidItemIds = []) => {
+    setRefreshing(true);
+    setRefreshToast(null);
+    const results = [];
+
+    try {
+      const promises = [];
+
+      // Refresh prices (stock/crypto)
+      promises.push(
+        refreshAndApplyPrices()
+          .then(r => { if (r.count > 0) results.push(`${r.count} price${r.count !== 1 ? 's' : ''}`); })
+          .catch(() => results.push('prices failed'))
+      );
+
+      // Refresh balances (Plaid)
+      if (plaidItemIds.length > 0) {
+        const provider = getProvider('plaid');
+        if (provider) {
+          promises.push(
+            provider.refresh(plaidItemIds, entries, decryptedCache, encrypt,
+              (id, data) => setDecryptedCache(prev => ({ ...prev, [id]: data })))
+              .then(({ updated }) => { if (updated > 0) { results.push(`${updated} balance${updated !== 1 ? 's' : ''}`); refetch(); } })
+              .catch(() => results.push('balances failed'))
+          );
+        }
+      }
+
+      await Promise.all(promises);
+      const hasFailure = results.some(r => r.includes('failed'));
+      setRefreshToast({
+        message: results.length > 0 ? `Refreshed ${results.join(', ')}` : 'Everything up to date',
+        type: hasFailure ? 'error' : 'success',
+        key: Date.now(),
+      });
+    } catch {
+      setRefreshToast({ message: 'Refresh failed', type: 'error', key: Date.now() });
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshAndApplyPrices, entries, decryptedCache, encrypt, setDecryptedCache, refetch]);
+
+  return {
+    refreshAndApplyPrices,
+    handleRefreshAll,
+    refreshing,
+    refreshToast,
+    clearRefreshToast: () => setRefreshToast(null),
+  };
 }
