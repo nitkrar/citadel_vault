@@ -230,7 +230,7 @@ export default function EncryptionKeyModal() {
   };
   const btnPrimary = (disabled) => ({
     width: '100%', padding: '10px 0', borderRadius: 8, border: 'none',
-    background: 'var(--color-primary, #2563eb)', color: '#fff', fontWeight: 600, fontSize: 15,
+    background: 'var(--color-primary)', color: 'var(--color-primary-text, #fff)', fontWeight: 600, fontSize: 15,
     cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.7 : 1, marginBottom: 8,
   });
   const btnSecondary = {
@@ -284,7 +284,7 @@ export default function EncryptionKeyModal() {
             <div>
               <div>Your administrator requires you to change your vault key.</div>
               {adminActionMessage && (
-                <div style={{ marginTop: 6, padding: '6px 10px', background: 'rgba(0,0,0,.04)', borderRadius: 6, fontStyle: 'italic', color: 'var(--color-danger)' }}>
+                <div style={{ marginTop: 6, padding: '6px 10px', background: 'var(--color-input-bg)', borderRadius: 6, fontStyle: 'italic', color: 'var(--color-danger)' }}>
                   {adminActionMessage}
                 </div>
               )}
@@ -305,7 +305,7 @@ export default function EncryptionKeyModal() {
             <div style={{ display: 'flex', gap: 6 }}>
               {Object.entries({ numeric: 'PIN', alphanumeric: 'Password', passphrase: 'Passphrase' }).map(([type, label]) => (
                 <button key={type} type="button" onClick={() => { setKeyType(type); setNewVaultKey(''); setConfirmNewKey(''); }}
-                  style={{ flex: 1, padding: '7px 8px', borderRadius: 8, border: `1px solid ${keyType === type ? 'var(--color-primary, #2563eb)' : 'var(--color-border)'}`, background: keyType === type ? 'var(--color-primary-light, #eff6ff)' : 'transparent', color: keyType === type ? 'var(--color-primary, #2563eb)' : 'var(--color-text-muted)', fontWeight: 500, fontSize: 13, cursor: 'pointer' }}>
+                  style={{ flex: 1, padding: '7px 8px', borderRadius: 8, border: `1px solid ${keyType === type ? 'var(--color-primary)' : 'var(--color-border)'}`, background: keyType === type ? 'var(--color-primary-light)' : 'transparent', color: keyType === type ? 'var(--color-primary)' : 'var(--color-text-muted)', fontWeight: 500, fontSize: 13, cursor: 'pointer' }}>
                   {label}
                   <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 2 }}>{VAULT_KEY_MINIMUMS[type]}+ chars</div>
                 </button>
@@ -356,7 +356,7 @@ export default function EncryptionKeyModal() {
             <div style={{ display: 'flex', gap: 6 }}>
               {Object.entries({ numeric: 'PIN', alphanumeric: 'Password', passphrase: 'Passphrase' }).map(([type, label]) => (
                 <button key={type} type="button" onClick={() => { setKeyType(type); setNewVaultKey(''); setConfirmNewKey(''); }}
-                  style={{ flex: 1, padding: '7px 8px', borderRadius: 8, border: `1px solid ${activeKeyType === type ? 'var(--color-primary, #2563eb)' : 'var(--color-border)'}`, background: activeKeyType === type ? 'var(--color-primary-light, #eff6ff)' : 'transparent', color: activeKeyType === type ? 'var(--color-primary, #2563eb)' : 'var(--color-text-muted)', fontWeight: 500, fontSize: 13, cursor: 'pointer' }}>
+                  style={{ flex: 1, padding: '7px 8px', borderRadius: 8, border: `1px solid ${activeKeyType === type ? 'var(--color-primary)' : 'var(--color-border)'}`, background: activeKeyType === type ? 'var(--color-primary-light)' : 'transparent', color: activeKeyType === type ? 'var(--color-primary)' : 'var(--color-text-muted)', fontWeight: 500, fontSize: 13, cursor: 'pointer' }}>
                   {label}
                   <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 2 }}>{VAULT_KEY_MINIMUMS[type]}+ chars</div>
                 </button>
@@ -394,7 +394,7 @@ export default function EncryptionKeyModal() {
     return (
       <Modal isOpen={true} title="Set Up Vault Key" onClose={handleSkip}>
         <form onSubmit={handleSetup}>
-          <div style={{ textAlign: 'center', marginBottom: 16 }}><KeyRound size={40} style={{ color: 'var(--color-primary, #2563eb)' }} /></div>
+          <div style={{ textAlign: 'center', marginBottom: 16 }}><KeyRound size={40} style={{ color: 'var(--color-primary)' }} /></div>
           <p style={{ color: 'var(--color-text-muted)', fontSize: 14, marginBottom: 16 }}>
             Create a vault key to protect your data with end-to-end encryption. All encryption happens in your browser — the server never sees your vault key.
           </p>
@@ -406,7 +406,7 @@ export default function EncryptionKeyModal() {
             <div style={{ display: 'flex', gap: 6 }}>
               {Object.entries({ numeric: 'PIN', alphanumeric: 'Password', passphrase: 'Passphrase' }).map(([type, label]) => (
                 <button key={type} type="button" onClick={() => { setKeyType(type); setVaultKey(''); setConfirmKey(''); }}
-                  style={{ flex: 1, padding: '7px 8px', borderRadius: 8, border: `1px solid ${keyType === type ? 'var(--color-primary, #2563eb)' : 'var(--color-border)'}`, background: keyType === type ? 'var(--color-primary-light, #eff6ff)' : 'transparent', color: keyType === type ? 'var(--color-primary, #2563eb)' : 'var(--color-text-muted)', fontWeight: 500, fontSize: 13, cursor: 'pointer' }}>
+                  style={{ flex: 1, padding: '7px 8px', borderRadius: 8, border: `1px solid ${keyType === type ? 'var(--color-primary)' : 'var(--color-border)'}`, background: keyType === type ? 'var(--color-primary-light)' : 'transparent', color: keyType === type ? 'var(--color-primary)' : 'var(--color-text-muted)', fontWeight: 500, fontSize: 13, cursor: 'pointer' }}>
                   {label}
                   <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 2 }}>{VAULT_KEY_MINIMUMS[type]}+ chars</div>
                 </button>
@@ -443,7 +443,7 @@ export default function EncryptionKeyModal() {
   return (
     <Modal isOpen={true} title={forceUnlockForChange ? 'Vault Key Change Required' : 'Unlock Your Vault'} onClose={forceUnlockForChange ? null : handleSkip}>
       <form onSubmit={handleUnlock}>
-        <div style={{ textAlign: 'center', marginBottom: 16 }}><KeyRound size={40} style={{ color: forceUnlockForChange ? 'var(--color-danger)' : 'var(--color-primary, #2563eb)' }} /></div>
+        <div style={{ textAlign: 'center', marginBottom: 16 }}><KeyRound size={40} style={{ color: forceUnlockForChange ? 'var(--color-danger)' : 'var(--color-primary)' }} /></div>
         {forceUnlockForChange && (
           <div style={{ marginBottom: 16 }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, background: 'var(--color-danger-light)', border: '1px solid var(--color-danger)', borderRadius: 8, padding: '10px 12px', color: 'var(--color-danger)', fontSize: 13 }}>
@@ -451,7 +451,7 @@ export default function EncryptionKeyModal() {
               <div>
                 <div>Your administrator requires you to change your vault key.</div>
                 {adminActionMessage && (
-                  <div style={{ marginTop: 6, padding: '6px 10px', background: 'rgba(0,0,0,.04)', borderRadius: 6, fontStyle: 'italic', color: 'var(--color-danger)' }}>
+                  <div style={{ marginTop: 6, padding: '6px 10px', background: 'var(--color-input-bg)', borderRadius: 6, fontStyle: 'italic', color: 'var(--color-danger)' }}>
                     {adminActionMessage}
                   </div>
                 )}
