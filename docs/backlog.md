@@ -1,37 +1,5 @@
 # Citadel Vault — Backlog
 
-## Critical — Fix Next Session
-
-### API Test Setup Data (37 failing tests)
-API tests now run against an isolated test DB (port 8083, `.env.test`), but 37/530 tests fail because they need test-specific data or config that the dev DB had implicitly. Grouped by root cause:
-
-**1. Account detail templates (12 tests)** — `account-detail-templates.test.js`
-- Tests create/update/delete templates referencing `account_type_id` from `account_types` table
-- Need: seed `account_types` with system defaults in `02-seed.sql` or `_seed_test_data.php`
-
-**2. Lockout tier tests (6 tests)** — `lockout-tiers.test.js`
-- Tests expect strict lockout thresholds (3/6/9 attempts) but `.env.test` has 1000
-- Need: either a separate `.env.test.lockout` config or the tests should set thresholds via the settings API before running
-
-**3. Invitation request tests (5 tests)** — `invitations.test.js` (POST ?action=request)
-- `invite_requests_enabled` is `false` in seed data → requests get 403
-- Need: test sets `invite_requests_enabled=true` via settings API in `beforeAll`
-
-**4. Settings metadata tests (3 tests)** — `settings.test.js`
-- Tests check `type='gatekeeper'` and `options` array — data is correct but `options` column has no seed values
-- Need: add `options` JSON to relevant system_settings rows in seed
-
-**5. Auth login tests (2 tests)** — `auth.test.js`
-- Login returns 401 intermittently — likely password hash mismatch or race with admin seeding
-- Need: investigate; may be a test ordering issue with parallel execution
-
-**6. Misc edge cases (9 tests)** — scattered across auth-edge-cases, negative, sharing, vault
-- Cascade from missing regular test user (created lazily but admin login may fail first)
-- Need: seed regular user in `_seed_test_data.php` alongside admin
-
-Design doc: `docs/plans/2026-04-04-pdo-consolidation-design-final.md`
-Test infrastructure: `tests/helpers/apiTestServer.js`, `tests/helpers/_seed_test_data.php`
-
 ---
 
 ## Security Audit (2026-03-27)
@@ -65,7 +33,7 @@ Full report: `docs/SECURITY_AUDIT_2026-03-27.md`. 16 agents audited every securi
 
 ### Medium — Plan Fix
 - No AAD in AES-GCM — ciphertext swappable between entries (`crypto.js`)
-- No blob size/format validation on encryption/vault/sharing POST endpoints
+- ~~No blob size/format validation on encryption/vault/sharing POST endpoints~~ FIXED — vault.php validates encrypted_data is string, bulk-create capped at 500 entries, FK violation returns 400
 - No audit logging: admin actions (`users.php`), vault CRUD (`vault.php`), password changes (`auth.php`), WebAuthn ops, recovery key update, setup-rsa
 - Registration rate limit recorded before validation — enables rate-limit DoS on emails
 - Login timing oracle — user existence detectable via response time
@@ -84,15 +52,16 @@ Full report: `docs/SECURITY_AUDIT_2026-03-27.md`. 16 agents audited every securi
 - Multiple empty catch blocks swallow errors in EncryptionContext
 
 ### Test Gaps — Zero Coverage
-- **EncryptionContext** — lock/unlock, session persistence, auto-lock, user-switch cleanup
-- **SecurityPage** — password change, vault key change, RSA key generation, recovery key view
-- **LoginPage / RegisterPage** — form handling, error display, password clearing
-- **Forgot-password** happy path end-to-end
-- **Email verification** flow
-- **Portfolio sharing** (`source_entry_id: 0`)
-- **WebAuthn** crypto verification (CBOR, signatures, challenge expiry/replay)
-- **Lockout tier escalation** (tier 2, tier 3 never tested)
-- **JWT expiry/tampering** tests
+- ~~**EncryptionContext**~~ DONE — 20 tests in `EncryptionContext.test.jsx` (lock/unlock, session restore, auto-lock, user-switch, encrypt/decrypt guards, vault prompt state)
+- **RegisterPage** — form handling, error display, password clearing (LoginPage covered: 24 tests)
+- **Forgot-password** happy path end-to-end (client-side crypto + API round-trip; API endpoint tested in auth.test.js)
+- **Email verification** flow (property existence checked; full happy path not tested)
+- ~~**SecurityPage**~~ DONE — 19 tests in `SecurityPage.test.jsx`
+- ~~**LoginPage**~~ DONE — 24 tests in `LoginPage.test.jsx`
+- ~~**Portfolio sharing** (`source_entry_id: 0`)~~ DONE — 6 tests in `sharing.test.js`
+- ~~**WebAuthn** crypto verification (CBOR, signatures, challenge expiry/replay)~~ DONE — 26 tests in `webauthn.test.js`
+- ~~**Lockout tier escalation** (tier 2, tier 3)~~ DONE — 10 tests in `lockout-tiers.test.js`
+- ~~**JWT expiry/tampering**~~ DONE — 19 tests in `jwt-security.test.js`
 
 ## High Priority (prior)
 - **Address test review findings** — Full findings in `docs/plans/2026-03-17-test-review-findings.md`. Key items:
@@ -364,6 +333,18 @@ _Recovery after KDF changes_
 - Added `InlineTextField` component (mirrors `InlineNumberField` for text fields)
 - `InlineNumberField` now has `stopPropagation` for use in table rows
 - 577 total tests passing
+
+## Bug Fixes (2026-04-04 session, cont.)
+- **API test seed audit — 37 failures → 0 (530/530 passing)**
+  - Centralized all test data in `_seed_test_data.php`: admin user, regular user, account_types (11 rows), system_settings overrides
+  - Fixed `.env.test` lockout thresholds: relaxed 1000/2000/3000 → strict 3/6/9 (safe: only 2 wrong-login attempts hit admin across all tests)
+  - Fixed stale passwords in `auth.test.js` (`Initial#12$` → `TestAdmin123`) from 2026-04-04 password simplification
+  - Isolated password-change + deactivated-user integration tests to dedicated throwaway users (no more shared admin/regular mutation)
+  - Fixed invitation tests: wrong admin email `admin@citadel.local` → `admin@test.local`
+  - Fixed lockout tests: MySQL CLI targeting dev DB `citadel_vault_db` → test DB `citadel_vault_test_db`
+  - Fixed sharing test: ISO datetime → MySQL-compatible format for `expires_at`
+  - Simplified `ensureRegularUser()` in apiClient.js (no-op — user is pre-seeded)
+  - vault.php: `encrypted_data` validated as string (was accepting arrays → 500), FK violation on `template_id` returns 400 (was 500), bulk-create capped at 500 entries (was crashing PHP server)
 
 ## Pending Prod Migrations
 - All migrations run on prod as of 2026-04-04. None pending.
