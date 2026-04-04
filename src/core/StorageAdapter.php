@@ -244,6 +244,12 @@ interface StorageAdapter {
      */
     function getSnapshotsWithEntries(int $userId, ?string $fromDate = null, ?string $toDate = null): array;
 
+    /**
+     * Get paginated snapshots with entries (cursor-based, newest first).
+     * @return array { snapshots: [...], has_more: bool, next_cursor: ?string }
+     */
+    function getSnapshotsWithEntriesPaginated(int $userId, ?string $before = null, int $limit = 50): array;
+
     // =========================================================================
     // Audit Log
     // =========================================================================

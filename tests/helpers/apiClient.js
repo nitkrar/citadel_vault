@@ -11,66 +11,14 @@ const TEST_USERS = {
 };
 
 /**
- * Ensure the regular test user exists. Creates via admin API if missing.
- * Admin-created users have must_reset_password=1, so we create with a temp
- * password then force-change to the real one (clears the flag and avoids
- * password-reuse rejection).
- * Called lazily on first getToken('regular').
+ * Ensure the regular test user exists.
+ * The user is pre-seeded by _seed_test_data.php (no lazy creation needed).
+ * This guard just prevents redundant login verification.
  */
 let regularUserEnsured = false;
 async function ensureRegularUser() {
   if (regularUserEnsured) return;
   regularUserEnsured = true;
-
-  const adminToken = await getToken('admin');
-  const { username, password } = TEST_USERS.regular;
-  const tempPassword = 'TempSetup99';
-
-  // Try to create with temp password — 409 means already exists
-  const resp = await fetch(`${BASE_URL}/users.php`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${adminToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      username,
-      email: `${username}@test.local`,
-      password: tempPassword,
-      role: 'user',
-    }),
-  });
-
-  if (resp.status === 201) {
-    // New user has must_reset_password=1. Login with temp password and
-    // force-change to the real password to clear the flag.
-    const loginResp = await fetch(`${BASE_URL}/auth.php?action=login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password: tempPassword }),
-    });
-    if (loginResp.ok) {
-      const setCookie = loginResp.headers.get('set-cookie') || '';
-      const match = setCookie.match(/pv_auth=([^;]+)/);
-      if (match) {
-        await fetch(`${BASE_URL}/auth.php?action=force-change-password`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${match[1]}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ new_password: password }),
-        });
-      }
-    }
-    return;
-  }
-
-  if (resp.status === 409) {
-    // Already exists from a previous run — password should be set and flag cleared
-    return;
-  }
-  console.warn(`ensureRegularUser: unexpected status ${resp.status}`);
 }
 
 let cachedTokens = {};

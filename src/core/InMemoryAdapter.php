@@ -587,6 +587,29 @@ class InMemoryAdapter implements StorageAdapter {
         return $snapshots;
     }
 
+    public function getSnapshotsWithEntriesPaginated(int $userId, ?string $before = null, int $limit = 50): array {
+        $all = $this->getSnapshotsWithEntries($userId);
+
+        // Sort descending by date
+        usort($all, fn($a, $b) => strcmp($b['snapshot_date'], $a['snapshot_date']));
+
+        if ($before !== null) {
+            $all = array_values(array_filter($all, fn($s) => $s['snapshot_date'] < $before));
+        }
+
+        $hasMore = count($all) > $limit;
+        $page = array_slice($all, 0, $limit);
+
+        // Reverse to chronological order
+        $page = array_reverse($page);
+
+        return [
+            'snapshots'   => $page,
+            'has_more'    => $hasMore,
+            'next_cursor' => $hasMore ? $page[0]['snapshot_date'] : null,
+        ];
+    }
+
     // =========================================================================
     // Audit Log
     // =========================================================================

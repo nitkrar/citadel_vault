@@ -542,7 +542,9 @@ describe('Sharing API (Redesigned)', () => {
       expect(keyResp.status).toBe(200);
       const keyData = await extractData(keyResp);
 
-      const futureDate = new Date(Date.now() + 86400000).toISOString();
+      // Use MySQL-compatible datetime format (YYYY-MM-DD HH:MM:SS)
+      const d = new Date(Date.now() + 86400000);
+      const futureDate = d.toISOString().slice(0, 19).replace('T', ' ');
       const resp = await api.post('/sharing.php?action=share', {
         json: {
           source_entry_id: expiryEntryId,

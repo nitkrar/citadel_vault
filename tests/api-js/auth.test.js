@@ -30,7 +30,7 @@ describe('Auth API', () => {
       const resp = await fetch(`${BASE_URL}/auth.php?action=login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'initial_user', password: 'Initial#12$' }),
+        body: JSON.stringify({ username: 'initial_user', password: 'TestAdmin123' }),
       });
       expect(resp.status).toBe(200);
       const body = await resp.json();
@@ -47,7 +47,7 @@ describe('Auth API', () => {
       const resp = await fetch(`${BASE_URL}/auth.php?action=login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'initial_user', password: 'Initial#12$' }),
+        body: JSON.stringify({ username: 'initial_user', password: 'TestAdmin123' }),
       });
       expect(resp.status).toBe(200);
       const setCookie = resp.headers.get('set-cookie') || '';
@@ -196,7 +196,7 @@ describe('Auth API', () => {
 
     it('returns error for short new password', async () => {
       const resp = await api.put('/auth.php?action=password', {
-        json: { current_password: 'Initial#12$', new_password: 'short' },
+        json: { current_password: 'TestAdmin123', new_password: 'short' },
       });
       expect(resp.ok).toBe(false);
     });
@@ -234,7 +234,7 @@ describe('Auth API', () => {
       const loginResp = await fetch(`${BASE_URL}/auth.php?action=login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'initial_user', password: 'Initial#12$' }),
+        body: JSON.stringify({ username: 'initial_user', password: 'TestAdmin123' }),
       });
       const cookies = loginResp.headers.get('set-cookie') || '';
       const match = cookies.match(/pv_auth=([^;]+)/);
@@ -324,21 +324,62 @@ describe('Auth API', () => {
   // ── integration edge cases ───────────────────────────────────────
   describe('integration edge cases', () => {
     it('password-change → re-login: new password works, old password fails', async () => {
-      // Change admin password to a new value
-      const changeResp = await apiRequest('PUT', '/auth.php?action=password', {
-        role: 'admin',
-        json: { current_password: 'Initial#12$', new_password: 'Changed#99!' },
+      // Use a dedicated user to avoid mutating the shared admin account
+      const ts = Date.now();
+      const username = `pwchange_${ts}`;
+      const tempPassword = 'TempPass#12';
+      const origPassword = 'OrigPass#12';
+      const newPassword = 'Changed#99!';
+
+      // Create user via admin API (gets must_reset_password=1)
+      const createResp = await api.post('/users.php', {
+        json: { username, email: `${username}@test.local`, password: tempPassword, role: 'user' },
+      });
+      expect(createResp.status).toBe(201);
+      const userId = (await extractData(createResp)).id;
+
+      // Login with temp password, then force-change to origPassword (clears must_reset_password)
+      const tempLoginResp = await fetch(`${BASE_URL}/auth.php?action=login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password: tempPassword }),
+      });
+      expect(tempLoginResp.status).toBe(200);
+      const tempCookies = tempLoginResp.headers.get('set-cookie') || '';
+      const tempToken = tempCookies.match(/pv_auth=([^;]+)/)?.[1];
+      expect(tempToken).toBeTruthy();
+
+      const forceResp = await fetch(`${BASE_URL}/auth.php?action=force-change-password`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${tempToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ new_password: origPassword }),
+      });
+      expect(forceResp.status).toBe(200);
+
+      // Re-login with origPassword to get a fresh token (force-change may invalidate old one)
+      const origLoginResp = await fetch(`${BASE_URL}/auth.php?action=login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password: origPassword }),
+      });
+      expect(origLoginResp.status).toBe(200);
+      const origCookies = origLoginResp.headers.get('set-cookie') || '';
+      const origToken = origCookies.match(/pv_auth=([^;]+)/)?.[1];
+      expect(origToken).toBeTruthy();
+
+      // Change password via the normal password-change endpoint
+      const changeResp = await fetch(`${BASE_URL}/auth.php?action=password`, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${origToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ current_password: origPassword, new_password: newPassword }),
       });
       expect(changeResp.status).toBe(200);
-
-      // Reset cached tokens so subsequent logins use fresh credentials
-      resetTokens();
 
       // Login with NEW password must succeed
       const newLoginResp = await fetch(`${BASE_URL}/auth.php?action=login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'initial_user', password: 'Changed#99!' }),
+        body: JSON.stringify({ username, password: newPassword }),
       });
       expect(newLoginResp.status).toBe(200);
 
@@ -346,57 +387,61 @@ describe('Auth API', () => {
       const oldLoginResp = await fetch(`${BASE_URL}/auth.php?action=login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'initial_user', password: 'Initial#12$' }),
+        body: JSON.stringify({ username, password: origPassword }),
       });
       expect(oldLoginResp.status).toBe(401);
 
-      // CLEANUP: restore original password so other tests are not broken
-      const restoreResp = await apiRequest('PUT', '/auth.php?action=password', {
-        role: 'admin',
-        json: { current_password: 'Changed#99!', new_password: 'Initial#12$' },
-      });
-      expect(restoreResp.status).toBe(200);
-
-      // Reset tokens again so subsequent tests get a fresh admin session
-      resetTokens();
+      // Cleanup: delete the test user
+      await api.delete(`/users.php?id=${userId}`);
     });
 
     it('deactivated user is blocked from API access', async () => {
-      // Admin fetches user list to find the regular user's ID
-      const usersResp = await apiRequest('GET', '/users.php', { role: 'admin' });
-      expect(usersResp.status).toBe(200);
-      const usersBody = await usersResp.json();
-      const users = usersBody?.data ?? usersBody;
-      const regularUser = Array.isArray(users)
-        ? users.find((u) => u.username === 'test_regular_user')
-        : null;
-      expect(regularUser).toBeTruthy();
-      const userId = regularUser.id;
+      // Use a dedicated user to avoid mutating the shared test_regular_user
+      const ts = Date.now();
+      const username = `deact_${ts}`;
+      const password = 'Deactivate#1';
 
-      // Admin deactivates the regular user
-      const deactivateResp = await apiRequest('PUT', `/users.php?id=${userId}`, {
-        role: 'admin',
+      // Create user via admin API
+      const createResp = await api.post('/users.php', {
+        json: { username, email: `${username}@test.local`, password, role: 'user' },
+      });
+      expect(createResp.status).toBe(201);
+      const userId = (await extractData(createResp)).id;
+
+      // Clear must_reset_password via force-change flow
+      const loginResp = await fetch(`${BASE_URL}/auth.php?action=login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      expect(loginResp.status).toBe(200);
+      const cookies = loginResp.headers.get('set-cookie') || '';
+      const token = cookies.match(/pv_auth=([^;]+)/)?.[1];
+      if (token) {
+        await fetch(`${BASE_URL}/auth.php?action=force-change-password`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ new_password: password }),
+        });
+      }
+
+      // Admin deactivates the user
+      const deactivateResp = await api.put(`/users.php?id=${userId}`, {
         json: { is_active: false },
       });
       expect(deactivateResp.status).toBe(200);
 
-      // Login AFTER deactivation — the server must reject credentials for an
-      // inactive account (the login handler checks is_active before issuing a
-      // token, so no JWT caching window applies here).
-      // auth.php login returns 403 specifically for deactivated accounts.
-      const loginAfterDeactivateResp = await fetch(`${BASE_URL}/auth.php?action=login`, {
+      // Login after deactivation must fail with 403
+      const blockedResp = await fetch(`${BASE_URL}/auth.php?action=login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'test_regular_user', password: 'TestRegular#1' }),
+        body: JSON.stringify({ username, password }),
       });
-      expect(loginAfterDeactivateResp.status).toBe(403);
+      expect(blockedResp.status).toBe(403);
 
-      // CLEANUP: re-activate the regular user
-      const reactivateResp = await apiRequest('PUT', `/users.php?id=${userId}`, {
-        role: 'admin',
-        json: { is_active: true },
-      });
-      expect(reactivateResp.status).toBe(200);
+      // Cleanup: re-activate then delete
+      await api.put(`/users.php?id=${userId}`, { json: { is_active: true } });
+      await api.delete(`/users.php?id=${userId}`);
     });
 
     it('force-change-password endpoint returns 403 when flag is not set', async () => {
@@ -405,7 +450,7 @@ describe('Auth API', () => {
       // endpoint is reachable and enforces its guard correctly.
       const resp = await apiRequest('POST', '/auth.php?action=force-change-password', {
         role: 'admin',
-        json: { new_password: 'Initial#12$' },
+        json: { new_password: 'TestAdmin123' },
       });
       expect(resp.status).toBe(403);
     });
