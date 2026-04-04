@@ -114,6 +114,17 @@ export function buildSymbolMap(currencies) {
 }
 
 /**
+ * Internal helper: initialize a group bucket if needed, accumulate total + count.
+ * Returns the group object so callers can append extra fields (items, has_liability, etc.).
+ */
+function accumulateGroup(groups, key, value, defaults) {
+  if (!groups[key]) groups[key] = { total: 0, count: 0, ...defaults };
+  groups[key].total += value;
+  groups[key].count++;
+  return groups[key];
+}
+
+/**
  * Recalculate a snapshot from its per-entry blobs using a given rate map.
  * Used by HistoryTab to recompute totals at snapshot-time or current rates.
  *
@@ -148,41 +159,21 @@ export function recalculateSnapshot(entries, rateMap, displayCurrency) {
       totalAssets += displayValue;
     }
 
-    // Group by type (match aggregatePortfolio: subtype || entry_type)
-    // Normalize to lowercase — old snapshots may have capitalized template_name as key
+    // Group by type — normalize to lowercase (old snapshots may have capitalized keys)
     const typeKey = (e.subtype || e.entry_type || e.template_name || 'other').toLowerCase();
-    if (!byType[typeKey]) {
-      byType[typeKey] = { total: 0, count: 0, label: e.template_name || typeKey };
-    }
-    byType[typeKey].total += displayValue;
-    byType[typeKey].count++;
+    accumulateGroup(byType, typeKey, displayValue, { label: e.template_name || typeKey });
 
     // Group by currency
-    if (!byCurrency[currency]) {
-      byCurrency[currency] = { total: 0, count: 0, label: currency };
-    }
-    byCurrency[currency].total += displayValue;
-    byCurrency[currency].count++;
+    accumulateGroup(byCurrency, currency, displayValue, { label: currency });
 
     // Group by country
     const countryKey = e.country || 'Unknown';
-    if (!byCountry[countryKey]) {
-      byCountry[countryKey] = { total: 0, count: 0, label: countryKey };
-    }
-    byCountry[countryKey].total += displayValue;
-    byCountry[countryKey].count++;
+    accumulateGroup(byCountry, countryKey, displayValue, { label: countryKey });
 
     // Group by linked account
     const acctId = e.linked_account?.id;
     const acctKey = acctId ? String(acctId) : '_unlinked';
-    if (!byAccount[acctKey]) {
-      byAccount[acctKey] = {
-        total: 0, count: 0,
-        label: e.linked_account?.name || 'Not linked to an account',
-      };
-    }
-    byAccount[acctKey].total += displayValue;
-    byAccount[acctKey].count++;
+    accumulateGroup(byAccount, acctKey, displayValue, { label: e.linked_account?.name || 'Not linked to an account' });
 
     enrichedEntries.push({ ...e, displayValue });
   }
@@ -309,41 +300,21 @@ export function aggregatePortfolio(entries, currencies, baseCurrency, displayCur
 
     // Group by country
     const countryKey = country || 'Unknown';
-    if (!byCountry[countryKey]) byCountry[countryKey] = { total: 0, count: 0, items: [] };
-    byCountry[countryKey].total += displayValue;
-    byCountry[countryKey].count++;
-    byCountry[countryKey].items.push(assetItem);
+    accumulateGroup(byCountry, countryKey, displayValue, { items: [] }).items.push(assetItem);
 
     // Group by type (subtype or entry_type)
     const typeKey = subtype || entryType;
-    if (!byType[typeKey]) byType[typeKey] = { total: 0, count: 0, items: [], has_liability: false, label: template?.name || typeKey };
-    byType[typeKey].total += displayValue;
-    byType[typeKey].count++;
-    byType[typeKey].items.push(assetItem);
-    if (isLiability) byType[typeKey].has_liability = true;
+    const typeGroup = accumulateGroup(byType, typeKey, displayValue, { items: [], has_liability: false, label: template?.name || typeKey });
+    typeGroup.items.push(assetItem);
+    if (isLiability) typeGroup.has_liability = true;
 
     // Group by linked account
     const acctKey = linkedAccountId || '_unlinked';
-    if (!byAccount[acctKey]) {
-      const acct = accountMap[linkedAccountId];
-      byAccount[acctKey] = {
-        total: 0,
-        count: 0,
-        items: [],
-        account: acct || null,
-        label: acct ? acct.name : 'Not linked to an account',
-      };
-    }
-    byAccount[acctKey].total += displayValue;
-    byAccount[acctKey].count++;
-    byAccount[acctKey].items.push(assetItem);
+    const acct = accountMap[linkedAccountId];
+    accumulateGroup(byAccount, acctKey, displayValue, { items: [], account: acct || null, label: acct ? acct.name : 'Not linked to an account' }).items.push(assetItem);
 
     // Group by currency
-    if (!byCurrency[currency]) {
-      byCurrency[currency] = { total: 0, count: 0, symbol: symbolMap[currency] || currency };
-    }
-    byCurrency[currency].total += displayValue;
-    byCurrency[currency].count++;
+    accumulateGroup(byCurrency, currency, displayValue, { symbol: symbolMap[currency] || currency });
   }
 
   // Find rates_last_updated from currencies
