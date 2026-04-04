@@ -16,6 +16,7 @@ import useAppConfig from '../hooks/useAppConfig';
 import useExchanges from '../hooks/useExchanges';
 import useShareData from '../hooks/useShareData';
 import useRefreshPrices from '../hooks/useRefreshPrices';
+import useLayoutMode from '../hooks/useLayoutMode';
 import ImportModal from '../components/ImportModal';
 import SaveToast from '../components/SaveToast';
 import SortTh from '../components/SortableTh';
@@ -28,7 +29,7 @@ import { extractValue, buildRateMap, convertCurrency } from '../lib/portfolioAgg
 import {
   Plus, Edit2, Trash2, Search, Eye, EyeOff, Copy, Check, Lock,
   KeyRound, AlertTriangle, Undo2, X, Upload,
-  Landmark, Briefcase, FileText, Shield, Layers, RefreshCw, Link2, Share2,
+  Landmark, Briefcase, FileText, Shield, Layers, RefreshCw, Link2, Share2, MoreVertical, ChevronDown,
 } from 'lucide-react';
 
 const TYPE_META = {
@@ -155,6 +156,7 @@ export default function VaultPage() {
   const { config } = useAppConfig();
   const { exchanges } = useExchanges();
   const { shareCounts, sharesByEntry, refetch: refetchShares } = useShareData();
+  const { isMobile } = useLayoutMode();
 
   // Ticker verification state
   const [tickerVerified, setTickerVerified] = useState(false);
@@ -236,6 +238,10 @@ export default function VaultPage() {
   const [plaidAccountPicker, setPlaidAccountPicker] = useState(null); // { accounts, itemId, metadata, entryId }
   const [integrationRefreshing, setIntegrationRefreshing] = useState(false);
   const plaidEnabled = config?.plaid_enabled === 'true';
+
+  // Mobile overflow menus
+  const [showActionOverflow, setShowActionOverflow] = useState(false);
+  const [showTypeOverflow, setShowTypeOverflow] = useState(false);
 
   // ── Plaid Connect Bank success handler ─────────────────────────────
   const handlePlaidConnectSuccess = useCallback(async ({ itemId, accounts, metadata }) => {
@@ -1214,14 +1220,20 @@ export default function VaultPage() {
 
   return (
     <div className="page-content">
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">Vault</h1>
-          <p className="page-subtitle">All your encrypted entries in one place</p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <button className="btn btn-ghost btn-sm" onClick={loadDeleted}><Undo2 size={14} /> Recently Deleted</button>
-          <button className="btn btn-secondary btn-sm" onClick={() => setShowImport(true)}><Upload size={14} /> Import</button>
+      {isMobile ? (
+        /* Mobile: Row 1 — currency selector (left), ... menu (right) */
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-sm)' }}>
+          {currencies.length > 0 ? (
+            <select className="form-control"
+              style={{ width: 'auto', minWidth: 70, padding: '4px 24px 4px 6px', fontSize: 13 }}
+              value={baseCurrency}
+              onChange={e => setDisplayCurrency(e.target.value)}
+            >
+              {currencies.filter(c => c.is_active === 1 || c.is_active === '1' || c.is_active === true).map(c => (
+                <option key={c.code} value={c.code}>{c.symbol} {c.code}</option>
+              ))}
+            </select>
+          ) : <div />}
           {(() => {
             const plaidItemIds = plaidEnabled ? [...new Set(
               entries.map(e => {
@@ -1236,58 +1248,179 @@ export default function VaultPage() {
             });
             const canRefresh = plaidItemIds.length > 0 || hasTickers;
             return (
-              <>
-                {canRefresh && (
-                  <button className="btn btn-secondary btn-sm" disabled={refreshAllInProgress}
-                    onClick={() => handleRefreshAll(plaidItemIds)}>
-                    <RefreshCw size={14} className={refreshAllInProgress ? 'spin' : ''} /> {refreshAllInProgress ? 'Refreshing...' : 'Refresh All'}
-                  </button>
+              <div style={{ position: 'relative' }}>
+                <button className="btn btn-ghost btn-sm" onClick={() => setShowActionOverflow(v => !v)} aria-label="More actions">
+                  <MoreVertical size={18} />
+                </button>
+                {showActionOverflow && (
+                  <>
+                    <div style={{ position: 'fixed', inset: 0, zIndex: 900 }} onClick={() => setShowActionOverflow(false)} />
+                    <div style={{
+                      position: 'fixed', right: 16, top: 'auto', zIndex: 901,
+                      background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 8,
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.15)', minWidth: 180, overflow: 'hidden',
+                    }}>
+                      <button className="btn btn-ghost btn-sm" style={{ width: '100%', justifyContent: 'flex-start', borderRadius: 0, padding: '10px 14px' }}
+                        onClick={() => { loadDeleted(); setShowActionOverflow(false); }}>
+                        <Undo2 size={14} /> Recently Deleted
+                      </button>
+                      {canRefresh && (
+                        <button className="btn btn-ghost btn-sm" style={{ width: '100%', justifyContent: 'flex-start', borderRadius: 0, padding: '10px 14px' }}
+                          disabled={refreshAllInProgress}
+                          onClick={() => { handleRefreshAll(plaidItemIds); setShowActionOverflow(false); }}>
+                          <RefreshCw size={14} className={refreshAllInProgress ? 'spin' : ''} /> {refreshAllInProgress ? 'Refreshing...' : 'Refresh All'}
+                        </button>
+                      )}
+                      {plaidEnabled && (
+                        <button className="btn btn-ghost btn-sm" style={{ width: '100%', justifyContent: 'flex-start', borderRadius: 0, padding: '10px 14px' }}
+                          disabled={plaidConnectLoading}
+                          onClick={() => { openPlaidConnect(); setShowActionOverflow(false); }}>
+                          <Landmark size={14} /> {plaidConnectLoading ? 'Connecting...' : 'Connect Bank'}
+                        </button>
+                      )}
+                    </div>
+                  </>
                 )}
-                {plaidEnabled && (
-                  <button className="btn btn-secondary" onClick={openPlaidConnect} disabled={plaidConnectLoading}>
-                    <Landmark size={14} /> {plaidConnectLoading ? 'Connecting...' : 'Connect Bank'}
-                  </button>
-                )}
-              </>
+              </div>
             );
           })()}
-          {currencies.length > 0 && (
-            <div className="flex items-center gap-2">
-              <span className="text-muted" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>Display:</span>
-              <select
-                className="form-control"
-                style={{ width: 'auto', minWidth: 90, padding: '4px 30px 4px 8px', fontSize: 13 }}
-                value={baseCurrency}
-                onChange={e => setDisplayCurrency(e.target.value)}
-              >
-                {currencies.filter(c => c.is_active === 1 || c.is_active === '1' || c.is_active === true).map(c => (
-                  <option key={c.code} value={c.code}>{c.symbol} {c.code}</option>
-                ))}
-              </select>
-            </div>
-          )}
-          <button className="btn btn-primary" onClick={() => openAdd(activeType !== 'all' ? activeType : 'password')}><Plus size={16} /> New Entry</button>
         </div>
-      </div>
+      ) : (
+        /* Desktop: full page header */
+        <div className="page-header">
+          <div>
+            <h1 className="page-title">Vault</h1>
+            <p className="page-subtitle">All your encrypted entries in one place</p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button className="btn btn-ghost btn-sm" onClick={loadDeleted}><Undo2 size={14} /> Recently Deleted</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setShowImport(true)}><Upload size={14} /> Import</button>
+            {(() => {
+              const plaidItemIds = plaidEnabled ? [...new Set(
+                entries.map(e => {
+                  const d = decryptedCache[e.id];
+                  return getIntegration(d, getIntegrationType(d))?.item_id;
+                }).filter(Boolean)
+              )] : [];
+              const hasTickers = entries.some(e => {
+                const d = decryptedCache[e.id];
+                const tpl = templates.find(t => t.id === e.template_id) || e.template;
+                return (tpl?.subtype === 'stock' && d?.ticker) || (tpl?.subtype === 'crypto' && d?.coin);
+              });
+              const canRefresh = plaidItemIds.length > 0 || hasTickers;
+              return (
+                <>
+                  {canRefresh && (
+                    <button className="btn btn-secondary btn-sm" disabled={refreshAllInProgress}
+                      onClick={() => handleRefreshAll(plaidItemIds)}>
+                      <RefreshCw size={14} className={refreshAllInProgress ? 'spin' : ''} /> {refreshAllInProgress ? 'Refreshing...' : 'Refresh All'}
+                    </button>
+                  )}
+                  {plaidEnabled && (
+                    <button className="btn btn-secondary" onClick={openPlaidConnect} disabled={plaidConnectLoading}>
+                      <Landmark size={14} /> {plaidConnectLoading ? 'Connecting...' : 'Connect Bank'}
+                    </button>
+                  )}
+                </>
+              );
+            })()}
+            {currencies.length > 0 && (
+              <div className="flex items-center gap-2">
+                <span className="text-muted" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>Display:</span>
+                <select className="form-control"
+                  style={{ width: 'auto', minWidth: 90, padding: '4px 30px 4px 8px', fontSize: 13 }}
+                  value={baseCurrency}
+                  onChange={e => setDisplayCurrency(e.target.value)}
+                >
+                  {currencies.filter(c => c.is_active === 1 || c.is_active === '1' || c.is_active === true).map(c => (
+                    <option key={c.code} value={c.code}>{c.symbol} {c.code}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <button className="btn btn-primary" onClick={() => openAdd(activeType !== 'all' ? activeType : 'password')}><Plus size={16} /> New Entry</button>
+          </div>
+        </div>
+      )}
 
       {/* Type filter tabs */}
-      <div className="vault-type-filters flex gap-2 mb-4" style={{ flexWrap: 'wrap' }}>
-        <button className={`btn btn-sm ${!activeType || activeType === 'all' ? 'btn-primary' : 'btn-ghost'}`}
-          onClick={() => { setActiveType('all'); sessionStorage.setItem('pv_vault_last_tab', 'all'); }}>
-          All <span className="badge badge-muted" style={{ marginLeft: 4 }}>{counts.all}</span>
-        </button>
-        {TAB_ORDER.map(type => {
-          const meta = TYPE_META[type];
-          const Icon = meta?.icon || Layers;
-          return (
-            <button key={type} className={`btn btn-sm ${activeType === type ? 'btn-primary' : 'btn-ghost'}`}
-              onClick={() => { setActiveType(type); sessionStorage.setItem('pv_vault_last_tab', type); }}>
-              <Icon size={14} /> {meta?.label || type}
-              {counts[type] > 0 && <span className="badge badge-muted" style={{ marginLeft: 4 }}>{counts[type]}</span>}
-            </button>
-          );
-        })}
-      </div>
+      {isMobile ? (
+        /* Mobile row 2: Accounts + Assets tabs + More dropdown */
+        <div className="vault-type-filters flex gap-2 mb-4" style={{ flexWrap: 'nowrap', alignItems: 'center' }}>
+          {['account', 'asset'].map(type => {
+            const meta = TYPE_META[type];
+            const Icon = meta?.icon || Layers;
+            return (
+              <button key={type} className={`btn btn-sm ${activeType === type ? 'btn-primary' : 'btn-ghost'}`}
+                onClick={() => { setActiveType(type); sessionStorage.setItem('pv_vault_last_tab', type); }}>
+                <Icon size={14} /> {meta?.label || type}
+                {counts[type] > 0 && <span className="badge badge-muted" style={{ marginLeft: 4 }}>{counts[type]}</span>}
+              </button>
+            );
+          })}
+          {(() => {
+            const dropdownTypes = ['all', ...TAB_ORDER.filter(t => t !== 'account' && t !== 'asset')];
+            const isDropdownActive = dropdownTypes.includes(activeType) || !activeType || activeType === 'all';
+            const activeLabel = !activeType || activeType === 'all' ? `All (${counts.all})` : (TYPE_META[activeType]?.label || activeType);
+            return (
+              <div style={{ position: 'relative', flexShrink: 0 }}>
+                <button className={`btn btn-sm ${isDropdownActive ? 'btn-primary' : 'btn-ghost'}`}
+                  onClick={() => setShowTypeOverflow(v => !v)}>
+                  {isDropdownActive ? activeLabel : 'More'}
+                  <ChevronDown size={14} />
+                </button>
+                {showTypeOverflow && (
+                  <>
+                    <div style={{ position: 'fixed', inset: 0, zIndex: 900 }} onClick={() => setShowTypeOverflow(false)} />
+                    <div style={{
+                      position: 'fixed', left: 16, zIndex: 901,
+                      background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 8,
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.15)', minWidth: 160, overflow: 'hidden',
+                    }}>
+                      {dropdownTypes.map(type => {
+                        const isAll = type === 'all';
+                        const meta = TYPE_META[type];
+                        const Icon = isAll ? Layers : (meta?.icon || Layers);
+                        const label = isAll ? 'All' : (meta?.label || type);
+                        const count = isAll ? counts.all : counts[type];
+                        const isActive = isAll ? (!activeType || activeType === 'all') : activeType === type;
+                        return (
+                          <button key={type} className="btn btn-ghost btn-sm"
+                            style={{ width: '100%', justifyContent: 'flex-start', borderRadius: 0, padding: '10px 14px',
+                              background: isActive ? 'var(--hover-bg)' : undefined }}
+                            onClick={() => { setActiveType(type); sessionStorage.setItem('pv_vault_last_tab', type); setShowTypeOverflow(false); }}>
+                            <Icon size={14} /> {label}
+                            {count > 0 && <span className="badge badge-muted" style={{ marginLeft: 4 }}>{count}</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })()}
+        </div>
+      ) : (
+        /* Desktop: all tabs visible */
+        <div className="vault-type-filters flex gap-2 mb-4" style={{ flexWrap: 'wrap' }}>
+          <button className={`btn btn-sm ${!activeType || activeType === 'all' ? 'btn-primary' : 'btn-ghost'}`}
+            onClick={() => { setActiveType('all'); sessionStorage.setItem('pv_vault_last_tab', 'all'); }}>
+            All <span className="badge badge-muted" style={{ marginLeft: 4 }}>{counts.all}</span>
+          </button>
+          {TAB_ORDER.map(type => {
+            const meta = TYPE_META[type];
+            const Icon = meta?.icon || Layers;
+            return (
+              <button key={type} className={`btn btn-sm ${activeType === type ? 'btn-primary' : 'btn-ghost'}`}
+                onClick={() => { setActiveType(type); sessionStorage.setItem('pv_vault_last_tab', type); }}>
+                <Icon size={14} /> {meta?.label || type}
+                {counts[type] > 0 && <span className="badge badge-muted" style={{ marginLeft: 4 }}>{counts[type]}</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Search */}
       <div className="flex gap-3 mb-4">
