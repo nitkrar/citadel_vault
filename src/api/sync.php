@@ -7,11 +7,12 @@
 require_once __DIR__ . '/../core/Response.php';
 require_once __DIR__ . '/../../config/config.php';
 require_once __DIR__ . '/../core/Auth.php';
+require_once __DIR__ . '/../core/Storage.php';
 
 Response::setCors();
 $payload = Auth::requireAuth();
 $userId = Auth::userId($payload);
-$db = Database::getInstance();
+$storage = Storage::adapter();
 
 $since = $_GET['since'] ?? null;
 $pollInterval = (int)env('SYNC_POLL_INTERVAL', 900);
@@ -33,20 +34,18 @@ if ($sinceTime === false) {
 }
 $sinceFormatted = gmdate('Y-m-d H:i:s', $sinceTime);
 
-// Single query: check MAX(updated_at) per category
+// Check MAX(updated_at) per category via adapter
 $categories = [
-    ['name' => 'vault_entries',  'sql' => "SELECT MAX(updated_at) FROM vault_entries WHERE user_id = ?",   'params' => [$userId]],
-    ['name' => 'currencies',     'sql' => "SELECT MAX(last_updated) FROM currencies",                      'params' => []],
-    ['name' => 'countries',      'sql' => "SELECT MAX(updated_at) FROM countries",                         'params' => []],
-    ['name' => 'templates',      'sql' => "SELECT MAX(updated_at) FROM entry_templates WHERE owner_id IS NULL OR owner_id = ?", 'params' => [$userId]],
+    ['name' => 'vault_entries',  'method' => fn() => $storage->getMaxEntryUpdatedAt($userId)],
+    ['name' => 'currencies',     'method' => fn() => $storage->getLastCurrencyUpdate()],
+    ['name' => 'countries',      'method' => fn() => $storage->getMaxCountryUpdatedAt()],
+    ['name' => 'templates',      'method' => fn() => $storage->getMaxTemplateUpdatedAt($userId)],
 ];
 
 $changed = [];
 foreach ($categories as $cat) {
     try {
-        $stmt = $db->prepare($cat['sql']);
-        $stmt->execute($cat['params']);
-        $maxTime = $stmt->fetchColumn();
+        $maxTime = ($cat['method'])();
         if ($maxTime && $maxTime > $sinceFormatted) {
             $changed[] = $cat['name'];
         }

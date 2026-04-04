@@ -20,7 +20,6 @@ $userId = Auth::userId($payload);
 $method = $_SERVER['REQUEST_METHOD'];
 $action = $_GET['action'] ?? null;
 $storage = Storage::adapter();
-$db = Database::getInstance();
 
 // ---------------------------------------------------------------------------
 // GET ?action=recipient-key&identifier=X — Resolve recipient, return public key + signed token
@@ -32,23 +31,14 @@ if ($method === 'GET' && $action === 'recipient-key') {
         Response::error('identifier parameter is required.', 400);
     }
 
-    // Don't allow sharing with yourself
-    $stmt = $db->prepare("SELECT id, username, email FROM users WHERE id = ?");
-    $stmt->execute([$userId]);
-    $self = $stmt->fetch(PDO::FETCH_ASSOC);
+    // Don't allow sharing with yourself (reuse getUserById #1 — returns needed fields)
+    $self = $storage->getUserById($userId);
     if ($self && ($identifier === $self['username'] || $identifier === $self['email'])) {
         Response::error('Cannot share with yourself.', 400);
     }
 
     // Try to find real user by username or email
-    $stmt = $db->prepare(
-        "SELECT u.id, uvk.public_key
-         FROM users u
-         LEFT JOIN user_vault_keys uvk ON u.id = uvk.user_id
-         WHERE (u.username = ? OR u.email = ?) AND u.is_active = 1 AND u.role != 'ghost'"
-    );
-    $stmt->execute([$identifier, $identifier]);
-    $recipient = $stmt->fetch(PDO::FETCH_ASSOC);
+    $recipient = $storage->getRecipientWithVaultKey($identifier);
 
     if ($recipient && !empty($recipient['public_key'])) {
         Response::success([
@@ -159,10 +149,8 @@ if ($method === 'POST' && $action === 'share') {
         $recipientIdentifier = trim($r['identifier'] ?? '');
         if ($recipientId !== 0) {
             // For real users, always use their actual username (not sender-provided value)
-            $stmt = $db->prepare("SELECT username FROM users WHERE id = ?");
-            $stmt->execute([$recipientId]);
-            $recipientUser = $stmt->fetch(PDO::FETCH_ASSOC);
-            $recipientIdentifier = $recipientUser ? $recipientUser['username'] : ($recipientIdentifier ?: 'unknown');
+            $recipientUsername = $storage->getUsernameById($recipientId);
+            $recipientIdentifier = $recipientUsername ?: ($recipientIdentifier ?: 'unknown');
         } elseif (!$recipientIdentifier) {
             $recipientIdentifier = 'unknown';
         }
@@ -215,12 +203,7 @@ if ($method === 'POST' && $action === 'update') {
         if (!$shareUserId || empty($encryptedData)) continue;
 
         // Find the share by sender + source_entry + recipient
-        $stmt = $db->prepare(
-            "SELECT id FROM shared_items
-             WHERE sender_id = ? AND source_entry_id = ? AND recipient_id = ?"
-        );
-        $stmt->execute([$userId, $sourceEntryId, $shareUserId]);
-        $share = $stmt->fetch(PDO::FETCH_ASSOC);
+        $share = $storage->getShareByKey($userId, $sourceEntryId, $shareUserId);
 
         if ($share) {
             $storage->updateShare((int)$share['id'], $encryptedData);
@@ -245,17 +228,9 @@ if ($method === 'POST' && $action === 'revoke') {
         Response::error('source_entry_id is required.', 400);
     }
 
-    // Build WHERE clause for source matching (NULL-safe for portfolio)
-    $sourceWhere = $isPortfolio
-        ? "sender_id = ? AND source_entry_id IS NULL AND source_type = 'portfolio'"
-        : "sender_id = ? AND source_entry_id = ?";
-    $sourceParams = $isPortfolio ? [$userId] : [$userId, $sourceEntryId];
-
     if (empty($userIds)) {
         // Revoke all shares for this source
-        $stmt = $db->prepare("SELECT id FROM shared_items WHERE $sourceWhere");
-        $stmt->execute($sourceParams);
-        $shares = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $shares = $storage->getSharesForRevoke($userId, $sourceEntryId, $isPortfolio ? 'portfolio' : null);
 
         $revoked = 0;
         foreach ($shares as $share) {
@@ -266,10 +241,8 @@ if ($method === 'POST' && $action === 'revoke') {
         // Revoke specific recipients
         $revoked = 0;
         foreach ($userIds as $recipientId) {
-            $stmt = $db->prepare("SELECT id FROM shared_items WHERE $sourceWhere AND recipient_id = ?");
-            $stmt->execute(array_merge($sourceParams, [(int)$recipientId]));
-            $share = $stmt->fetch(PDO::FETCH_ASSOC);
-            if ($share) {
+            $shares = $storage->getSharesForRevoke($userId, $sourceEntryId, $isPortfolio ? 'portfolio' : null, (int)$recipientId);
+            foreach ($shares as $share) {
                 $storage->deleteShare($userId, (int)$share['id']);
                 $revoked++;
             }
@@ -307,11 +280,7 @@ if ($method === 'GET' && $action === 'share-count') {
         Response::error('entry_id parameter is required.', 400);
     }
 
-    $stmt = $db->prepare(
-        "SELECT COUNT(*) FROM shared_items WHERE source_entry_id = ? AND sender_id = ?"
-    );
-    $stmt->execute([$entryId, $userId]);
-    $count = (int)$stmt->fetchColumn();
+    $count = $storage->getShareCountForEntry($userId, $entryId);
 
     Response::success(['count' => $count]);
 }

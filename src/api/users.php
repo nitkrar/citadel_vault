@@ -8,6 +8,7 @@ require_once __DIR__ . '/../core/Response.php';
 require_once __DIR__ . '/../../config/config.php';
 require_once __DIR__ . '/../core/Auth.php';
 require_once __DIR__ . '/../core/Mailer.php';
+require_once __DIR__ . '/../core/Storage.php';
 
 Response::setCors();
 $payload = Auth::requireAuth();
@@ -16,7 +17,7 @@ $isSiteAdmin = $payload['role'] === 'admin';
 $method = $_SERVER['REQUEST_METHOD'];
 $id = isset($_GET['id']) ? (int)$_GET['id'] : null;
 $action = $_GET['action'] ?? '';
-$db = Database::getConnection();
+$adapter = Storage::adapter();
 
 // =============================================================================
 // GET
@@ -25,11 +26,7 @@ if ($method === 'GET') {
 
     // List active users for sharing dropdowns (any user)
     if ($action === 'list-simple') {
-        $stmt = $db->prepare(
-            "SELECT id, username FROM users WHERE is_active = 1 AND id != ? ORDER BY username"
-        );
-        $stmt->execute([$userId]);
-        Response::success($stmt->fetchAll());
+        Response::success($adapter->getActiveUsersSimple($userId));
     }
 
     // List all users (admin only)
@@ -38,15 +35,7 @@ if ($method === 'GET') {
             Response::error('Admin access required.', 403);
         }
 
-        $stmt = $db->query(
-            "SELECT u.id, u.username, u.display_name, u.email, u.role, u.is_active, u.created_at,
-                    CASE WHEN vk.user_id IS NOT NULL THEN 1 ELSE 0 END AS has_vault_key,
-                    COALESCE(vk.must_reset_vault_key, 0) AS must_reset_vault_key
-             FROM users u
-             LEFT JOIN user_vault_keys vk ON vk.user_id = u.id
-             ORDER BY u.id"
-        );
-        Response::success($stmt->fetchAll());
+        Response::success($adapter->getAllUsersWithVaultKeyStatus());
     }
 }
 
@@ -75,20 +64,20 @@ if ($method === 'POST') {
 
     $passwordHash = Auth::hashPassword($password);
 
-    $stmt = $db->prepare(
-        "INSERT INTO users (username, display_name, email, password_hash, role, email_verified, must_reset_password) VALUES (?, ?, ?, ?, ?, 1, 1)"
-    );
-
     try {
-        $stmt->execute([$username, $displayName, $email, $passwordHash, $role]);
+        $newId = $adapter->createUserByAdmin([
+            'username'      => $username,
+            'display_name'  => $displayName,
+            'email'         => $email,
+            'password_hash' => $passwordHash,
+            'role'          => $role,
+        ]);
     } catch (PDOException $e) {
         if ($e->getCode() == 23000) {
             Response::error('Username or email already exists.', 409);
         }
         throw $e;
     }
-
-    $newId = (int)$db->lastInsertId();
 
     // Send welcome email with credentials
     $emailSent = false;
@@ -117,8 +106,10 @@ if ($method === 'PUT') {
         $message = $body['message'] ?? null;
         Auth::validatePassword($newPassword);
 
-        $stmt = $db->prepare("UPDATE users SET password_hash = ?, must_reset_password = 1 WHERE id = ?");
-        $stmt->execute([Auth::hashPassword($newPassword), $id]);
+        $adapter->updateUser($id, [
+            'password_hash'       => Auth::hashPassword($newPassword),
+            'must_reset_password' => 1,
+        ]);
         Response::success(['message' => 'Password reset. User will be forced to change on next login.']);
     }
 
@@ -128,8 +119,7 @@ if ($method === 'PUT') {
         $body = Response::getBody();
         $message = $body['message'] ?? null;
 
-        $stmt = $db->prepare("UPDATE users SET must_reset_password = 1 WHERE id = ?");
-        $stmt->execute([$id]);
+        $adapter->updateUser($id, ['must_reset_password' => 1]);
         Response::success(['message' => 'User will be forced to change their password on next login.']);
     }
 
@@ -140,8 +130,10 @@ if ($method === 'PUT') {
         $message = $body['message'] ?? null;
 
         // must_reset_vault_key is on user_vault_keys table, not users
-        $stmt = $db->prepare("UPDATE user_vault_keys SET must_reset_vault_key = 1, admin_action_message = ? WHERE user_id = ?");
-        $stmt->execute([$message, $id]);
+        $adapter->setVaultKeys($id, [
+            'must_reset_vault_key'  => 1,
+            'admin_action_message'  => $message,
+        ]);
         Response::success(['message' => 'User will be forced to change their vault key on next session.']);
     }
 
@@ -155,41 +147,33 @@ if ($method === 'PUT') {
         Response::error('No fields to update.', 400);
     }
 
-    $setClauses = [];
-    $params = [];
+    $updateFields = [];
 
-    if (isset($body['username'])) { $setClauses[] = "username = ?"; $params[] = Response::sanitize($body['username']); }
-    if (isset($body['email'])) { $setClauses[] = "email = ?"; $params[] = Response::sanitize($body['email']); }
+    if (isset($body['username'])) { $updateFields['username'] = Response::sanitize($body['username']); }
+    if (isset($body['email'])) { $updateFields['email'] = Response::sanitize($body['email']); }
 
     if (isset($body['password'])) {
         Auth::validatePassword($body['password']);
-        $setClauses[] = "password_hash = ?";
-        $params[] = Auth::hashPassword($body['password']);
+        $updateFields['password_hash'] = Auth::hashPassword($body['password']);
     }
 
     if (isset($body['role'])) {
         if (!$isSiteAdmin) { Response::error('Only admins can change roles.', 403); }
         if (!in_array($body['role'], ['admin', 'user'], true)) { Response::error('Invalid role.', 400); }
         if ($id === $userId && $body['role'] !== 'admin') { Response::error('Cannot demote your own admin account.', 400); }
-        $setClauses[] = "role = ?";
-        $params[] = $body['role'];
+        $updateFields['role'] = $body['role'];
     }
 
     if (array_key_exists('is_active', $body)) {
         if (!$isSiteAdmin) { Response::error('Only admins can change active status.', 403); }
         if ($id === $userId && !$body['is_active']) { Response::error('Cannot deactivate your own account.', 400); }
-        $setClauses[] = "is_active = ?";
-        $params[] = (int)$body['is_active'];
+        $updateFields['is_active'] = (int)$body['is_active'];
     }
 
-    if (empty($setClauses)) { Response::error('No valid fields to update.', 400); }
-
-    $params[] = $id;
-    $sql = "UPDATE users SET " . implode(', ', $setClauses) . " WHERE id = ?";
-    $stmt = $db->prepare($sql);
+    if (empty($updateFields)) { Response::error('No valid fields to update.', 400); }
 
     try {
-        $stmt->execute($params);
+        $adapter->updateUser($id, $updateFields);
     } catch (PDOException $e) {
         if ($e->getCode() == 23000) { Response::error('Username or email already exists.', 409); }
         throw $e;
@@ -206,10 +190,9 @@ if ($method === 'DELETE') {
     if (!$id) { Response::error('User ID is required.', 400); }
     if ($id === $userId) { Response::error('Cannot delete your own account.', 400); }
 
-    $stmt = $db->prepare("DELETE FROM users WHERE id = ?");
-    $stmt->execute([$id]);
+    $deleted = $adapter->deleteUser($id);
 
-    if ($stmt->rowCount() === 0) { Response::error('User not found.', 404); }
+    if (!$deleted) { Response::error('User not found.', 404); }
 
     Response::success(['id' => $id]);
 }

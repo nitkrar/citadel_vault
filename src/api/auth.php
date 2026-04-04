@@ -15,8 +15,6 @@ Response::setCors();
 
 $method = $_SERVER['REQUEST_METHOD'];
 $action = $_GET['action'] ?? '';
-$db = Database::getConnection();
-
 // Load registration settings from system_settings, falling back to .env constants
 $selfRegistration = SELF_REGISTRATION;
 $requireEmailVerification = REQUIRE_EMAIL_VERIFICATION;
@@ -56,26 +54,21 @@ if ($method === 'POST' && $action === 'login') {
     }
 
     // --- IP-based rate limiting (cross-account credential stuffing protection) ---
-    $loginIpHash = Auth::enforceIpRateLimit($db, 'login', RATE_LIMIT_LOGIN_IP, RATE_LIMIT_LOGIN_IP_WINDOW);
+    $loginIpHash = Auth::enforceIpRateLimit('login', RATE_LIMIT_LOGIN_IP, RATE_LIMIT_LOGIN_IP_WINDOW);
 
-    $stmt = $db->prepare(
-        "SELECT id, username, display_name, email, password_hash, role, is_active, must_reset_password
-         FROM users WHERE username = ? OR email = ? LIMIT 1"
-    );
-    $stmt->execute([$username, $username]);
-    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+    $user = Storage::adapter()->getUserByIdentifier($username);
 
     // --- Account lockout check (before password verification) ---
     if ($user) {
-        Auth::enforceAccountLockout($db, (int)$user['id']);
+        Auth::enforceAccountLockout((int)$user['id']);
     }
 
     // --- Verify credentials ---
     if (!$user || !Auth::verifyPassword($password, $user['password_hash'])) {
         if ($user) {
-            Auth::recordFailedLogin($db, (int)$user['id'], $user['username']);
+            Auth::recordFailedLogin((int)$user['id'], $user['username']);
         }
-        Auth::recordRateLimit($db, 'login', $loginIpHash);
+        Auth::recordRateLimit('login', $loginIpHash);
         Response::error('Invalid credentials.', 401);
     }
 
@@ -84,15 +77,13 @@ if ($method === 'POST' && $action === 'login') {
     }
 
     // --- Successful login: reset lockout counters ---
-    Auth::resetLoginLockout($db, (int)$user['id']);
+    Auth::resetLoginLockout((int)$user['id']);
 
     // Check email verification (DB migration resilience)
     if ($requireEmailVerification) {
         try {
-            $stmt3 = $db->prepare("SELECT email_verified FROM users WHERE id = ?");
-            $stmt3->execute([$user['id']]);
-            $evRow = $stmt3->fetch(PDO::FETCH_ASSOC);
-            if ($evRow && !(int)$evRow['email_verified']) {
+            $emailVerified = Storage::adapter()->getEmailVerifiedStatus((int)$user['id']);
+            if ($emailVerified === false) {
                 Response::error('Please verify your email address before signing in. Check your inbox for the verification link.', 403);
             }
         } catch (Exception $e) {
@@ -105,9 +96,7 @@ if ($method === 'POST' && $action === 'login') {
     $mustChangeVaultKey = false;
     $adminActionMessage = null;
     try {
-        $stmt2 = $db->prepare("SELECT must_reset_vault_key, admin_action_message FROM user_vault_keys WHERE user_id = ?");
-        $stmt2->execute([$user['id']]);
-        $vkRow = $stmt2->fetch(PDO::FETCH_ASSOC);
+        $vkRow = Storage::adapter()->getVaultKeys((int)$user['id']);
         if ($vkRow) {
             $mustChangeVaultKey = (bool)($vkRow['must_reset_vault_key'] ?? false);
             $adminActionMessage = $vkRow['admin_action_message'] ?? null;
@@ -116,11 +105,11 @@ if ($method === 'POST' && $action === 'login') {
         // Table may not exist — default to false
     }
 
-    $authUser = Auth::issueAuthToken($db, (int)$user['id']);
+    $authUser = Auth::issueAuthToken((int)$user['id']);
 
     // Once-per-day exchange rate refresh on first login of the day
     try {
-        ExchangeRates::refreshIfStale($db);
+        ExchangeRates::refreshIfStale();
     } catch (Exception $e) {
         // Silent failure — login must never break due to rate refresh
     }
@@ -151,22 +140,18 @@ if ($method === 'POST' && $action === 'register') {
     $password = $body['password'] ?? '';
 
     // Rate limiting — 5 attempts per hour per IP, 5 per hour per email
-    $ipHash = Auth::enforceIpRateLimit($db, 'register', RATE_LIMIT_REGISTER, RATE_LIMIT_REGISTER_WINDOW);
-    Auth::recordRateLimit($db, 'register', $ipHash);
+    $ipHash = Auth::enforceIpRateLimit('register', RATE_LIMIT_REGISTER, RATE_LIMIT_REGISTER_WINDOW);
+    Auth::recordRateLimit('register', $ipHash);
     if ($email) {
         $emailHash = Auth::hashForRateLimit('register_email', strtolower(trim($email)));
-        Auth::enforceRateLimit($db, 'register', $emailHash, RATE_LIMIT_REGISTER, RATE_LIMIT_REGISTER_WINDOW);
-        Auth::recordRateLimit($db, 'register', $emailHash);
+        Auth::enforceRateLimit('register', $emailHash, RATE_LIMIT_REGISTER, RATE_LIMIT_REGISTER_WINDOW);
+        Auth::recordRateLimit('register', $emailHash);
     }
 
     // Gate: either self-registration is enabled OR a valid invite token is provided
     $inviteRow = null;
     if ($inviteToken) {
-        $stmt = $db->prepare(
-            "SELECT id, email, expires_at, used_at FROM invitations WHERE token = ? LIMIT 1"
-        );
-        $stmt->execute([$inviteToken]);
-        $inviteRow = $stmt->fetch(PDO::FETCH_ASSOC);
+        $inviteRow = Storage::adapter()->validateInviteToken($inviteToken);
 
         if (!$inviteRow) {
             Response::error('Invalid invite link.', 403);
@@ -200,9 +185,7 @@ if ($method === 'POST' && $action === 'register') {
     $role = 'user';
 
     // Check for duplicate username or email
-    $stmt = $db->prepare("SELECT id FROM users WHERE username = ? OR email = ?");
-    $stmt->execute([$username, $email]);
-    if ($stmt->fetch()) {
+    if (Storage::adapter()->checkDuplicateUser($username, $email)) {
         Response::error('Username or email already exists.');
     }
 
@@ -219,17 +202,19 @@ if ($method === 'POST' && $action === 'register') {
     }
 
     $emailVerifyExpires = ($emailVerifyToken) ? date('Y-m-d H:i:s', time() + 86400) : null; // 24 hours
-    $stmt = $db->prepare(
-        "INSERT INTO users (username, email, password_hash, role, is_active, email_verified, email_verify_token, email_verify_expires)
-         VALUES (?, ?, ?, ?, 1, ?, ?, ?)"
-    );
-    $stmt->execute([$username, $email, $hash, $role, $emailVerified, $emailVerifyToken, $emailVerifyExpires]);
-    $newId = (int)$db->lastInsertId();
+    $newId = Storage::adapter()->createUserFromRegistration([
+        'username'             => $username,
+        'email'                => $email,
+        'password_hash'        => $hash,
+        'role'                 => $role,
+        'email_verified'       => $emailVerified,
+        'email_verify_token'   => $emailVerifyToken,
+        'email_verify_expires' => $emailVerifyExpires,
+    ]);
 
     // Mark invite as used
     if ($inviteRow) {
-        $stmt = $db->prepare("UPDATE invitations SET used_at = NOW() WHERE id = ?");
-        $stmt->execute([$inviteRow['id']]);
+        Storage::adapter()->markInvitationUsed($inviteRow['id']);
     }
 
     // If email verification is required and not coming from an invite, send verification email
@@ -246,7 +231,7 @@ if ($method === 'POST' && $action === 'register') {
         ], 201);
     }
 
-    $user = Auth::issueAuthToken($db, $newId);
+    $user = Auth::issueAuthToken($newId);
 
     Response::success([
         'token' => $user['token'],
@@ -271,12 +256,7 @@ if ($method === 'GET' && $action === 'verify-email') {
     }
 
     try {
-        $stmt = $db->prepare(
-            "SELECT id, email_verify_expires FROM users
-             WHERE email_verify_token = ? AND email_verified = 0 LIMIT 1"
-        );
-        $stmt->execute([$token]);
-        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+        $user = Storage::adapter()->getUserByEmailVerifyToken($token);
 
         if (!$user) {
             Response::error('Invalid or expired verification token.', 400);
@@ -286,10 +266,7 @@ if ($method === 'GET' && $action === 'verify-email') {
             Response::error('Verification token has expired. Please register again.', 400);
         }
 
-        $stmt = $db->prepare(
-            "UPDATE users SET email_verified = 1, email_verify_token = NULL, email_verify_expires = NULL WHERE id = ?"
-        );
-        $stmt->execute([$user['id']]);
+        Storage::adapter()->markEmailVerified($user['id']);
 
         Response::success(['message' => 'Email verified successfully. You can now sign in.']);
     } catch (PDOException $e) {
@@ -304,12 +281,7 @@ if ($method === 'GET' && $action === 'me') {
     $payload = Auth::requireAuth(allowMustResetPassword: true);
     $userId = Auth::userId($payload);
 
-    $stmt = $db->prepare(
-        "SELECT id, username, display_name, email, role, must_reset_password, created_at
-         FROM users WHERE id = ?"
-    );
-    $stmt->execute([$userId]);
-    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+    $user = Storage::adapter()->getUserById($userId);
 
     if (!$user) {
         Response::error('User not found.', 404);
@@ -323,9 +295,7 @@ if ($method === 'GET' && $action === 'me') {
     $user['must_change_vault_key'] = false;
     $user['admin_action_message'] = null;
     try {
-        $stmt2 = $db->prepare("SELECT must_reset_vault_key, admin_action_message FROM user_vault_keys WHERE user_id = ?");
-        $stmt2->execute([$userId]);
-        $vkRow = $stmt2->fetch(PDO::FETCH_ASSOC);
+        $vkRow = Storage::adapter()->getVaultKeys($userId);
         if ($vkRow) {
             $user['must_change_vault_key'] = (bool)($vkRow['must_reset_vault_key'] ?? false);
             $user['admin_action_message'] = $vkRow['admin_action_message'] ?? null;
@@ -347,11 +317,9 @@ if ($method === 'GET' && $action === 'me') {
 
     // Add RSA key status flags for profile display
     try {
-        $stmt3 = $db->prepare("SELECT public_key, encrypted_private_key FROM users WHERE id = ?");
-        $stmt3->execute([$userId]);
-        $keyRow = $stmt3->fetch(PDO::FETCH_ASSOC);
-        $user['has_public_key'] = !empty($keyRow['public_key']);
-        $user['has_encrypted_private_key'] = !empty($keyRow['encrypted_private_key']);
+        $keyStatus = Storage::adapter()->getUserRsaKeyStatus($userId);
+        $user['has_public_key'] = $keyStatus['has_public_key'];
+        $user['has_encrypted_private_key'] = $keyStatus['has_encrypted_private_key'];
     } catch (Exception $e) {
         $user['has_public_key'] = false;
         $user['has_encrypted_private_key'] = false;
@@ -377,43 +345,32 @@ if ($method === 'PUT' && $action === 'profile') {
     }
 
     // Build dynamic update
-    $fields = [];
-    $values = [];
+    $updateFields = [];
 
     if ($displayName !== '') {
-        $fields[] = 'display_name = ?';
-        $values[] = $displayName;
+        $updateFields['display_name'] = $displayName;
     }
 
     if ($username) {
-        // Check for duplicate username excluding current user
-        $stmt = $db->prepare("SELECT id FROM users WHERE username = ? AND id != ?");
-        $stmt->execute([$username, $userId]);
-        if ($stmt->fetch()) {
+        // Check for duplicate username excluding current user (R2-S2: separate check)
+        if (Storage::adapter()->checkDuplicateUser($username, '', $userId)) {
             Response::error('Username already taken.');
         }
-        $fields[] = 'username = ?';
-        $values[] = $username;
+        $updateFields['username'] = $username;
     }
 
     if ($email) {
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
             Response::error('Invalid email address.');
         }
-        // Check for duplicate email excluding current user
-        $stmt = $db->prepare("SELECT id FROM users WHERE email = ? AND id != ?");
-        $stmt->execute([$email, $userId]);
-        if ($stmt->fetch()) {
+        // Check for duplicate email excluding current user (R2-S2: separate check)
+        if (Storage::adapter()->checkDuplicateUser('', $email, $userId)) {
             Response::error('Email already taken.');
         }
-        $fields[] = 'email = ?';
-        $values[] = $email;
+        $updateFields['email'] = $email;
     }
 
-    $values[] = $userId;
-    $sql = "UPDATE users SET " . implode(', ', $fields) . " WHERE id = ?";
-    $stmt = $db->prepare($sql);
-    $stmt->execute($values);
+    Storage::adapter()->updateUserProfile($userId, $updateFields);
 
     Response::success(['message' => 'Profile updated.']);
 }
@@ -424,7 +381,7 @@ if ($method === 'PUT' && $action === 'profile') {
 if ($method === 'PUT' && $action === 'password') {
     $payload = Auth::requireAuth();
     $userId = Auth::userId($payload);
-    $ipHash = Auth::enforceIpRateLimit($db, 'password_change', RATE_LIMIT_LOGIN_IP, RATE_LIMIT_LOGIN_IP_WINDOW);
+    $ipHash = Auth::enforceIpRateLimit('password_change', RATE_LIMIT_LOGIN_IP, RATE_LIMIT_LOGIN_IP_WINDOW);
     $body = Response::getBody();
 
     $currentPassword = $body['current_password'] ?? '';
@@ -437,28 +394,25 @@ if ($method === 'PUT' && $action === 'password') {
     Auth::validatePassword($newPassword);
 
     // Verify current password
-    $stmt = $db->prepare("SELECT password_hash FROM users WHERE id = ?");
-    $stmt->execute([$userId]);
-    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+    $currentHash = Storage::adapter()->getPasswordHash($userId);
 
-    if (!$user || !Auth::verifyPassword($currentPassword, $user['password_hash'])) {
-        Auth::recordRateLimit($db, 'password_change', $ipHash);
+    if (!$currentHash || !Auth::verifyPassword($currentPassword, $currentHash)) {
+        Auth::recordRateLimit('password_change', $ipHash);
         Response::error('Current password is incorrect.', 401);
     }
 
     // Check password reuse
-    if (Auth::isPasswordReused($db, $userId, $newPassword)) {
+    if (Auth::isPasswordReused($userId, $newPassword)) {
         Response::error('You cannot reuse a recent password. Please choose a different one.');
     }
 
     // Save old hash to history, then update
-    Auth::savePasswordToHistory($db, $userId, $user['password_hash']);
+    Auth::savePasswordToHistory($userId, $currentHash);
     $hash = Auth::hashPassword($newPassword);
-    $stmt = $db->prepare("UPDATE users SET password_hash = ? WHERE id = ?");
-    $stmt->execute([$hash, $userId]);
+    Storage::adapter()->updateUserPassword($userId, $hash);
 
     // Reissue JWT so old token is replaced
-    $authUser = Auth::issueAuthToken($db, $userId);
+    $authUser = Auth::issueAuthToken($userId);
 
     Response::success(['token' => $authUser['token'], 'message' => 'Password updated.']);
 }
@@ -476,39 +430,28 @@ if ($method === 'POST' && $action === 'force-change-password') {
     Auth::validatePassword($newPassword);
 
     // Verify must_reset_password flag is set
-    $stmt = $db->prepare("SELECT must_reset_password FROM users WHERE id = ?");
-    $stmt->execute([$userId]);
-    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    $mustReset = Storage::adapter()->getMustResetPassword($userId);
 
-    if (!$row || !(bool)$row['must_reset_password']) {
+    if (!$mustReset) {
         Response::error('Password change is not required.', 403);
     }
 
     // Check password reuse
-    if (Auth::isPasswordReused($db, $userId, $newPassword)) {
+    if (Auth::isPasswordReused($userId, $newPassword)) {
         Response::error('You cannot reuse a recent password. Please choose a different one.');
     }
 
     // Save old hash to history, then hash new password, clear the flag
-    $stmt = $db->prepare("SELECT password_hash FROM users WHERE id = ?");
-    $stmt->execute([$userId]);
-    $oldHash = $stmt->fetchColumn();
+    $oldHash = Storage::adapter()->getPasswordHash($userId);
     if ($oldHash) {
-        Auth::savePasswordToHistory($db, $userId, $oldHash);
+        Auth::savePasswordToHistory($userId, $oldHash);
     }
 
     $hash = Auth::hashPassword($newPassword);
-    try {
-        $stmt = $db->prepare("UPDATE users SET password_hash = ?, must_reset_password = 0, failed_login_attempts = 0, locked_until = NULL, last_failed_login_at = NULL WHERE id = ?");
-        $stmt->execute([$hash, $userId]);
-    } catch (PDOException $e) {
-        // Fallback if columns don't exist yet
-        $stmt = $db->prepare("UPDATE users SET password_hash = ?, must_reset_password = 0 WHERE id = ?");
-        $stmt->execute([$hash, $userId]);
-    }
+    Storage::adapter()->resetPasswordAndUnlock($userId, $hash);
 
     // Reissue JWT with must_reset_password cleared
-    $authUser = Auth::issueAuthToken($db, $userId);
+    $authUser = Auth::issueAuthToken($userId);
 
     Response::success(['token' => $authUser['token'], 'message' => 'Password changed successfully.']);
 }
@@ -526,27 +469,23 @@ if ($method === 'DELETE' && $action === 'self-delete') {
         Response::error('Password is required to confirm account deletion.', 400);
     }
 
-    // Verify password
-    $stmt = $db->prepare("SELECT password_hash, role FROM users WHERE id = ?");
-    $stmt->execute([$userId]);
-    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+    // Verify password — need both password_hash and role
+    $passwordHash = Storage::adapter()->getPasswordHash($userId);
+    $userInfo = Storage::adapter()->getUserById($userId);
 
-    if (!$user || !Auth::verifyPassword($password, $user['password_hash'])) {
+    if (!$passwordHash || !$userInfo || !Auth::verifyPassword($password, $passwordHash)) {
         Response::error('Invalid password.', 401);
     }
 
     // Prevent admin from self-deleting if they are the only admin
-    if ($user['role'] === 'admin') {
-        $stmt = $db->prepare("SELECT COUNT(*) AS cnt FROM users WHERE role = 'admin' AND is_active = 1 AND id != ?");
-        $stmt->execute([$userId]);
-        if ((int)$stmt->fetch()['cnt'] === 0) {
+    if ($userInfo['role'] === 'admin') {
+        if (Storage::adapter()->getAdminCount($userId) === 0) {
             Response::error('Cannot delete the only admin account.', 400);
         }
     }
 
     // Delete user — cascades handle cleanup
-    $stmt = $db->prepare("DELETE FROM users WHERE id = ?");
-    $stmt->execute([$userId]);
+    Storage::adapter()->deleteUserById($userId);
 
     // Clear auth cookie
     Auth::clearAuthCookie();
@@ -564,22 +503,15 @@ if ($method === 'POST' && $action === 'forgot-password-material') {
     $username = Response::sanitize($body['username'] ?? '');
 
     // Rate limiting — 5 attempts per hour per IP
-    $ipHash = Auth::enforceIpRateLimit($db, 'forgot_password', RATE_LIMIT_FORGOT_PW, RATE_LIMIT_FORGOT_PW_WINDOW);
-    Auth::recordRateLimit($db, 'forgot_password', $ipHash);
+    $ipHash = Auth::enforceIpRateLimit('forgot_password', RATE_LIMIT_FORGOT_PW, RATE_LIMIT_FORGOT_PW_WINDOW);
+    Auth::recordRateLimit('forgot_password', $ipHash);
 
     if (!$username) {
         Response::error('Username or email is required.');
     }
 
     // Look up user
-    $stmt = $db->prepare(
-        "SELECT u.id, u.is_active, v.recovery_key_salt, v.encrypted_dek_recovery
-         FROM users u
-         LEFT JOIN user_vault_keys v ON v.user_id = u.id
-         WHERE (u.username = ? OR u.email = ?) LIMIT 1"
-    );
-    $stmt->execute([$username, $username]);
-    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+    $user = Storage::adapter()->getUserWithRecoveryMaterial($username);
 
     // Generic error to avoid user enumeration
     if (!$user || !$user['is_active'] || empty($user['recovery_key_salt'])) {
@@ -608,8 +540,8 @@ if ($method === 'POST' && $action === 'forgot-password') {
     $newRecoveryKeyEncrypted  = $body['recovery_key_encrypted'] ?? '';
 
     // Rate limiting — same bucket as material fetch
-    $ipHash = Auth::enforceIpRateLimit($db, 'forgot_password', RATE_LIMIT_FORGOT_PW, RATE_LIMIT_FORGOT_PW_WINDOW);
-    Auth::recordRateLimit($db, 'forgot_password', $ipHash);
+    $ipHash = Auth::enforceIpRateLimit('forgot_password', RATE_LIMIT_FORGOT_PW, RATE_LIMIT_FORGOT_PW_WINDOW);
+    Auth::recordRateLimit('forgot_password', $ipHash);
 
     // Validate inputs
     if (!$username) {
@@ -624,12 +556,7 @@ if ($method === 'POST' && $action === 'forgot-password') {
     }
 
     // Look up user
-    $stmt = $db->prepare(
-        "SELECT id, username, email, role, is_active FROM users
-         WHERE (username = ? OR email = ?) LIMIT 1"
-    );
-    $stmt->execute([$username, $username]);
-    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+    $user = Storage::adapter()->getUserByIdentifier($username);
 
     if (!$user) {
         Response::error('Invalid credentials.', 401);
@@ -640,36 +567,19 @@ if ($method === 'POST' && $action === 'forgot-password') {
 
     $userId = (int)$user['id'];
 
-    // Update login password
+    // Update login password + clear lockout (method #13)
     $hash = Auth::hashPassword($newPassword);
-    $stmt = $db->prepare(
-        "UPDATE users SET
-            password_hash = ?,
-            failed_login_attempts = 0,
-            locked_until = NULL,
-            last_failed_login_at = NULL,
-            must_reset_password = 0
-         WHERE id = ?"
-    );
-    $stmt->execute([$hash, $userId]);
+    Storage::adapter()->resetPasswordAndUnlock($userId, $hash);
 
-    // Update recovery blobs on user_vault_keys
-    $stmt = $db->prepare(
-        "UPDATE user_vault_keys SET
-            recovery_key_salt = ?,
-            encrypted_dek_recovery = ?,
-            recovery_key_encrypted = ?
-         WHERE user_id = ?"
-    );
-    $stmt->execute([
-        $newRecoverySalt,
-        $newEncryptedDekRecovery,
-        $newRecoveryKeyEncrypted,
-        $userId,
+    // Update recovery blobs on user_vault_keys (existing setVaultKeys method)
+    Storage::adapter()->setVaultKeys($userId, [
+        'recovery_key_salt'      => $newRecoverySalt,
+        'encrypted_dek_recovery' => $newEncryptedDekRecovery,
+        'recovery_key_encrypted' => $newRecoveryKeyEncrypted,
     ]);
 
     // Save to password history
-    Auth::savePasswordToHistory($db, $userId, $hash);
+    Auth::savePasswordToHistory($userId, $hash);
 
     // Audit log
     $auditIpHash = Auth::clientIpHash();
@@ -679,7 +589,7 @@ if ($method === 'POST' && $action === 'forgot-password') {
     } catch (Exception $e) {}
 
     // Generate JWT and set cookie
-    $authUser = Auth::issueAuthToken($db, $userId);
+    $authUser = Auth::issueAuthToken($userId);
 
     Response::success([
         'token' => $authUser['token'],

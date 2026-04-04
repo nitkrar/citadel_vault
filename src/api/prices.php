@@ -19,7 +19,7 @@ $isSiteAdmin = $payload['role'] === 'admin';
 $method = $_SERVER['REQUEST_METHOD'];
 $action = $_GET['action'] ?? null;
 
-$db = Database::getInstance();
+$storage = Storage::adapter();
 
 // ============================================================================
 // POST — Fetch prices for tickers
@@ -41,21 +41,10 @@ if ($method === 'POST' && !$action) {
     }
 
     // Get TTL from system settings
-    $storage = Storage::adapter();
     $ttl = (int)($storage->getSystemSetting('ticker_price_ttl') ?? 86400);
 
     // Check cache
-    $placeholders = implode(',', array_fill(0, count($tickers), '?'));
-    $stmt = $db->prepare(
-        "SELECT ticker, exchange, price, currency, name, fetched_at
-         FROM ticker_prices
-         WHERE ticker IN ($placeholders)
-         AND fetched_at > DATE_SUB(NOW(), INTERVAL ? SECOND)"
-    );
-    $params = array_values($tickers);
-    $params[] = $ttl;
-    $stmt->execute($params);
-    $cached = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $cached = $storage->getCachedPrices(array_values($tickers), $ttl);
 
     $results = [];
     $cachedTickers = [];
@@ -131,21 +120,10 @@ if ($method === 'POST' && !$action) {
             }
 
             // Upsert cache
-            $stmt = $db->prepare(
-                'INSERT INTO ticker_prices (ticker, exchange, price, currency, name, fetched_at)
-                 VALUES (?, ?, ?, ?, ?, NOW())
-                 ON DUPLICATE KEY UPDATE exchange = VALUES(exchange), price = VALUES(price),
-                 currency = VALUES(currency), name = VALUES(name), fetched_at = NOW()'
-            );
-            $stmt->execute([$ticker, $exchange, $price, $currency, $name]);
+            $storage->upsertPrice($ticker, $exchange, $price, $currency, $name);
 
             // Upsert history
-            $stmt = $db->prepare(
-                'INSERT INTO ticker_price_history (ticker, exchange, price, currency, recorded_at)
-                 VALUES (?, ?, ?, ?, CURDATE())
-                 ON DUPLICATE KEY UPDATE price = VALUES(price), exchange = VALUES(exchange)'
-            );
-            $stmt->execute([$ticker, $exchange, $price, $currency]);
+            $storage->addPriceHistory($ticker, $exchange, $price, $currency);
 
             $results[$ticker] = [
                 'price'    => (float)$price,
@@ -170,8 +148,7 @@ if ($method === 'POST' && !$action) {
 if ($method === 'GET' && $action === 'cache') {
     if (!$isSiteAdmin) Response::error('Admin access required.', 403);
 
-    $stmt = $db->query('SELECT * FROM ticker_prices ORDER BY fetched_at DESC');
-    Response::success($stmt->fetchAll(PDO::FETCH_ASSOC));
+    Response::success($storage->getAllCachedPrices());
 }
 
 // ============================================================================
@@ -180,7 +157,7 @@ if ($method === 'GET' && $action === 'cache') {
 if ($method === 'DELETE' && $action === 'cache') {
     if (!$isSiteAdmin) Response::error('Admin access required.', 403);
 
-    $db->exec('TRUNCATE TABLE ticker_prices');
+    $storage->clearPriceCache();
     Response::success(['cleared' => true]);
 }
 

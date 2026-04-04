@@ -79,19 +79,7 @@ if ($method === 'PUT' && $action === 'update' && $id) {
 
     if (!$updated && $isAdmin) {
         // Try updating global template (owner_id IS NULL)
-        $db = Database::getInstance();
-        $fields = [];
-        $values = [];
-        $allowed = ['name', 'icon', 'fields', 'is_active'];
-        foreach ($data as $k => $v) {
-            if (in_array($k, $allowed, true)) { $fields[] = "`$k` = ?"; $values[] = $v; }
-        }
-        if (!empty($fields)) {
-            $values[] = $id;
-            $stmt = $db->prepare("UPDATE entry_templates SET " . implode(', ', $fields) . " WHERE id = ? AND owner_id IS NULL");
-            $stmt->execute($values);
-            $updated = $stmt->rowCount() > 0;
-        }
+        $updated = $storage->updateGlobalTemplate($id, $data);
     }
 
     if (!$updated) {
@@ -113,34 +101,23 @@ if ($method === 'POST' && $action === 'relink') {
         Response::error('old_template_id and new_template_id are required.', 400);
     }
 
-    $db = Database::getInstance();
-    $stmt = $db->prepare(
-        "UPDATE vault_entries SET template_id = ? WHERE template_id = ? AND user_id = ?"
-    );
-    $stmt->execute([$newTemplateId, $oldTemplateId, $userId]);
+    $updated = $storage->relinkEntries($userId, $oldTemplateId, $newTemplateId);
 
-    Response::success(['updated' => $stmt->rowCount()]);
+    Response::success(['updated' => $updated]);
 }
 
 // ---------------------------------------------------------------------------
 // POST ?action=request-promotion&id=X — Request template promotion to global
 // ---------------------------------------------------------------------------
 if ($method === 'POST' && $action === 'request-promotion' && $id) {
-    $db = Database::getInstance();
-
     // Verify ownership
-    $stmt = $db->prepare("SELECT owner_id FROM entry_templates WHERE id = ?");
-    $stmt->execute([$id]);
-    $template = $stmt->fetch(PDO::FETCH_ASSOC);
+    $template = $storage->getTemplateOwner($id);
 
     if (!$template || (int)$template['owner_id'] !== $userId) {
         Response::error('Template not found or not owned by you.', 404);
     }
 
-    $stmt = $db->prepare(
-        "UPDATE entry_templates SET promotion_requested = 1, promotion_requested_at = NOW() WHERE id = ?"
-    );
-    $stmt->execute([$id]);
+    $storage->setPromotionRequested($id);
 
     Response::success(['message' => 'Promotion requested.']);
 }
@@ -153,37 +130,26 @@ if ($method === 'POST' && $action === 'approve-promotion' && $id) {
         Response::error('Admin access required.', 403);
     }
 
-    $db = Database::getInstance();
-
     // Fetch the template
-    $stmt = $db->prepare("SELECT * FROM entry_templates WHERE id = ? AND promotion_requested = 1");
-    $stmt->execute([$id]);
-    $template = $stmt->fetch(PDO::FETCH_ASSOC);
+    $template = $storage->getTemplateForPromotion($id);
 
     if (!$template) {
         Response::error('Template not found or not pending promotion.', 404);
     }
 
     // Create a global copy (owner_id = NULL)
-    $stmt = $db->prepare(
-        "INSERT INTO entry_templates (template_key, owner_id, name, icon, country_code, subtype, schema_version, fields)
-         VALUES (?, NULL, ?, ?, ?, ?, ?, ?)"
-    );
-    $stmt->execute([
-        $template['template_key'],
-        $template['name'],
-        $template['icon'],
-        $template['country_code'],
-        $template['subtype'],
-        $template['schema_version'],
-        $template['fields'],
+    $globalId = $storage->createGlobalTemplate([
+        'template_key'   => $template['template_key'],
+        'name'           => $template['name'],
+        'icon'           => $template['icon'],
+        'country_code'   => $template['country_code'],
+        'subtype'        => $template['subtype'],
+        'schema_version' => $template['schema_version'],
+        'fields'         => $template['fields'],
     ]);
-    $globalId = (int)$db->lastInsertId();
 
     // Reset flag on the original
-    $db->prepare(
-        "UPDATE entry_templates SET promotion_requested = 0, promotion_requested_at = NULL WHERE id = ?"
-    )->execute([$id]);
+    $storage->clearPromotionRequest($id);
 
     Response::success(['global_template_id' => $globalId, 'message' => 'Template promoted to global.']);
 }
