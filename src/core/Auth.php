@@ -4,6 +4,7 @@
  * JWT generation/validation, role-based access control, password hashing.
  */
 require_once __DIR__ . '/../../config/config.php';
+require_once __DIR__ . '/Storage.php';
 
 class Auth {
     /**
@@ -29,10 +30,8 @@ class Auth {
      * Ensures consistent field set (id, username, role, must_reset_password).
      * Returns the user array for use in API responses.
      */
-    public static function issueAuthToken(PDO $db, int $userId): array {
-        $stmt = $db->prepare("SELECT id, username, display_name, email, role, must_reset_password FROM users WHERE id = ?");
-        $stmt->execute([$userId]);
-        $user = $stmt->fetch(\PDO::FETCH_ASSOC);
+    public static function issueAuthToken(int $userId): array {
+        $user = Storage::adapter()->getUserById($userId);
         if (!$user) {
             Response::error('User not found.', 404);
         }
@@ -142,11 +141,11 @@ class Auth {
         }
 
         // DB check: verify is_active and refresh role
-        $db = Database::getInstance();
+        $adapter = Storage::adapter();
 
         // Load auth_check_interval from system_settings (alongside the user check)
         try {
-            $setting = Storage::adapter()->getSystemSetting('auth_check_interval');
+            $setting = $adapter->getSystemSetting('auth_check_interval');
             if ($setting !== null) $interval = (int)$setting;
         } catch (Exception $e) {}
 
@@ -155,9 +154,7 @@ class Auth {
             return $payload;
         }
 
-        $stmt = $db->prepare("SELECT is_active, role, must_reset_password FROM users WHERE id = ?");
-        $stmt->execute([self::userId($payload)]);
-        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+        $user = $adapter->getUserActiveAndRole(self::userId($payload));
 
         if (!$user || !$user['is_active']) {
             http_response_code(401);
@@ -261,27 +258,23 @@ class Auth {
      * Check if a new password matches any of the user's last N passwords.
      * Returns true if the password was recently used (should be rejected).
      */
-    public static function isPasswordReused(PDO $db, int $userId, string $newPassword): bool {
+    public static function isPasswordReused(int $userId, string $newPassword): bool {
         $count = defined('PASSWORD_HISTORY_COUNT') ? PASSWORD_HISTORY_COUNT : 1;
         if ($count < 1) return false;
 
         try {
+            $adapter = Storage::adapter();
+
             // Check current password first
-            $stmt = $db->prepare("SELECT password_hash FROM users WHERE id = ?");
-            $stmt->execute([$userId]);
-            $current = $stmt->fetchColumn();
+            $current = $adapter->getPasswordHash($userId);
             if ($current && password_verify($newPassword, $current)) {
                 return true;
             }
 
             // Check password history (last N-1 since current counts as 1)
             if ($count > 1) {
-                $stmt = $db->prepare(
-                    "SELECT password_hash FROM password_history
-                     WHERE user_id = ? ORDER BY created_at DESC LIMIT ?"
-                );
-                $stmt->execute([$userId, $count - 1]);
-                while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                $rows = $adapter->getPasswordHistory($userId, $count - 1);
+                foreach ($rows as $row) {
                     if (password_verify($newPassword, $row['password_hash'])) {
                         return true;
                     }
@@ -298,26 +291,17 @@ class Auth {
      * Store the current password hash in history before changing it.
      * Trims history to keep only the last N entries.
      */
-    public static function savePasswordToHistory(PDO $db, int $userId, string $oldHash): void {
+    public static function savePasswordToHistory(int $userId, string $oldHash): void {
         $count = defined('PASSWORD_HISTORY_COUNT') ? PASSWORD_HISTORY_COUNT : 1;
         if ($count < 1) return;
 
         try {
-            $stmt = $db->prepare(
-                "INSERT INTO password_history (user_id, password_hash) VALUES (?, ?)"
-            );
-            $stmt->execute([$userId, $oldHash]);
+            $adapter = Storage::adapter();
+            $adapter->addPasswordHistory($userId, $oldHash);
 
             // Trim: keep only the last N entries (current password + history = N total)
             $keep = max($count - 1, 0);
-            $stmt = $db->prepare(
-                "DELETE FROM password_history WHERE user_id = ? AND id NOT IN (
-                    SELECT id FROM (
-                        SELECT id FROM password_history WHERE user_id = ? ORDER BY created_at DESC LIMIT $keep
-                    ) AS recent
-                )"
-            );
-            $stmt->execute([$userId, $userId]);
+            $adapter->prunePasswordHistory($userId, $keep);
         } catch (PDOException $e) {
             // password_history table may not exist — non-fatal
         }
@@ -351,14 +335,12 @@ class Auth {
      * Tier 2: LOCKOUT_TIER2_ATTEMPTS → lock for LOCKOUT_TIER2_DURATION
      * Tier 3: LOCKOUT_TIER3_ATTEMPTS+ (every 3rd) → permanent lock + force password change
      */
-    public static function recordFailedLogin(PDO $db, int $userId, string $username): void {
+    public static function recordFailedLogin(int $userId, string $username): void {
         try {
-            $db->prepare("UPDATE users SET failed_login_attempts = failed_login_attempts + 1, last_failed_login_at = NOW() WHERE id = ?")
-               ->execute([$userId]);
+            $adapter = Storage::adapter();
+            $adapter->incrementFailedLogin($userId);
 
-            $stmt = $db->prepare("SELECT failed_login_attempts, email FROM users WHERE id = ?");
-            $stmt->execute([$userId]);
-            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            $row = $adapter->getFailedLoginInfo($userId);
             if (!$row) return;
 
             $attempts = (int)($row['failed_login_attempts'] ?? 0);
@@ -377,18 +359,18 @@ class Auth {
             } elseif ($attempts >= LOCKOUT_TIER3_ATTEMPTS && $attempts % 3 === 0) {
                 $tier3Duration = 86400 * 90;
                 try {
-                    $setting = Storage::adapter()->getSystemSetting('lockout_tier3_duration');
+                    $setting = $adapter->getSystemSetting('lockout_tier3_duration');
                     if ($setting !== null) $tier3Duration = (int)$setting;
                 } catch (Exception $e) {}
                 $lockUntil = date('Y-m-d H:i:s', time() + $tier3Duration);
                 $auditAction = 'account_locked_permanent';
                 $lockLabel = null;
-                $db->prepare("UPDATE users SET must_reset_password = 1 WHERE id = ?")->execute([$userId]);
+                $adapter->setUserMustResetPassword($userId, true);
             }
 
             if ($lockUntil) {
-                $db->prepare("UPDATE users SET locked_until = ? WHERE id = ?")->execute([$lockUntil, $userId]);
-                try { Storage::adapter()->logAction($userId, $auditAction, 'users', null, self::clientIpHash()); } catch (Exception $e) {}
+                $adapter->setUserLockedUntil($userId, $lockUntil);
+                try { $adapter->logAction($userId, $auditAction, 'users', null, self::clientIpHash()); } catch (Exception $e) {}
                 if (defined('SMTP_ENABLED') && SMTP_ENABLED && $row['email']) {
                     Mailer::sendLockoutNotification($row['email'], $username, $attempts, self::getClientIp(), $lockLabel);
                 }
@@ -401,10 +383,9 @@ class Auth {
     /**
      * Reset lockout counters after successful login.
      */
-    public static function resetLoginLockout(PDO $db, int $userId): void {
+    public static function resetLoginLockout(int $userId): void {
         try {
-            $db->prepare("UPDATE users SET failed_login_attempts = 0, locked_until = NULL, last_failed_login_at = NULL WHERE id = ?")
-               ->execute([$userId]);
+            Storage::adapter()->resetLoginLockout($userId);
         } catch (Exception $e) {
             // Columns may not exist — non-fatal
         }
@@ -413,11 +394,9 @@ class Auth {
     /**
      * Check if an account is locked — 429s with remaining time if so.
      */
-    public static function enforceAccountLockout(PDO $db, int $userId): void {
+    public static function enforceAccountLockout(int $userId): void {
         try {
-            $stmt = $db->prepare("SELECT locked_until FROM users WHERE id = ?");
-            $stmt->execute([$userId]);
-            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            $row = Storage::adapter()->getUserLockoutStatus($userId);
             if ($row && $row['locked_until']) {
                 $lockedUntil = strtotime($row['locked_until']);
                 if ($lockedUntil > time()) {
@@ -442,19 +421,20 @@ class Auth {
     /**
      * Enforce rate limit on any identifier — 429s and exits if exceeded.
      */
-    public static function enforceRateLimit(PDO $db, string $action, string $identifier, int $limit, int $window): void {
-        if (self::isRateLimited($db, $action, $identifier, $limit, $window)) {
+    public static function enforceRateLimit(string $action, string $identifier, int $limit, int $window): void {
+        if (self::isRateLimited($action, $identifier, $limit, $window)) {
             Response::error('Too many attempts. Please try again later.', 429);
         }
     }
+
 
     /**
      * Enforce IP-based rate limit — 429s and exits if exceeded.
      * Returns the hashed identifier for use with recordRateLimit().
      */
-    public static function enforceIpRateLimit(PDO $db, string $action, int $limit, int $window): string {
+    public static function enforceIpRateLimit(string $action, int $limit, int $window): string {
         $ipHash = self::hashForRateLimit($action . '_ip', self::getClientIp());
-        self::enforceRateLimit($db, $action, $ipHash, $limit, $window);
+        self::enforceRateLimit($action, $ipHash, $limit, $window);
         return $ipHash;
     }
 
@@ -468,27 +448,23 @@ class Auth {
      * @param int    $windowSeconds  time window in seconds
      * @return bool  true if rate limited (should reject)
      */
-    public static function isRateLimited(PDO $db, string $action, string $identifier, int $maxAttempts = 5, int $windowSeconds = 3600): bool {
+    public static function isRateLimited(string $action, string $identifier, int $maxAttempts = 5, int $windowSeconds = 3600): bool {
         try {
+            $adapter = Storage::adapter();
+
             // Clean up expired entries periodically (1 in 10 chance)
             if (random_int(1, 10) === 1) {
-                $db->prepare("DELETE FROM rate_limits WHERE window_start < DATE_SUB(NOW(), INTERVAL ? SECOND)")
-                   ->execute([$windowSeconds * 2]);
+                $adapter->deleteExpiredRateLimits($windowSeconds * 2);
             }
 
-            $stmt = $db->prepare(
-                "SELECT attempts, window_start FROM rate_limits WHERE action = ? AND identifier = ? LIMIT 1"
-            );
-            $stmt->execute([$action, $identifier]);
-            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            $row = $adapter->getRateLimit($action, $identifier);
 
             if (!$row) return false; // No record = not limited
 
             // Check if window has expired
             if (strtotime($row['window_start']) + $windowSeconds < time()) {
                 // Window expired — reset
-                $db->prepare("DELETE FROM rate_limits WHERE action = ? AND identifier = ?")
-                   ->execute([$action, $identifier]);
+                $adapter->deleteRateLimit($action, $identifier);
                 return false;
             }
 
@@ -501,14 +477,9 @@ class Auth {
     /**
      * Record a rate-limited action attempt.
      */
-    public static function recordRateLimit(PDO $db, string $action, string $identifier): void {
+    public static function recordRateLimit(string $action, string $identifier): void {
         try {
-            $stmt = $db->prepare(
-                "INSERT INTO rate_limits (action, identifier, attempts, window_start)
-                 VALUES (?, ?, 1, NOW())
-                 ON DUPLICATE KEY UPDATE attempts = attempts + 1"
-            );
-            $stmt->execute([$action, $identifier]);
+            Storage::adapter()->upsertRateLimit($action, $identifier);
         } catch (PDOException $e) {
             // non-fatal
         }

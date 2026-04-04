@@ -6,7 +6,6 @@
  * Replaces: accounts.php, assets.php, licenses.php, insurance.php, vault.php (old).
  */
 require_once __DIR__ . '/../core/Response.php';
-require_once __DIR__ . '/../../config/config.php';
 require_once __DIR__ . '/../core/Auth.php';
 require_once __DIR__ . '/../core/Storage.php';
 
@@ -40,22 +39,11 @@ if ($method === 'GET' && $action === 'counts') {
 // GET ?action=deleted — List soft-deleted entries
 // ---------------------------------------------------------------------------
 if ($method === 'GET' && $action === 'deleted') {
-    $db = Database::getInstance();
-    $stmt = $db->prepare(
-        "SELECT ve.id, ve.entry_type, ve.template_id, ve.encrypted_data, ve.deleted_at, ve.created_at, ve.updated_at,
-                et.name AS template_name, et.icon AS template_icon, et.fields AS template_fields
-         FROM vault_entries ve
-         LEFT JOIN entry_templates et ON ve.template_id = et.id
-         WHERE ve.user_id = ? AND ve.deleted_at IS NOT NULL
-           AND ve.deleted_at >= NOW() - INTERVAL 1 DAY
-         ORDER BY ve.deleted_at DESC"
-    );
-    $stmt->execute([$userId]);
-    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $rows = $storage->getSoftDeletedEntries($userId);
 
     $result = array_map(function ($row) {
         $template = null;
-        if ($row['template_name']) {
+        if (!empty($row['template_name'])) {
             $template = [
                 'name'   => $row['template_name'],
                 'icon'   => $row['template_icon'],
@@ -66,7 +54,7 @@ if ($method === 'GET' && $action === 'deleted') {
             'id'             => (int)$row['id'],
             'entry_type'     => $row['entry_type'],
             'template_id'    => $row['template_id'] ? (int)$row['template_id'] : null,
-            'template'       => $template,
+            'template'       => $row['template'] ?? $template,
             'encrypted_data' => $row['encrypted_data'],
             'deleted_at'     => $row['deleted_at'],
             'created_at'     => $row['created_at'],
@@ -126,13 +114,7 @@ if ($method === 'GET') {
 // POST ?action=restore&id=X — Restore soft-deleted entry
 // ---------------------------------------------------------------------------
 if ($method === 'POST' && $action === 'restore' && $id) {
-    $db = Database::getInstance();
-    $stmt = $db->prepare(
-        "UPDATE vault_entries SET deleted_at = NULL WHERE id = ? AND user_id = ? AND deleted_at IS NOT NULL"
-    );
-    $stmt->execute([$id, $userId]);
-
-    if ($stmt->rowCount() === 0) {
+    if (!$storage->restoreDeletedEntry($userId, $id)) {
         Response::error('Entry not found or not deleted.', 404);
     }
 
@@ -162,8 +144,7 @@ if ($method === 'POST' && $action === 'bulk-create') {
     }
 
     // All entries valid — insert atomically
-    $db = Database::getInstance();
-    $db->beginTransaction();
+    $storage->beginTransaction();
     try {
         $ids = [];
         foreach ($entries as $entry) {
@@ -174,9 +155,9 @@ if ($method === 'POST' && $action === 'bulk-create') {
                 isset($entry['template_id']) ? (int)$entry['template_id'] : null
             );
         }
-        $db->commit();
+        $storage->commit();
     } catch (Exception $e) {
-        $db->rollBack();
+        $storage->rollBack();
         Response::error('Bulk create failed: ' . $e->getMessage(), 500);
     }
 
@@ -202,8 +183,7 @@ if ($method === 'POST' && $action === 'bulk-update') {
     }
 
     // All entries valid — update atomically
-    $db = Database::getInstance();
-    $db->beginTransaction();
+    $storage->beginTransaction();
     try {
         $updated = 0;
         foreach ($entries as $entry) {
@@ -213,9 +193,9 @@ if ($method === 'POST' && $action === 'bulk-update') {
                 $updated++;
             }
         }
-        $db->commit();
+        $storage->commit();
     } catch (Exception $e) {
-        $db->rollBack();
+        $storage->rollBack();
         Response::error('Bulk update failed: ' . $e->getMessage(), 500);
     }
 
@@ -276,12 +256,7 @@ if ($method === 'PUT' && $id) {
 // ---------------------------------------------------------------------------
 if ($method === 'DELETE' && $id) {
     // Check share count first to warn client
-    $db = Database::getInstance();
-    $stmt = $db->prepare(
-        "SELECT COUNT(*) FROM shared_items WHERE source_entry_id = ? AND sender_id = ?"
-    );
-    $stmt->execute([$id, $userId]);
-    $shareCount = (int)$stmt->fetchColumn();
+    $shareCount = $storage->getShareCountForEntry($userId, $id);
 
     if (!$storage->deleteEntry($userId, $id)) {
         Response::error('Entry not found.', 404);

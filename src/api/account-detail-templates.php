@@ -7,12 +7,12 @@
 require_once __DIR__ . '/../core/Response.php';
 require_once __DIR__ . '/../../config/config.php';
 require_once __DIR__ . '/../core/Auth.php';
+require_once __DIR__ . '/../core/Storage.php';
 
 Response::setCors();
 $payload = Auth::requireAuth();
 $userId = Auth::userId($payload);
 $method = $_SERVER['REQUEST_METHOD'];
-$db = Database::getInstance();
 
 /**
  * Standardize a field key for consistent storage.
@@ -35,15 +35,7 @@ function standardizeKey(string $key): string {
 // GET — List personal templates + global templates
 // =============================================================================
 if ($method === 'GET') {
-    $stmt = $db->prepare(
-        "SELECT id, user_id, account_type_id, subtype, country_id,
-                IFNULL(is_global, 0) AS is_global, field_keys
-         FROM account_detail_templates
-         WHERE user_id = ? OR (IFNULL(is_global, 0) = 1)
-         ORDER BY is_global ASC, updated_at DESC"
-    );
-    $stmt->execute([$userId]);
-    $rows = $stmt->fetchAll();
+    $rows = Storage::adapter()->getAccountDetailTemplates($userId);
 
     $templates = [];
     foreach ($rows as $row) {
@@ -99,45 +91,15 @@ if ($method === 'POST') {
         if (($payload['role'] ?? '') !== 'admin') {
             Response::error('Only admins can save global templates.', 403);
         }
-
-        // Check if a global row already exists for this combo
-        $stmt = $db->prepare(
-            "SELECT id FROM account_detail_templates
-             WHERE user_id = 0 AND account_type_id = ? AND subtype = ? AND country_id = ? AND IFNULL(is_global, 0) = 1"
-        );
-        $stmt->execute([$accountTypeId, $subtype, $countryId]);
-        $existing = $stmt->fetch();
-
-        if ($existing) {
-            // Admin overwrites existing global template
-            $stmt = $db->prepare(
-                "UPDATE account_detail_templates SET field_keys = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
-            );
-            $stmt->execute([json_encode($fieldKeys), (int)$existing['id']]);
-            $id = (int)$existing['id'];
-        } else {
-            // New global template
-            $stmt = $db->prepare(
-                "INSERT INTO account_detail_templates
-                    (user_id, account_type_id, subtype, country_id, is_global, field_keys)
-                 VALUES (0, ?, ?, ?, 1, ?)"
-            );
-            $stmt->execute([$accountTypeId, $subtype, $countryId, json_encode($fieldKeys)]);
-            $id = (int)$db->lastInsertId();
-        }
-    } else {
-        // Personal template: user_id = actual user, is_global = 0
-        $fieldKeysJson = json_encode($fieldKeys);
-
-        $stmt = $db->prepare(
-            "INSERT INTO account_detail_templates
-                (user_id, account_type_id, subtype, country_id, is_global, field_keys)
-             VALUES (?, ?, ?, ?, 0, ?)
-             ON DUPLICATE KEY UPDATE field_keys = VALUES(field_keys), updated_at = CURRENT_TIMESTAMP"
-        );
-        $stmt->execute([$userId, $accountTypeId, $subtype, $countryId, $fieldKeysJson]);
-        $id = (int)$db->lastInsertId();
     }
+
+    $id = Storage::adapter()->upsertAccountDetailTemplate($userId, [
+        'account_type_id' => $accountTypeId,
+        'subtype'         => $subtype,
+        'country_id'      => $countryId,
+        'field_keys'      => json_encode($fieldKeys),
+        'scope'           => $scope,
+    ]);
 
     Response::success(['id' => $id], 201);
 }
@@ -152,9 +114,7 @@ if ($method === 'DELETE') {
     }
 
     // Look up the template to check ownership / global status
-    $stmt = $db->prepare("SELECT id, user_id, IFNULL(is_global, 0) AS is_global FROM account_detail_templates WHERE id = ?");
-    $stmt->execute([$id]);
-    $tpl = $stmt->fetch();
+    $tpl = Storage::adapter()->getAccountDetailTemplate($id);
 
     if (!$tpl) {
         Response::error('Template not found.', 404);
@@ -172,8 +132,7 @@ if ($method === 'DELETE') {
         }
     }
 
-    $stmt = $db->prepare("DELETE FROM account_detail_templates WHERE id = ?");
-    $stmt->execute([$id]);
+    Storage::adapter()->deleteAccountDetailTemplate($id);
 
     Response::success(['id' => $id]);
 }

@@ -5,6 +5,7 @@
  * Supports ES256 (-7) algorithm only (ECDSA with P-256 and SHA-256).
  */
 require_once __DIR__ . '/../../config/config.php';
+require_once __DIR__ . '/Storage.php';
 
 // ============================================================================
 // Minimal CBOR Decoder
@@ -309,30 +310,22 @@ function webauthnBase64UrlDecode(string $data): string {
 /**
  * Generate WebAuthn registration options (PublicKeyCredentialCreationOptions).
  *
- * @param  PDO    $db
  * @param  int    $userId
  * @param  string $username
  * @return array  Options to pass to navigator.credentials.create()
  */
-function webauthnRegisterOptions(PDO $db, int $userId, string $username): array {
+function webauthnRegisterOptions(int $userId, string $username): array {
+    $adapter = Storage::adapter();
+
     // Generate a random challenge (32 bytes)
     $challenge = random_bytes(32);
     $challengeB64 = webauthnBase64UrlEncode($challenge);
 
     // Store challenge in DB with 5-minute expiry
-    $stmt = $db->prepare(
-        "INSERT INTO webauthn_challenges (challenge, user_id, type, expires_at)
-         VALUES (?, ?, 'register', DATE_ADD(NOW(), INTERVAL 5 MINUTE))"
-    );
-    $stmt->execute([$challengeB64, $userId]);
-    $challengeId = (int)$db->lastInsertId();
+    $challengeId = $adapter->createWebAuthnChallenge($userId, $challengeB64, 'register');
 
     // Get existing credentials for this user (to exclude)
-    $stmt = $db->prepare(
-        "SELECT credential_id FROM user_credentials_webauthn WHERE user_id = ?"
-    );
-    $stmt->execute([$userId]);
-    $existingCreds = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    $existingCreds = $adapter->getExistingCredentialIds($userId);
 
     $excludeCredentials = [];
     foreach ($existingCreds as $credId) {
@@ -375,7 +368,6 @@ function webauthnRegisterOptions(PDO $db, int $userId, string $username): array 
 /**
  * Verify a WebAuthn registration response.
  *
- * @param  PDO    $db
  * @param  int    $userId
  * @param  string $clientDataJSON   Base64URL-encoded clientDataJSON
  * @param  string $attestationObject Base64URL-encoded attestationObject
@@ -383,19 +375,15 @@ function webauthnRegisterOptions(PDO $db, int $userId, string $username): array 
  * @return array  Extracted credential data (credentialId, publicKeyPem)
  */
 function webauthnVerifyRegistration(
-    PDO    $db,
     int    $userId,
     string $clientDataJSON,
     string $attestationObject,
     int    $challengeId
 ): array {
+    $adapter = Storage::adapter();
+
     // 1. Retrieve and validate the stored challenge
-    $stmt = $db->prepare(
-        "SELECT challenge, user_id, type FROM webauthn_challenges
-         WHERE id = ? AND expires_at > NOW()"
-    );
-    $stmt->execute([$challengeId]);
-    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    $row = $adapter->getWebAuthnChallenge($challengeId);
 
     if (!$row) {
         throw new RuntimeException('Challenge not found or expired');
@@ -410,8 +398,7 @@ function webauthnVerifyRegistration(
     $expectedChallenge = $row['challenge'];
 
     // Delete the challenge (single-use)
-    $stmt = $db->prepare("DELETE FROM webauthn_challenges WHERE id = ?");
-    $stmt->execute([$challengeId]);
+    $adapter->deleteWebAuthnChallenge($challengeId);
 
     // 2. Decode and validate clientDataJSON
     $clientDataRaw = webauthnBase64UrlDecode($clientDataJSON);
@@ -476,21 +463,17 @@ function webauthnVerifyRegistration(
  * Generate WebAuthn authentication options (PublicKeyCredentialRequestOptions).
  * This is called without authentication — any user can initiate passkey login.
  *
- * @param  PDO   $db
  * @return array Options to pass to navigator.credentials.get()
  */
-function webauthnAuthOptions(PDO $db): array {
+function webauthnAuthOptions(): array {
+    $adapter = Storage::adapter();
+
     // Generate a random challenge (32 bytes)
     $challenge = random_bytes(32);
     $challengeB64 = webauthnBase64UrlEncode($challenge);
 
     // Store challenge in DB with 5-minute expiry (no user_id — discoverable flow)
-    $stmt = $db->prepare(
-        "INSERT INTO webauthn_challenges (challenge, user_id, type, expires_at)
-         VALUES (?, NULL, 'authenticate', DATE_ADD(NOW(), INTERVAL 5 MINUTE))"
-    );
-    $stmt->execute([$challengeB64]);
-    $challengeId = (int)$db->lastInsertId();
+    $challengeId = $adapter->createWebAuthnChallenge(null, $challengeB64, 'authenticate');
 
     $options = [
         'challengeId' => $challengeId,
@@ -509,7 +492,6 @@ function webauthnAuthOptions(PDO $db): array {
 /**
  * Verify a WebAuthn authentication assertion.
  *
- * @param  PDO    $db
  * @param  string $clientDataJSON    Base64URL-encoded clientDataJSON
  * @param  string $authenticatorData Base64URL-encoded authenticatorData
  * @param  string $signature         Base64URL-encoded signature
@@ -518,20 +500,16 @@ function webauthnAuthOptions(PDO $db): array {
  * @return array  User data and JWT token
  */
 function webauthnVerifyAuth(
-    PDO    $db,
     string $clientDataJSON,
     string $authenticatorData,
     string $signature,
     int    $challengeId,
     string $credentialId
 ): array {
+    $adapter = Storage::adapter();
+
     // 1. Retrieve and validate the stored challenge
-    $stmt = $db->prepare(
-        "SELECT challenge, type FROM webauthn_challenges
-         WHERE id = ? AND expires_at > NOW()"
-    );
-    $stmt->execute([$challengeId]);
-    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    $row = $adapter->getWebAuthnChallenge($challengeId);
 
     if (!$row) {
         throw new RuntimeException('Challenge not found or expired');
@@ -543,19 +521,10 @@ function webauthnVerifyAuth(
     $expectedChallenge = $row['challenge'];
 
     // Delete the challenge (single-use)
-    $stmt = $db->prepare("DELETE FROM webauthn_challenges WHERE id = ?");
-    $stmt->execute([$challengeId]);
+    $adapter->deleteWebAuthnChallenge($challengeId);
 
     // 2. Look up the stored credential
-    $stmt = $db->prepare(
-        "SELECT wc.user_id, wc.public_key, wc.sign_count, wc.credential_id,
-                u.id, u.username, u.email, u.role, u.is_active
-         FROM user_credentials_webauthn wc
-         JOIN users u ON u.id = wc.user_id
-         WHERE wc.credential_id = ?"
-    );
-    $stmt->execute([$credentialId]);
-    $cred = $stmt->fetch(PDO::FETCH_ASSOC);
+    $cred = $adapter->getWebAuthnCredentialForAuth($credentialId);
 
     if (!$cred) {
         throw new RuntimeException('Credential not found');
@@ -622,16 +591,11 @@ function webauthnVerifyAuth(
     }
 
     // Update sign count and last_used_at
-    $stmt = $db->prepare(
-        "UPDATE user_credentials_webauthn
-         SET sign_count = ?, last_used_at = NOW()
-         WHERE credential_id = ?"
-    );
-    $stmt->execute([$newSignCount, $credentialId]);
+    $adapter->updateWebAuthnCredentialUsage($credentialId, $newSignCount);
 
     // 7. Generate JWT token
     require_once __DIR__ . '/Auth.php';
-    $user = Auth::issueAuthToken($pdo, (int)$cred['user_id']);
+    $user = Auth::issueAuthToken((int)$cred['user_id']);
 
     return [
         'user'       => $user,

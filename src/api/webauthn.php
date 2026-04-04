@@ -8,11 +8,13 @@ require_once __DIR__ . '/../../config/config.php';
 require_once __DIR__ . '/../core/Auth.php';
 require_once __DIR__ . '/../core/WebAuthn.php';
 
+require_once __DIR__ . '/../core/Storage.php';
+
 Response::setCors();
 
 $method = $_SERVER['REQUEST_METHOD'];
 $action = $_GET['action'] ?? '';
-$db = Database::getConnection();
+$adapter = Storage::adapter();
 
 // ---------------------------------------------------------------------------
 // POST ?action=register-options — Get registration options (JWT required)
@@ -22,16 +24,14 @@ if ($method === 'POST' && $action === 'register-options') {
     $userId  = Auth::userId($payload);
 
     // Fetch username for the registration options
-    $stmt = $db->prepare("SELECT username FROM users WHERE id = ?");
-    $stmt->execute([$userId]);
-    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+    $username = $adapter->getUsernameById($userId);
 
-    if (!$user) {
+    if (!$username) {
         Response::error('User not found.', 404);
     }
 
     try {
-        $options = webauthnRegisterOptions($db, $userId, $user['username']);
+        $options = webauthnRegisterOptions($userId, $username);
         Response::success($options);
     } catch (Exception $e) {
         Response::error('Failed to generate registration options: ' . $e->getMessage());
@@ -58,7 +58,7 @@ if ($method === 'POST' && $action === 'register-verify') {
 
     try {
         $credData = webauthnVerifyRegistration(
-            $db, $userId, $clientDataJSON, $attestationObject, $challengeId
+            $userId, $clientDataJSON, $attestationObject, $challengeId
         );
     } catch (Exception $e) {
         Response::error('Registration verification failed: ' . $e->getMessage());
@@ -73,19 +73,14 @@ if ($method === 'POST' && $action === 'register-verify') {
     $transportsJson = is_array($transports) ? json_encode($transports) : '[]';
 
     // Store the credential
-    $stmt = $db->prepare(
-        "INSERT INTO user_credentials_webauthn
-         (user_id, credential_id, public_key, sign_count, transports, name, created_at, last_used_at)
-         VALUES (?, ?, ?, ?, ?, ?, NOW(), NULL)"
-    );
-    $stmt->execute([
+    $adapter->registerWebAuthnCredential(
         $userId,
         $credData['credentialId'],
         $credData['publicKeyPem'],
         $credData['signCount'],
         $transportsJson,
-        $name,
-    ]);
+        $name
+    );
 
     Response::success([
         'credentialId' => $credData['credentialId'],
@@ -99,10 +94,10 @@ if ($method === 'POST' && $action === 'register-verify') {
 // ---------------------------------------------------------------------------
 if ($method === 'POST' && $action === 'auth-options') {
     // Shared login rate limit bucket (passkey + password attempts combined)
-    Auth::enforceIpRateLimit($db, 'login', RATE_LIMIT_LOGIN_IP, RATE_LIMIT_LOGIN_IP_WINDOW);
+    Auth::enforceIpRateLimit('login', RATE_LIMIT_LOGIN_IP, RATE_LIMIT_LOGIN_IP_WINDOW);
 
     try {
-        $options = webauthnAuthOptions($db);
+        $options = webauthnAuthOptions();
         Response::success($options);
     } catch (Exception $e) {
         Response::error('Failed to generate authentication options: ' . $e->getMessage());
@@ -114,7 +109,7 @@ if ($method === 'POST' && $action === 'auth-options') {
 // ---------------------------------------------------------------------------
 if ($method === 'POST' && $action === 'auth-verify') {
     // Shared login rate limit bucket — record on failure below
-    $loginIpHash = Auth::enforceIpRateLimit($db, 'login', RATE_LIMIT_LOGIN_IP, RATE_LIMIT_LOGIN_IP_WINDOW);
+    $loginIpHash = Auth::enforceIpRateLimit('login', RATE_LIMIT_LOGIN_IP, RATE_LIMIT_LOGIN_IP_WINDOW);
 
     $body = Response::getBody();
 
@@ -130,15 +125,15 @@ if ($method === 'POST' && $action === 'auth-verify') {
 
     try {
         $result = webauthnVerifyAuth(
-            $db, $clientDataJSON, $authenticatorData, $signature, $challengeId, $credentialId
+            $clientDataJSON, $authenticatorData, $signature, $challengeId, $credentialId
         );
     } catch (Exception $e) {
-        Auth::recordRateLimit($db, 'login', $loginIpHash);
+        Auth::recordRateLimit('login', $loginIpHash);
         Response::error('Authentication failed: ' . $e->getMessage(), 401);
     }
 
     // Check account lockout before issuing JWT
-    Auth::enforceAccountLockout($db, (int)$result['user']['id']);
+    Auth::enforceAccountLockout((int)$result['user']['id']);
 
     Response::success([
         'token'      => $result['user']['token'],
@@ -160,14 +155,7 @@ if ($method === 'GET' && $action === 'list') {
     $payload = Auth::requireAuth();
     $userId  = Auth::userId($payload);
 
-    $stmt = $db->prepare(
-        "SELECT id, credential_id, name, transports, created_at, last_used_at
-         FROM user_credentials_webauthn
-         WHERE user_id = ?
-         ORDER BY created_at DESC"
-    );
-    $stmt->execute([$userId]);
-    $passkeys = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $passkeys = $adapter->listWebAuthnCredentials($userId);
 
     // Parse transports JSON and cast id
     foreach ($passkeys as &$pk) {
@@ -195,18 +183,11 @@ if ($method === 'POST' && $action === 'rename') {
     }
 
     // Verify ownership
-    $stmt = $db->prepare(
-        "SELECT id FROM user_credentials_webauthn WHERE id = ? AND user_id = ?"
-    );
-    $stmt->execute([$id, $userId]);
-    if (!$stmt->fetch()) {
+    if (!$adapter->getWebAuthnCredentialOwnership($id, $userId)) {
         Response::error('Passkey not found.', 404);
     }
 
-    $stmt = $db->prepare(
-        "UPDATE user_credentials_webauthn SET name = ? WHERE id = ? AND user_id = ?"
-    );
-    $stmt->execute([$name, $id, $userId]);
+    $adapter->renameWebAuthnCredential($id, $userId, $name);
 
     Response::success(['message' => 'Passkey renamed.']);
 }
@@ -226,18 +207,11 @@ if ($method === 'POST' && $action === 'delete') {
     }
 
     // Verify ownership
-    $stmt = $db->prepare(
-        "SELECT id FROM user_credentials_webauthn WHERE id = ? AND user_id = ?"
-    );
-    $stmt->execute([$id, $userId]);
-    if (!$stmt->fetch()) {
+    if (!$adapter->getWebAuthnCredentialOwnership($id, $userId)) {
         Response::error('Passkey not found.', 404);
     }
 
-    $stmt = $db->prepare(
-        "DELETE FROM user_credentials_webauthn WHERE id = ? AND user_id = ?"
-    );
-    $stmt->execute([$id, $userId]);
+    $adapter->deleteWebAuthnCredential($id, $userId);
 
     Response::success(['message' => 'Passkey deleted.']);
 }

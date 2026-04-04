@@ -22,41 +22,18 @@ $storage = Storage::adapter();
 // GET ?action=stats — Dashboard statistics (zero blob data)
 // ---------------------------------------------------------------------------
 if ($method === 'GET' && $action === 'stats') {
-    $db = Database::getInstance();
-
-    // Entry counts by type
-    $stmt = $db->prepare(
-        "SELECT entry_type, COUNT(*) as cnt
-         FROM vault_entries
-         WHERE user_id = ? AND deleted_at IS NULL
-         GROUP BY entry_type"
-    );
-    $stmt->execute([$userId]);
-    $entryCounts = [];
-    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-        $entryCounts[$row['entry_type']] = (int)$row['cnt'];
-    }
+    // Entry counts by type (reuse existing adapter method)
+    $entryCounts = $storage->getEntryCounts($userId);
 
     // Shared with me count
-    $stmt = $db->prepare("SELECT COUNT(*) FROM shared_items WHERE recipient_id = ?");
-    $stmt->execute([$userId]);
-    $sharedWithMeCount = (int)$stmt->fetchColumn();
+    $sharedWithMeCount = $storage->getSharedWithMeCount($userId);
 
     // Last login and last vault unlock from audit log
     $lastLogin = null;
     $lastVaultUnlock = null;
     try {
-        $stmt = $db->prepare(
-            "SELECT MAX(created_at) FROM audit_log WHERE user_id = ? AND action = 'login'"
-        );
-        $stmt->execute([$userId]);
-        $lastLogin = $stmt->fetchColumn() ?: null;
-
-        $stmt = $db->prepare(
-            "SELECT MAX(created_at) FROM audit_log WHERE user_id = ? AND action = 'vault_unlock'"
-        );
-        $stmt->execute([$userId]);
-        $lastVaultUnlock = $stmt->fetchColumn() ?: null;
+        $lastLogin = $storage->getLastAuditEvent($userId, 'login');
+        $lastVaultUnlock = $storage->getLastAuditEvent($userId, 'vault_unlock');
     } catch (Exception $e) {
         // audit_log may not exist yet
     }

@@ -3,15 +3,15 @@
  * Personal Vault — Exchange Rate Helper
  * Shared logic for once-per-day forex rate refresh.
  */
+require_once __DIR__ . '/Storage.php';
+
 class ExchangeRates {
 
     /**
      * Check whether rates need refreshing (last update before today UTC, or never).
      */
-    public static function needsRefresh(PDO $db): bool {
-        $stmt = $db->query("SELECT MAX(last_updated) AS last FROM currencies");
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        $last = $row['last'] ?? null;
+    public static function needsRefresh(): bool {
+        $last = Storage::adapter()->getLastCurrencyUpdate();
 
         if ($last === null) {
             return true;
@@ -27,7 +27,7 @@ class ExchangeRates {
      * Fetch latest rates from ExchangeRate API and update all matching currencies.
      * Returns ['updated' => count, 'skipped' => false].
      */
-    public static function refresh(PDO $db): array {
+    public static function refresh(): array {
         $apiKey = EXCHANGE_RATE_API_KEY;
         if (empty($apiKey)) {
             return ['updated' => 0, 'skipped' => true, 'reason' => 'no_api_key'];
@@ -50,35 +50,19 @@ class ExchangeRates {
 
         $rates = $data['conversion_rates'];
         $updatedCount = 0;
+        $storage = Storage::adapter();
 
-        $stmt = $db->query("SELECT id, code FROM currencies");
-        $currencies = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        $updateStmt = $db->prepare("UPDATE currencies SET exchange_rate_to_base = ?, last_updated = NOW() WHERE id = ?");
-
-        // History insert — degrades gracefully if migration hasn't run
-        $historyStmt = null;
-        try {
-            $historyStmt = $db->prepare(
-                "INSERT INTO currency_rate_history (currency_id, rate_to_base, base_currency, recorded_at)
-                 VALUES (?, ?, ?, CURDATE())
-                 ON DUPLICATE KEY UPDATE rate_to_base = VALUES(rate_to_base), base_currency = VALUES(base_currency)"
-            );
-        } catch (Exception $e) {
-            // Table may not exist yet
-        }
+        $currencies = $storage->getAllCurrenciesForUpdate();
 
         foreach ($currencies as $currency) {
             $code = $currency['code'];
             if (isset($rates[$code])) {
                 $rateToBase = 1 / $rates[$code];
-                $updateStmt->execute([$rateToBase, $currency['id']]);
-                if ($historyStmt) {
-                    try {
-                        $historyStmt->execute([$currency['id'], $rateToBase, $baseCurrency]);
-                    } catch (Exception $e) {
-                        // History table may not exist — skip silently
-                        $historyStmt = null;
-                    }
+                $storage->updateExchangeRate($currency['id'], $rateToBase);
+                try {
+                    $storage->addCurrencyRateHistory($currency['id'], $rateToBase, $baseCurrency);
+                } catch (Exception $e) {
+                    // History table may not exist — skip silently
                 }
                 $updatedCount++;
             }
@@ -90,10 +74,10 @@ class ExchangeRates {
     /**
      * Refresh only if rates are stale (not yet updated today).
      */
-    public static function refreshIfStale(PDO $db): array {
-        if (!self::needsRefresh($db)) {
+    public static function refreshIfStale(): array {
+        if (!self::needsRefresh()) {
             return ['updated' => 0, 'skipped' => true, 'reason' => 'already_fresh'];
         }
-        return self::refresh($db);
+        return self::refresh();
     }
 }

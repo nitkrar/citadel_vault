@@ -20,7 +20,6 @@ $payload = Auth::requireAuth();
 $userId = Auth::userId($payload);
 $method = $_SERVER['REQUEST_METHOD'];
 $action = $_GET['action'] ?? '';
-$db = Database::getInstance();
 
 // Check gatekeeper
 $storage = Storage::adapter();
@@ -107,12 +106,7 @@ if ($method === 'POST' && $action === 'exchange-token') {
 
         // Encrypt and store
         $encrypted = PlaidEncryption::encrypt($accessToken);
-        $stmt = $db->prepare(
-            'INSERT INTO plaid_items (user_id, item_id, access_token, status)
-             VALUES (?, ?, ?, "active")
-             ON DUPLICATE KEY UPDATE access_token = VALUES(access_token), status = "active"'
-        );
-        $stmt->execute([$userId, $itemId, $encrypted]);
+        $storage->upsertPlaidItem($userId, $itemId, $encrypted);
 
         // Fetch accounts with balances
         $accounts = plaidRequest('/accounts/balance/get', [
@@ -151,13 +145,7 @@ if ($method === 'POST' && $action === 'refresh') {
     }
 
     // Load access tokens for requested items (owned by this user)
-    $placeholders = implode(',', array_fill(0, count($itemIds), '?'));
-    $stmt = $db->prepare(
-        "SELECT item_id, access_token FROM plaid_items
-         WHERE user_id = ? AND item_id IN ($placeholders)"
-    );
-    $stmt->execute(array_merge([$userId], $itemIds));
-    $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $items = $storage->getPlaidItems($userId, $itemIds);
 
     $results = [];
     $errors = [];
@@ -181,10 +169,7 @@ if ($method === 'POST' && $action === 'refresh') {
             $errors[$item['item_id']] = $e->getMessage();
             // Update status if re-auth needed
             if (strpos($e->getMessage(), 'ITEM_LOGIN_REQUIRED') !== false) {
-                $stmt2 = $db->prepare(
-                    'UPDATE plaid_items SET status = "reauth_required" WHERE item_id = ? AND user_id = ?'
-                );
-                $stmt2->execute([$item['item_id'], $userId]);
+                $storage->updatePlaidItemStatus($item['item_id'], $userId, 'reauth_required');
             }
         }
     }
@@ -201,9 +186,7 @@ if ($method === 'POST' && $action === 'create-update-link-token') {
     if (!$itemId) Response::error('item_id is required.', 400);
 
     // Verify ownership
-    $stmt = $db->prepare('SELECT access_token FROM plaid_items WHERE user_id = ? AND item_id = ?');
-    $stmt->execute([$userId, $itemId]);
-    $row = $stmt->fetch();
+    $row = $storage->getPlaidItem($userId, $itemId);
     if (!$row) Response::error('Item not found.', 404);
 
     try {
@@ -228,9 +211,7 @@ if ($method === 'DELETE' && $action === 'disconnect') {
     $itemId = $_GET['item_id'] ?? '';
     if (!$itemId) Response::error('item_id is required.', 400);
 
-    $stmt = $db->prepare('SELECT access_token FROM plaid_items WHERE user_id = ? AND item_id = ?');
-    $stmt->execute([$userId, $itemId]);
-    $row = $stmt->fetch();
+    $row = $storage->getPlaidItem($userId, $itemId);
     if (!$row) Response::error('Item not found.', 404);
 
     // Remove from Plaid
@@ -241,8 +222,7 @@ if ($method === 'DELETE' && $action === 'disconnect') {
         // Continue even if Plaid fails — remove locally
     }
 
-    $stmt = $db->prepare('DELETE FROM plaid_items WHERE user_id = ? AND item_id = ?');
-    $stmt->execute([$userId, $itemId]);
+    $storage->deletePlaidItem($userId, $itemId);
 
     Response::success(['disconnected' => true]);
 }
@@ -251,16 +231,9 @@ if ($method === 'DELETE' && $action === 'disconnect') {
 // GET status
 // ============================================================================
 if ($method === 'GET' && $action === 'status') {
-    $stmt = $db->prepare(
-        'SELECT item_id, status, created_at, updated_at
-         FROM plaid_items WHERE user_id = ?
-         ORDER BY created_at DESC'
-    );
-    $stmt->execute([$userId]);
-
     Response::success([
         'enabled' => true,
-        'items' => $stmt->fetchAll(PDO::FETCH_ASSOC),
+        'items' => $storage->getPlaidItemsByUser($userId),
     ]);
 }
 

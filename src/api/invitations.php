@@ -14,8 +14,6 @@ Response::setCors();
 
 $method = $_SERVER['REQUEST_METHOD'];
 $action = $_GET['action'] ?? '';
-$db = Database::getConnection();
-
 // ---------------------------------------------------------------------------
 // POST ?action=create — Generate an invite link (any authenticated user)
 // ---------------------------------------------------------------------------
@@ -31,20 +29,12 @@ if ($method === 'POST' && $action === 'create') {
     }
 
     // Check if email is already registered
-    $stmt = $db->prepare("SELECT id FROM users WHERE email = ? LIMIT 1");
-    $stmt->execute([$email]);
-    if ($stmt->fetch()) {
+    if (Storage::adapter()->checkEmailRegistered($email)) {
         Response::error('A user with this email already exists.', 409);
     }
 
     // Check for an existing unused, unexpired invite for this email
-    $stmt = $db->prepare(
-        "SELECT id, token, expires_at FROM invitations
-         WHERE email = ? AND used_at IS NULL AND expires_at > NOW()
-         ORDER BY created_at DESC LIMIT 1"
-    );
-    $stmt->execute([$email]);
-    $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+    $existing = Storage::adapter()->getExistingInvitation($email);
 
     if ($existing) {
         // Return the existing invite link instead of creating a duplicate
@@ -66,10 +56,12 @@ if ($method === 'POST' && $action === 'create') {
     } catch (Exception $e) {}
     $expiresAt = date('Y-m-d H:i:s', time() + $inviteExpiryDays * 86400);
 
-    $stmt = $db->prepare(
-        "INSERT INTO invitations (token, email, invited_by, expires_at) VALUES (?, ?, ?, ?)"
-    );
-    $stmt->execute([$token, $email, $userId, $expiresAt]);
+    Storage::adapter()->createInvitation([
+        'token'      => $token,
+        'email'      => $email,
+        'invited_by' => $userId,
+        'expires_at' => $expiresAt,
+    ]);
 
     $origin = defined('APP_URL') ? APP_URL : (defined('WEBAUTHN_ORIGIN') ? WEBAUTHN_ORIGIN : 'http://localhost:8080');
     $inviteUrl = $origin . '/register?invite=' . $token;
@@ -78,9 +70,7 @@ if ($method === 'POST' && $action === 'create') {
     $emailSent = false;
     if (defined('SMTP_ENABLED') && SMTP_ENABLED) {
         // Get inviter's username
-        $stmt2 = $db->prepare("SELECT username FROM users WHERE id = ?");
-        $stmt2->execute([$userId]);
-        $inviterName = $stmt2->fetchColumn() ?: 'Someone';
+        $inviterName = Storage::adapter()->getUsernameById($userId) ?: 'Someone';
 
         $result = Mailer::sendInvite($email, $inviteUrl, $inviterName);
         $emailSent = ($result['success'] ?? false);
@@ -104,14 +94,7 @@ if ($method === 'GET' && $action === 'validate') {
         Response::error('Invite token is required.', 400);
     }
 
-    $stmt = $db->prepare(
-        "SELECT i.email, i.expires_at, i.used_at, u.username AS invited_by_username
-         FROM invitations i
-         JOIN users u ON u.id = i.invited_by
-         WHERE i.token = ? LIMIT 1"
-    );
-    $stmt->execute([$token]);
-    $invite = $stmt->fetch(PDO::FETCH_ASSOC);
+    $invite = Storage::adapter()->validateInviteToken($token);
 
     if (!$invite) {
         Response::error('Invalid invite link.', 404);
@@ -139,23 +122,10 @@ if ($method === 'GET' && $action === 'list') {
     $isSiteAdmin = $payload['role'] === 'admin';
 
     if ($isSiteAdmin) {
-        $stmt = $db->query(
-            "SELECT i.id, i.email, i.token, i.expires_at, i.used_at, i.created_at,
-                    u.username AS invited_by_username
-             FROM invitations i
-             JOIN users u ON u.id = i.invited_by
-             ORDER BY i.created_at DESC LIMIT 100"
-        );
+        $rows = Storage::adapter()->getAllInvitations();
     } else {
-        $stmt = $db->prepare(
-            "SELECT id, email, token, expires_at, used_at, created_at
-             FROM invitations WHERE invited_by = ?
-             ORDER BY created_at DESC LIMIT 50"
-        );
-        $stmt->execute([$userId]);
+        $rows = Storage::adapter()->getInvitationsByUser($userId);
     }
-
-    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     // Add status field
     foreach ($rows as &$row) {
@@ -185,9 +155,7 @@ if ($method === 'DELETE' && $action === 'revoke') {
         Response::error('Invite ID is required.', 400);
     }
 
-    $stmt = $db->prepare("SELECT id, invited_by, used_at FROM invitations WHERE id = ?");
-    $stmt->execute([$id]);
-    $invite = $stmt->fetch(PDO::FETCH_ASSOC);
+    $invite = Storage::adapter()->getInvitation($id);
 
     if (!$invite) {
         Response::error('Invite not found.', 404);
@@ -199,8 +167,7 @@ if ($method === 'DELETE' && $action === 'revoke') {
         Response::error('You can only revoke your own invites.', 403);
     }
 
-    $stmt = $db->prepare("DELETE FROM invitations WHERE id = ?");
-    $stmt->execute([$id]);
+    Storage::adapter()->deleteInvitation($id);
 
     Response::success(['message' => 'Invite revoked.']);
 }
@@ -226,37 +193,26 @@ if ($method === 'POST' && $action === 'request') {
     }
 
     // Rate limiting — per IP
-    $ipHash = Auth::enforceIpRateLimit($db, 'invite_request', RATE_LIMIT_INVITE_REQ, RATE_LIMIT_INVITE_REQ_WINDOW);
-    Auth::recordRateLimit($db, 'invite_request', $ipHash);
+    $ipHash = Auth::enforceIpRateLimit('invite_request', RATE_LIMIT_INVITE_REQ, RATE_LIMIT_INVITE_REQ_WINDOW);
+    Auth::recordRateLimit('invite_request', $ipHash);
 
     // Check if this email already requested (UNIQUE constraint on invite_requests.email)
-    $stmt = $db->prepare("SELECT id FROM invite_requests WHERE email = ? LIMIT 1");
-    $stmt->execute([$email]);
-    if ($stmt->fetch()) {
+    if (Storage::adapter()->checkExistingInviteRequest($email)) {
         Response::error('A request for this email has already been submitted.', 409);
     }
 
     // Check if email is already registered
-    $stmt = $db->prepare("SELECT id FROM users WHERE email = ? LIMIT 1");
-    $stmt->execute([$email]);
-    if ($stmt->fetch()) {
+    if (Storage::adapter()->checkEmailRegistered($email)) {
         Response::error('An account with this email already exists. Try signing in.', 409);
     }
 
     // Check if there's already an active invite for this email
-    $stmt = $db->prepare(
-        "SELECT id FROM invitations WHERE email = ? AND used_at IS NULL AND expires_at > NOW() LIMIT 1"
-    );
-    $stmt->execute([$email]);
-    if ($stmt->fetch()) {
+    if (Storage::adapter()->checkActiveInviteForEmail($email)) {
         Response::error('An invite has already been sent to this email. Please check your inbox.', 409);
     }
 
     // Record the request (tracks email + IP hash for audit)
-    $stmt = $db->prepare(
-        "INSERT INTO invite_requests (email, name, ip_hash) VALUES (?, ?, ?)"
-    );
-    $stmt->execute([$email, $name ?: null, $ipHash]);
+    Storage::adapter()->createInviteRequest($email, $name ?: null, $ipHash);
 
     // Send request email to admin
     $adminEmail = defined('ADMIN_EMAIL') && ADMIN_EMAIL ? ADMIN_EMAIL : '';
