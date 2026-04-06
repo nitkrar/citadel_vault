@@ -119,7 +119,7 @@ export default function ReferenceDataPage() {
   const refreshRates = async () => {
     setRefreshingRates(true);
     try {
-      await api.post('/reference.php?resource=refresh-rates');
+      await api.post('/prices.php?action=refresh', { type: 'forex', force: true });
       invalidateReferenceCache('currencies');
       await loadCurrencies();
     } catch (err) {

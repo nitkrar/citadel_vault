@@ -635,6 +635,13 @@ interface StorageAdapter {
     function getAllCachedPrices(): array;
 
     /**
+     * Get ticker symbols whose cached price is older than TTL.
+     * @param int $ttlSeconds — max age in seconds
+     * @return string[] — list of stale ticker symbols
+     */
+    function getStaleTickers(int $ttlSeconds): array;
+
+    /**
      * Clear the entire ticker price cache (admin action).
      */
     function clearPriceCache(): void;

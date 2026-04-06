@@ -7,7 +7,6 @@ require_once __DIR__ . '/../core/Response.php';
 require_once __DIR__ . '/../../config/config.php';
 require_once __DIR__ . '/../core/Auth.php';
 require_once __DIR__ . '/../core/Encryption.php';
-require_once __DIR__ . '/../core/ExchangeRates.php';
 require_once __DIR__ . '/../core/Mailer.php';
 require_once __DIR__ . '/../core/Storage.php';
 
@@ -108,13 +107,6 @@ if ($method === 'POST' && $action === 'login') {
     $authUser = Auth::issueAuthToken((int)$user['id']);
 
     try { Storage::adapter()->logAction((int)$user['id'], 'login', 'users', null, Auth::clientIpHash()); } catch (Exception $e) {}
-
-    // Once-per-day exchange rate refresh on first login of the day
-    try {
-        ExchangeRates::refreshIfStale();
-    } catch (Exception $e) {
-        // Silent failure — login must never break due to rate refresh
-    }
 
     Response::success([
         'token' => $authUser['token'],
