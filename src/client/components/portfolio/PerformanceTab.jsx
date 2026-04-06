@@ -55,6 +55,7 @@ function createSyncPlugin(peerRef, tooltipModeRef) {
 }
 
 function getGroupTotals(summary, breakdown) {
+  if (breakdown === 'none') return {};
   if (breakdown === 'type') return summary.by_type;
   if (breakdown === 'country') return summary.by_country;
   if (breakdown === 'account') return summary.by_account;
@@ -84,7 +85,7 @@ export default function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies,
   const [snapshotGroupBy, setSnapshotGroupBy] = useState('type');
   const [filterType, setFilterType] = useState('all');       // asset class filter
   const [filterCountry, setFilterCountry] = useState('all'); // country filter
-  const [breakdown, setBreakdown] = useState(() => sessionStorage.getItem('pv_portfolio_breakdown') || 'type');
+  const [breakdown, setBreakdown] = useState(() => sessionStorage.getItem('pv_portfolio_breakdown') || 'none');
   const [dateRange, setDateRange] = useState('all'); // 'all' | '3m' | '6m' | '1y' | 'ytd'
   const [showPercent, setShowPercent] = useState(false);
   const [tableExpanded, setTableExpanded] = useState(false);
@@ -366,6 +367,7 @@ export default function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies,
   // Collect all unique group keys with labels from filteredSummaryMap
   const allGroupKeys = useMemo(() => {
     const keys = new Map();
+    if (breakdown === 'none') { keys.set('__net_worth__', 'Net Worth'); return keys; }
     for (const summary of filteredSummaryMap.values()) {
       let source;
       if (breakdown === 'type') source = summary.by_type;
@@ -403,9 +405,11 @@ export default function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies,
     [...filteredSummaryMap.values()].map(s => ({
       date: s.date,
       netWorth: s.net_worth,
-      byGroup: Object.fromEntries(
-        Object.entries(getGroupTotals(s, breakdown)).map(([k, v]) => [k, v.total])
-      ),
+      byGroup: breakdown === 'none'
+        ? { __net_worth__: s.net_worth }
+        : Object.fromEntries(
+            Object.entries(getGroupTotals(s, breakdown)).map(([k, v]) => [k, v.total])
+          ),
     })).sort((a, b) => a.date.localeCompare(b.date)),
   [filteredSummaryMap, breakdown]);
 
@@ -413,12 +417,14 @@ export default function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies,
   const percentageData = useMemo(() =>
     [...filteredSummaryMap.values()].map(s => {
       const groups = getGroupTotals(s, breakdown);
-      const absSum = Object.values(groups).reduce((acc, g) => acc + Math.abs(g.total), 0);
-      if (absSum === 0) return { date: s.date, groups: {} };
+      const keys = Object.keys(groups);
+      if (keys.length === 0) return { date: s.date, groups: { __net_worth__: 100 } };
+      const absSum = keys.reduce((acc, k) => acc + Math.abs(groups[k].total), 0);
+      if (absSum === 0) return { date: s.date, groups: Object.fromEntries(keys.map(k => [k, 0])) };
       return {
         date: s.date,
         groups: Object.fromEntries(
-          Object.entries(groups).map(([k, v]) => [k, (Math.abs(v.total) / absSum) * 100])
+          keys.map(k => [k, (Math.abs(groups[k].total) / absSum) * 100])
         ),
       };
     }).sort((a, b) => a.date.localeCompare(b.date)),
@@ -432,13 +438,17 @@ export default function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies,
       const delta = s.net_worth - prev.net_worth;
       const pctDelta = prev.net_worth !== 0 ? (delta / Math.abs(prev.net_worth)) * 100 : 0;
       // Per-group deltas for breakdown-aware bar chart
-      const currGroups = getGroupTotals(s, breakdown);
-      const prevGroups = getGroupTotals(prev, breakdown);
       const byGroup = {};
-      for (const key of new Set([...Object.keys(currGroups), ...Object.keys(prevGroups)])) {
-        const curr = currGroups[key]?.total || 0;
-        const prv = prevGroups[key]?.total || 0;
-        byGroup[key] = { delta: curr - prv, pctDelta: prv !== 0 ? ((curr - prv) / Math.abs(prv)) * 100 : 0 };
+      if (breakdown === 'none') {
+        byGroup.__net_worth__ = { delta, pctDelta };
+      } else {
+        const currGroups = getGroupTotals(s, breakdown);
+        const prevGroups = getGroupTotals(prev, breakdown);
+        for (const key of new Set([...Object.keys(currGroups), ...Object.keys(prevGroups)])) {
+          const curr = currGroups[key]?.total || 0;
+          const prv = prevGroups[key]?.total || 0;
+          byGroup[key] = { delta: curr - prv, pctDelta: prv !== 0 ? ((curr - prv) / Math.abs(prv)) * 100 : 0 };
+        }
       }
       return { date: s.date, delta, pctDelta, byGroup };
     });
@@ -467,9 +477,11 @@ export default function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies,
           date: mapped.toISOString().split('T')[0],
           originalDate: s.date,
           netWorth: s.net_worth,
-          byGroup: Object.fromEntries(
-            Object.entries(getGroupTotals(s, breakdown)).map(([k, v]) => [k, v.total])
-          ),
+          byGroup: breakdown === 'none'
+            ? { __net_worth__: s.net_worth }
+            : Object.fromEntries(
+                Object.entries(getGroupTotals(s, breakdown)).map(([k, v]) => [k, v.total])
+              ),
         };
       });
 
@@ -490,8 +502,8 @@ export default function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies,
     const datasets = [];
     const hasActiveFilter = filterType !== 'all' || filterCountry !== 'all';
 
-    // Net Worth lines (if no active filter)
-    if (!hasActiveFilter) {
+    // Net Worth lines (only in 'none' breakdown, no active filter)
+    if (breakdown === 'none' && !hasActiveFilter) {
       datasets.push({
         label: `Net Worth (${currentYear})`,
         data: allDates.map(date => { const pt = currentYearData.find(d => d.date === date); return pt ? pt.netWorth : null; }),
@@ -563,7 +575,7 @@ export default function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies,
   const heroLineData = {
     labels: chartData.map(d => d.date),
     datasets: [
-      ...(!hasActiveFilter ? [{
+      ...(breakdown === 'none' && !hasActiveFilter ? [{
         label: 'Net Worth',
         data: chartData.map(d => d.netWorth),
         borderColor: NET_WORTH_COLOR,
@@ -733,6 +745,21 @@ export default function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies,
               : `${ctx.dataset.label}: ${fmtCurrency(ctx.parsed.y)}`,
         },
       },
+      zoom: {
+        pan: { enabled: true, mode: 'x' },
+        zoom: {
+          drag: {
+            enabled: true,
+            backgroundColor: 'rgba(13, 148, 136, 0.15)',
+            borderColor: 'rgba(13, 148, 136, 0.6)',
+            borderWidth: 1,
+          },
+          pinch: { enabled: true },
+          mode: 'x',
+          onZoom: () => setIsZoomed(true),
+        },
+        limits: { x: { minRange: 2 * 86400000 } },
+      },
     },
   };
 
@@ -749,13 +776,14 @@ export default function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies,
             aria-label="Breakdown"
             style={{ width: 'auto', minWidth: 0, flex: '0 1 auto', fontSize: 13 }}
             value={breakdown}
-            onChange={e => { setBreakdown(e.target.value); sessionStorage.setItem('pv_portfolio_breakdown', e.target.value); }}
+            onChange={e => { const v = e.target.value; setBreakdown(v); sessionStorage.setItem('pv_portfolio_breakdown', v); }}
           >
-            <option value="type">By Class</option>
-            <option value="country">By Country</option>
-            <option value="account">By Account</option>
-            <option value="currency">By Currency</option>
-            <option value="asset">By Asset</option>
+            <option value="none">None</option>
+            <option value="type">Asset Type</option>
+            <option value="country">Country</option>
+            <option value="account">Account</option>
+            <option value="currency">Currency</option>
+            <option value="asset">Asset</option>
           </select>
 
           {/* Values / % toggle (always visible) */}
@@ -790,7 +818,7 @@ export default function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies,
                   {/* Asset class filter */}
                   {allTypes.size > 1 && (
                     <div style={{ padding: '6px 14px' }}>
-                      <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-muted)' }}>Asset Class</span>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-muted)' }}>Asset Type</span>
                       <select className="form-control" aria-label="Asset class filter"
                         style={{ width: '100%', fontSize: 13, marginTop: 4 }}
                         value={filterType} onChange={e => setFilterType(e.target.value)}>
@@ -871,22 +899,24 @@ export default function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies,
               style={{ width: 'auto', minWidth: 140, fontSize: 13 }}
               value={breakdown}
               onChange={e => {
-                setBreakdown(e.target.value);
-                sessionStorage.setItem('pv_portfolio_breakdown', e.target.value);
+                const v = e.target.value;
+                setBreakdown(v);
+                sessionStorage.setItem('pv_portfolio_breakdown', v);
               }}
             >
-              <option value="type">By Asset Class</option>
-              <option value="country">By Country</option>
-              <option value="account">By Account</option>
-              <option value="currency">By Currency</option>
-              <option value="asset">By Asset</option>
+              <option value="none">None</option>
+              <option value="type">Asset Type</option>
+              <option value="country">Country</option>
+              <option value="account">Account</option>
+              <option value="currency">Currency</option>
+              <option value="asset">Asset</option>
             </select>
           </div>
 
           {/* Independent asset class filter */}
           {allTypes.size > 1 && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <span style={{ fontSize: 13, fontWeight: 600 }}>Asset Class:</span>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>Asset Type:</span>
               <select
                 className="form-control"
                 aria-label="Asset class filter"
