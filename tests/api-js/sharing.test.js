@@ -16,6 +16,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { api, extractData, unauthRequest, apiRequest } from '../helpers/apiClient.js';
+import { TEST_RSA_PUBLIC_KEY } from '../helpers/fixtures.js';
 
 describe('Sharing API (Redesigned)', () => {
   let testEntryId = null;
@@ -31,7 +32,7 @@ describe('Sharing API (Redesigned)', () => {
       const resp = await apiRequest('POST', '/encryption.php?action=setup-rsa', {
         role: 'regular',
         json: {
-          public_key: 'dGVzdC1wdWJsaWMta2V5LWZvci1zaGFyaW5nLXRlc3Rz',
+          public_key: TEST_RSA_PUBLIC_KEY,
           encrypted_private_key: 'dGVzdC1wcml2YXRlLWtleQ==',
         },
       });

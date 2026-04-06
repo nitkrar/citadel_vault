@@ -127,6 +127,10 @@ if ($method === 'POST' && $action === 'setup') {
         }
     }
 
+    if (!Encryption::validateRsaPublicKey($body['public_key'])) {
+        Response::error('Invalid RSA public key format.', 400);
+    }
+
     $storage->setVaultKeys($userId, [
         'vault_key_salt'         => $body['vault_key_salt'],
         'encrypted_dek'          => $body['encrypted_dek'],
@@ -238,6 +242,10 @@ if ($method === 'POST' && $action === 'setup-rsa') {
 
     if (empty($body['public_key']) || empty($body['encrypted_private_key'])) {
         Response::error('public_key and encrypted_private_key are required.', 400);
+    }
+
+    if (!Encryption::validateRsaPublicKey($body['public_key'])) {
+        Response::error('Invalid RSA public key format.', 400);
     }
 
     // Idempotency guard — reject if RSA keys already exist

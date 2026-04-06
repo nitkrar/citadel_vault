@@ -44,6 +44,19 @@ export function makeTemplate(overrides = {}) {
   };
 }
 
+/**
+ * Valid RSA-2048 OAEP public key in base64 SPKI format.
+ * Pre-generated for deterministic tests — NOT a secret.
+ */
+export const TEST_RSA_PUBLIC_KEY =
+  'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyiHQSNRd6GX7PYAI2T0E' +
+  'Q5RvTC18LqTxKmMPqDPKOZkv9aYXtedqLmxHcWAWrJCTM4brT1bg+rkA0sKvImX8' +
+  '5zt2KlSPJHvHpaLHnrrSCfnntaQGNisS9fZrbWfYlTv11DhuIzBX0hJ31XCaSnXX' +
+  'DEMFFdSXZW3q8eWkuRgMnb8gk8JJsW2sqgPFpFfV/+/fB5giy5Q6mEu1ZWzntph' +
+  'YKhbAVVPycpndyGeonlRdOu9N/riICBqTtTKyniPnZYpmLc1BcB5sVhHk4oNGK2D' +
+  'NGdsyGRsPvePEAkSlZ/I+vHZz1T/Zh3v03wX5RFGKRFHVtaGRDI8aNJGpCWz4vAY' +
+  'WlwIDAQAB';
+
 /** Snapshot v3 payload. */
 export function makeSnapshotPayload(overrides = {}) {
   return {

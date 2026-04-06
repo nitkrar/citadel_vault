@@ -191,6 +191,18 @@ describe('Encryption API', () => {
       const resp = await unauthRequest('POST', '/encryption.php?action=setup-rsa', { json: {} });
       expect(resp.status).toBe(401);
     });
+
+    it('rejects invalid RSA public key format', async () => {
+      const resp = await api.post('/encryption.php?action=setup-rsa', {
+        json: {
+          public_key: 'bm90LWEtdmFsaWQtcnNhLWtleQ==',
+          encrypted_private_key: 'dGVzdC1wcml2YXRlLWtleQ==',
+        },
+      });
+      expect(resp.status).toBe(400);
+      const body = await resp.json();
+      expect(body.error).toMatch(/Invalid RSA public key/i);
+    });
   });
 
   // ── fallback ─────────────────────────────────────────────────────
