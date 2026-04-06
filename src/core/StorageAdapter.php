@@ -196,6 +196,21 @@ interface StorageAdapter {
     function getSharesForRevoke(int $senderId, ?int $sourceEntryId, ?string $sourceType, ?int $recipientId = null): array;
 
     /**
+     * Create multiple share records in a single group (batch share).
+     * @param int $userId Sender user ID
+     * @param string $groupId UUID for the group
+     * @param array $items Array of share data arrays
+     * @return array Created share IDs
+     */
+    function createShareGroup(int $userId, string $groupId, array $items): array;
+
+    /**
+     * Revoke (delete) all shares in a group owned by the sender.
+     * @return int Number of deleted shares
+     */
+    function revokeShareGroup(int $userId, string $groupId): int;
+
+    /**
      * Count active shares for an entry by a specific sender.
      * @param int $senderId Sender user ID
      * @param int $entryId  Source entry ID

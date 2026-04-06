@@ -91,6 +91,37 @@ class Response {
     }
 
     /**
+     * Sanitize a datetime field from request body.
+     * Returns a valid YYYY-MM-DD HH:MM:SS string, YYYY-MM-DD string, or null.
+     * Accepts ISO 8601 / datetime-local formats (e.g. "2026-04-10T14:30").
+     * Empty strings and invalid values become null.
+     */
+    public static function sanitizeDateTime($input): ?string {
+        if ($input === null || $input === '') return null;
+        $trimmed = trim((string)$input);
+        if ($trimmed === '') return null;
+        // YYYY-MM-DD HH:MM:SS
+        if (preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $trimmed)) {
+            return $trimmed;
+        }
+        // YYYY-MM-DDTHH:MM:SS[.sss][Z] (ISO 8601, with optional ms/timezone)
+        if (preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z?$/', $trimmed)) {
+            $clean = preg_replace('/\.\d+/', '', $trimmed);
+            $clean = rtrim($clean, 'Z');
+            return str_replace('T', ' ', $clean);
+        }
+        // YYYY-MM-DDTHH:MM (datetime-local without seconds)
+        if (preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/', $trimmed)) {
+            return str_replace('T', ' ', $trimmed) . ':00';
+        }
+        // YYYY-MM-DD (date only — treat as start of day)
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $trimmed)) {
+            return $trimmed . ' 00:00:00';
+        }
+        return null;
+    }
+
+    /**
      * Register global exception/error handlers so uncaught exceptions
      * (e.g. PDOException from a failed INSERT) return a proper JSON error
      * instead of a raw 500 with no body.

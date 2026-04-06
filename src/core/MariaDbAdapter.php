@@ -293,7 +293,7 @@ class MariaDbAdapter implements StorageAdapter {
             'SELECT si.id, si.recipient_identifier, si.recipient_id, si.source_entry_id,
                     si.entry_type, si.source_type, si.template_id,
                     si.sync_mode, si.label, si.expires_at,
-                    si.created_at, si.updated_at,
+                    si.created_at, si.updated_at, si.share_group_id,
                     u.username AS recipient_username,
                     et.template_key, et.name AS template_name, et.icon AS template_icon,
                     et.fields AS template_fields
@@ -322,6 +322,7 @@ class MariaDbAdapter implements StorageAdapter {
                 'template'             => $this->buildTemplateObject($row),
                 'created_at'           => $row['created_at'],
                 'updated_at'           => $row['updated_at'],
+                'share_group_id'       => $row['share_group_id'] ?? null,
             ];
         }, $rows);
     }
@@ -331,7 +332,7 @@ class MariaDbAdapter implements StorageAdapter {
             'SELECT si.id, si.sender_id, si.source_entry_id, si.entry_type, si.source_type,
                     si.template_id, si.encrypted_data, si.recipient_id,
                     si.sync_mode, si.label, si.expires_at,
-                    si.created_at, si.updated_at,
+                    si.created_at, si.updated_at, si.share_group_id,
                     u.username AS sender_username,
                     et.template_key, et.name AS template_name, et.icon AS template_icon,
                     et.fields AS template_fields
@@ -360,6 +361,7 @@ class MariaDbAdapter implements StorageAdapter {
                 'template'         => $this->buildTemplateObject($row),
                 'created_at'       => $row['created_at'],
                 'updated_at'       => $row['updated_at'],
+                'share_group_id'   => $row['share_group_id'] ?? null,
             ];
         }, $rows);
     }
@@ -455,6 +457,66 @@ class MariaDbAdapter implements StorageAdapter {
             $id = $row ? (int)$row['id'] : 0;
         }
         return $id;
+    }
+
+    public function createShareGroup(int $userId, string $groupId, array $items): array {
+        $ownTransaction = !$this->db->inTransaction();
+        if ($ownTransaction) $this->db->beginTransaction();
+        try {
+            $created = [];
+            $stmt = $this->db->prepare(
+                'INSERT INTO shared_items (sender_id, recipient_identifier, recipient_id,
+                 source_entry_id, entry_type, source_type, template_id,
+                 encrypted_data, sync_mode, label, expires_at, share_group_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE
+                   encrypted_data = VALUES(encrypted_data),
+                   sync_mode = VALUES(sync_mode),
+                   label = VALUES(label),
+                   expires_at = VALUES(expires_at),
+                   share_group_id = VALUES(share_group_id)'
+            );
+            foreach ($items as $item) {
+                $stmt->execute([
+                    $userId,
+                    $item['recipient_identifier'],
+                    $item['recipient_id'],
+                    $item['source_entry_id'] ?? null,
+                    $item['entry_type'],
+                    $item['source_type'] ?? 'entry',
+                    $item['template_id'] ?? null,
+                    $item['encrypted_data'],
+                    $item['sync_mode'] ?? 'snapshot',
+                    $item['label'] ?? null,
+                    $item['expires_at'] ?? null,
+                    $groupId,
+                ]);
+                // lastInsertId returns 0 on UPDATE, so fetch the actual ID
+                $insertedId = (int)$this->db->lastInsertId();
+                if ($insertedId === 0) {
+                    // Was an update — look up the existing ID
+                    $lookup = $this->db->prepare(
+                        'SELECT id FROM shared_items WHERE sender_id = ? AND source_entry_id <=> ? AND recipient_id = ?'
+                    );
+                    $lookup->execute([$userId, $item['source_entry_id'] ?? null, $item['recipient_id']]);
+                    $insertedId = (int)$lookup->fetchColumn();
+                }
+                $created[] = $insertedId;
+            }
+            if ($ownTransaction) $this->db->commit();
+            return $created;
+        } catch (\Throwable $e) {
+            if ($ownTransaction) $this->db->rollBack();
+            throw $e;
+        }
+    }
+
+    public function revokeShareGroup(int $userId, string $groupId): int {
+        $stmt = $this->db->prepare(
+            'DELETE FROM shared_items WHERE sender_id = ? AND share_group_id = ?'
+        );
+        $stmt->execute([$userId, $groupId]);
+        return $stmt->rowCount();
     }
 
     public function updateShare(int $shareId, string $encryptedData): bool {
