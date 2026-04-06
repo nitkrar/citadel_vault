@@ -14,6 +14,7 @@ import * as cryptoLib from '../lib/crypto';
 import useVaultData from '../hooks/useVaultData';
 import usePortfolioData from '../hooks/usePortfolioData';
 import { apiData } from '../lib/checks';
+import SharedPortfolioView from '../components/portfolio/SharedPortfolioView';
 
 // ── Constants ──────────────────────────────────────────────────────────
 
@@ -92,6 +93,7 @@ export default function SharingPage() {
   const [tab, setTab] = useState('with-me');
   const [showShareModal, setShowShareModal] = useState(false);
   const [viewItem, setViewItem] = useState(null);
+  const [detailIdx, setDetailIdx] = useState(null);
 
   // Mobile header event
   useEffect(() => {
@@ -223,42 +225,65 @@ export default function SharingPage() {
 
   const { data: sharedByMe, loading: loadingByMe, refetch: refetchByMe } = useVaultData(fetchSharedByMe, []);
 
-  // ── Sorted data ─────────────────────────────────────────────────
-  const sortedSent = useMemo(() => {
-    const dir = sentSortDir === 'asc' ? 1 : -1;
-    return [...sharedByMe].sort((a, b) => {
-      let va, vb;
-      switch (sentSortKey) {
-        case 'recipient_identifier': va = a.recipient_identifier || ''; vb = b.recipient_identifier || ''; break;
-        case 'entry_type': va = a.entry_type || a.source_type || ''; vb = b.entry_type || b.source_type || ''; break;
-        case 'sync_mode': va = a.sync_mode || ''; vb = b.sync_mode || ''; break;
-        case 'label': va = a.label || ''; vb = b.label || ''; break;
-        case 'expires_at': va = a.expires_at || ''; vb = b.expires_at || ''; break;
-        default: va = a.created_at || ''; vb = b.created_at || '';
-      }
-      const sa = String(va).toLowerCase(), sb = String(vb).toLowerCase();
-      return sa < sb ? -dir : sa > sb ? dir : 0;
-    });
-  }, [sharedByMe, sentSortKey, sentSortDir]);
+  // ── Group shares by share_group_id for display (1 row per share action) ──
+  const groupedWithMe = useMemo(() => {
+    const groups = new Map();
+    for (const item of sharedWithMe) {
+      const key = item.share_group_id || `solo_${item.id}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(item);
+    }
+    return [...groups.values()];
+  }, [sharedWithMe]);
 
-  const sortedRecv = useMemo(() => {
+  const groupedByMe = useMemo(() => {
+    const groups = new Map();
+    for (const item of sharedByMe) {
+      const key = item.share_group_id || `solo_${item.id}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(item);
+    }
+    return [...groups.values()];
+  }, [sharedByMe]);
+
+  // ── Sorted groups ───────────────────────────────────────────────
+  const sortedRecvGroups = useMemo(() => {
     const dir = recvSortDir === 'asc' ? 1 : -1;
-    return [...sharedWithMe].sort((a, b) => {
+    return [...groupedWithMe].sort((a, b) => {
+      const ga = a[0], gb = b[0];
       let va, vb;
       switch (recvSortKey) {
         case 'title':
-          va = a._decrypted?.title || ''; vb = b._decrypted?.title || ''; break;
-        case 'sender_username': va = a.sender_username || ''; vb = b.sender_username || ''; break;
-        case 'entry_type': va = a.source_type || a.entry_type || ''; vb = b.source_type || b.entry_type || ''; break;
-        case 'sync_mode': va = a.sync_mode || ''; vb = b.sync_mode || ''; break;
-        case 'label': va = a.label || ''; vb = b.label || ''; break;
-        case 'expires_at': va = a.expires_at || ''; vb = b.expires_at || ''; break;
-        default: va = a.created_at || ''; vb = b.created_at || '';
+          va = ga._decrypted?.title || ''; vb = gb._decrypted?.title || ''; break;
+        case 'sender_username': va = ga.sender_username || ''; vb = gb.sender_username || ''; break;
+        case 'entry_type': va = ga.source_type || ga.entry_type || ''; vb = gb.source_type || gb.entry_type || ''; break;
+        case 'sync_mode': va = ga.sync_mode || ''; vb = gb.sync_mode || ''; break;
+        case 'label': va = ga.label || ''; vb = gb.label || ''; break;
+        case 'expires_at': va = ga.expires_at || ''; vb = gb.expires_at || ''; break;
+        default: va = ga.created_at || ''; vb = gb.created_at || '';
       }
       const sa = String(va).toLowerCase(), sb = String(vb).toLowerCase();
       return sa < sb ? -dir : sa > sb ? dir : 0;
     });
-  }, [sharedWithMe, recvSortKey, recvSortDir]);
+  }, [groupedWithMe, recvSortKey, recvSortDir]);
+
+  const sortedSentGroups = useMemo(() => {
+    const dir = sentSortDir === 'asc' ? 1 : -1;
+    return [...groupedByMe].sort((a, b) => {
+      const ga = a[0], gb = b[0];
+      let va, vb;
+      switch (sentSortKey) {
+        case 'recipient_identifier': va = ga.recipient_identifier || ''; vb = gb.recipient_identifier || ''; break;
+        case 'entry_type': va = ga.entry_type || ga.source_type || ''; vb = gb.entry_type || gb.source_type || ''; break;
+        case 'sync_mode': va = ga.sync_mode || ''; vb = gb.sync_mode || ''; break;
+        case 'label': va = ga.label || ''; vb = gb.label || ''; break;
+        case 'expires_at': va = ga.expires_at || ''; vb = gb.expires_at || ''; break;
+        default: va = ga.created_at || ''; vb = gb.created_at || '';
+      }
+      const sa = String(va).toLowerCase(), sb = String(vb).toLowerCase();
+      return sa < sb ? -dir : sa > sb ? dir : 0;
+    });
+  }, [groupedByMe, sentSortKey, sentSortDir]);
 
   // ── Open share modal ─────────────────────────────────────────────
   const openShareModal = () => {
@@ -325,10 +350,11 @@ export default function SharingPage() {
         }
         // Decrypt snapshot meta
         let meta = {};
-        try { meta = await decryptWithFallback(snap.data || snap.encrypted_data, cryptoLib.AAD_SNAPSHOT_META); } catch { /* skip */ }
+        try { meta = await decryptWithFallback(snap.data, cryptoLib.AAD_SNAPSHOT_META); } catch { /* skip */ }
         dataToShare = {
           type: 'portfolio_snapshot',
           snapshot_date: snap.snapshot_date,
+          display_currency: displayCurrency,
           meta,
           assets: decryptedEntries,
         };
@@ -354,14 +380,18 @@ export default function SharingPage() {
         const recipientPubKey = await cryptoLib.importPublicKey(public_key);
         const encryptedData = await cryptoLib.hybridEncrypt(JSON.stringify(dataToShare), recipientPubKey);
 
-        await api.post('/sharing.php?action=share', {
-          source_entry_id: null,
-          source_type: 'portfolio',
-          entry_type: 'portfolio',
+        await api.post('/sharing.php?action=share-group', {
+          recipient_token,
+          identifier: form.recipient.trim(),
           sync_mode: form.sync_mode,
           label: form.label.trim() || null,
           expires_at: form.expires_at || null,
-          recipients: [{ recipient_token, encrypted_data: encryptedData, identifier: form.recipient.trim() }],
+          items: [{
+            source_entry_id: null,
+            source_type: 'portfolio',
+            entry_type: 'portfolio',
+            encrypted_data: encryptedData,
+          }],
         });
 
         setShowShareModal(false);
@@ -391,22 +421,25 @@ export default function SharingPage() {
         }
       }
 
-      // Encrypt and POST each item
+      // Build all items
+      const items = [];
       for (const id of itemIds) {
         const entry = entries.find(en => en.id === id);
         const plainData = decryptedCache[id];
         if (!plainData || !entry) continue;
         const encryptedData = await cryptoLib.hybridEncrypt(JSON.stringify(plainData), recipientPubKey);
-
-        await api.post('/sharing.php?action=share', {
-          source_entry_id: id,
-          source_type: entry.entry_type,
-          sync_mode: form.sync_mode,
-          label: form.label.trim() || null,
-          expires_at: form.expires_at || null,
-          recipients: [{ recipient_token, encrypted_data: encryptedData, identifier: form.recipient.trim() }],
-        });
+        items.push({ source_entry_id: id, encrypted_data: encryptedData });
       }
+      if (items.length === 0) { setShareError('No items to share.'); setSharing(false); return; }
+
+      await api.post('/sharing.php?action=share-group', {
+        recipient_token,
+        identifier: form.recipient.trim(),
+        sync_mode: form.sync_mode,
+        label: form.label.trim() || null,
+        expires_at: form.expires_at || null,
+        items,
+      });
 
       setShowShareModal(false);
       setForm({ ...defaultForm });
@@ -421,13 +454,21 @@ export default function SharingPage() {
   };
 
   // ── Revoke ───────────────────────────────────────────────────────
-  const handleRevoke = async (share) => {
+  const handleRevoke = async (group) => {
     if (!window.confirm('Revoke this share?')) return;
+    const groupId = group[0]?.share_group_id;
     try {
-      await api.post('/sharing.php?action=revoke', {
-        source_entry_id: share.source_entry_id,
-        user_ids: share.recipient_id ? [share.recipient_id] : [],
-      });
+      if (groupId) {
+        await api.post('/sharing.php?action=revoke-group', { share_group_id: groupId });
+      } else {
+        // Legacy: revoke individual share
+        const item = group[0];
+        await api.post('/sharing.php?action=revoke', {
+          source_entry_id: item.source_entry_id,
+          source_type: item.source_type,
+          user_ids: item.recipient_id ? [item.recipient_id] : [],
+        });
+      }
       refetchByMe();
     } catch (err) {
       alert(err.response?.data?.error || 'Revoke failed.');
@@ -476,32 +517,42 @@ export default function SharingPage() {
               <SortTh sortKey="title" current={recvSortKey} dir={recvSortDir} onSort={toggleRecvSort}>Title</SortTh>
               <SortTh sortKey="sender_username" current={recvSortKey} dir={recvSortDir} onSort={toggleRecvSort}>From</SortTh>
               <SortTh sortKey="entry_type" current={recvSortKey} dir={recvSortDir} onSort={toggleRecvSort}>Type</SortTh>
+              <th>Items</th>
               <SortTh sortKey="sync_mode" current={recvSortKey} dir={recvSortDir} onSort={toggleRecvSort}>Sync</SortTh>
               <SortTh sortKey="label" current={recvSortKey} dir={recvSortDir} onSort={toggleRecvSort}>Label</SortTh>
               <SortTh sortKey="expires_at" current={recvSortKey} dir={recvSortDir} onSort={toggleRecvSort}>Expiry</SortTh>
               <SortTh sortKey="created_at" current={recvSortKey} dir={recvSortDir} onSort={toggleRecvSort}>Shared</SortTh>
               <th>Actions</th>
             </tr></thead>
-            <tbody>{sortedRecv.map(item => (
-              <tr key={item.id}>
-                <td className="font-medium">
-                  {item._decrypted?.type?.startsWith('portfolio_')
-                    ? `Portfolio (${item._decrypted.type.replace('portfolio_', '')})`
-                    : (item._decrypted?.title || '(encrypted)')}
-                </td>
-                <td>{item.sender_username || 'Unknown'}</td>
-                <td>{renderTypeBadge(item.source_type || item.entry_type)}</td>
-                <td>{renderSyncBadge(item.sync_mode)}</td>
-                <td>{item.label || <span className="text-muted" style={{ fontSize: 12 }}>—</span>}</td>
-                <td>{renderExpiryBadge(item.expires_at)}</td>
-                <td style={{ fontSize: 13 }}>{new Date(item.created_at).toLocaleDateString()}</td>
-                <td>
-                  <button className="btn btn-ghost btn-sm" onClick={() => setViewItem(item)}>
-                    <Eye size={14} /> View
-                  </button>
-                </td>
-              </tr>
-            ))}</tbody>
+            <tbody>{sortedRecvGroups.map(group => {
+              const first = group[0];
+              const isPortfolio = first._decrypted?.type?.startsWith('portfolio_');
+              let title;
+              if (isPortfolio) {
+                title = `Portfolio (${first._decrypted.type.replace('portfolio_', '')})`;
+              } else if (group.length === 1) {
+                title = first._decrypted?.title || '(encrypted)';
+              } else {
+                title = `${first._decrypted?.title || '(encrypted)'} (+${group.length - 1} more)`;
+              }
+              return (
+                <tr key={first.share_group_id || first.id}>
+                  <td className="font-medium">{title}</td>
+                  <td>{first.sender_username || 'Unknown'}</td>
+                  <td>{renderTypeBadge(first.source_type || first.entry_type)}</td>
+                  <td>{group.length}</td>
+                  <td>{renderSyncBadge(first.sync_mode)}</td>
+                  <td>{first.label || <span className="text-muted" style={{ fontSize: 12 }}>—</span>}</td>
+                  <td>{renderExpiryBadge(first.expires_at)}</td>
+                  <td style={{ fontSize: 13 }}>{new Date(first.created_at).toLocaleDateString()}</td>
+                  <td>
+                    <button className="btn btn-ghost btn-sm" onClick={() => { setDetailIdx(null); setViewItem(group); }}>
+                      <Eye size={14} /> View
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}</tbody>
           </table></div></div>
         )
       )}
@@ -516,23 +567,28 @@ export default function SharingPage() {
             <thead><tr>
               <SortTh sortKey="recipient_identifier" current={sentSortKey} dir={sentSortDir} onSort={toggleSentSort}>Recipient</SortTh>
               <SortTh sortKey="entry_type" current={sentSortKey} dir={sentSortDir} onSort={toggleSentSort}>Type</SortTh>
+              <th>Items</th>
               <SortTh sortKey="sync_mode" current={sentSortKey} dir={sentSortDir} onSort={toggleSentSort}>Sync</SortTh>
               <SortTh sortKey="label" current={sentSortKey} dir={sentSortDir} onSort={toggleSentSort}>Label</SortTh>
               <SortTh sortKey="expires_at" current={sentSortKey} dir={sentSortDir} onSort={toggleSentSort}>Expiry</SortTh>
               <SortTh sortKey="created_at" current={sentSortKey} dir={sentSortDir} onSort={toggleSentSort}>Shared</SortTh>
               <th>Actions</th>
             </tr></thead>
-            <tbody>{sortedSent.map(item => (
-              <tr key={item.id}>
-                <td>{item.recipient_identifier}</td>
-                <td>{renderTypeBadge(item.source_type || item.entry_type)}</td>
-                <td>{renderSyncBadge(item.sync_mode)}</td>
-                <td>{item.label || <span className="text-muted" style={{ fontSize: 12 }}>—</span>}</td>
-                <td>{renderExpiryBadge(item.expires_at)}</td>
-                <td style={{ fontSize: 13 }}>{new Date(item.created_at).toLocaleDateString()}</td>
-                <td><button className="btn btn-ghost btn-sm text-danger" onClick={() => handleRevoke(item)}><Trash2 size={14} /> Revoke</button></td>
-              </tr>
-            ))}</tbody>
+            <tbody>{sortedSentGroups.map(group => {
+              const first = group[0];
+              return (
+                <tr key={first.share_group_id || first.id}>
+                  <td>{first.recipient_identifier}</td>
+                  <td>{renderTypeBadge(first.source_type || first.entry_type)}</td>
+                  <td>{group.length}</td>
+                  <td>{renderSyncBadge(first.sync_mode)}</td>
+                  <td>{first.label || <span className="text-muted" style={{ fontSize: 12 }}>—</span>}</td>
+                  <td>{renderExpiryBadge(first.expires_at)}</td>
+                  <td style={{ fontSize: 13 }}>{new Date(first.created_at).toLocaleDateString()}</td>
+                  <td><button className="btn btn-ghost btn-sm text-danger" onClick={() => handleRevoke(group)}><Trash2 size={14} /> Revoke</button></td>
+                </tr>
+              );
+            })}</tbody>
           </table></div></div>
         )
       )}
@@ -804,30 +860,36 @@ export default function SharingPage() {
       {/* ── Detail Modal (received shares) ───────────────────────── */}
       <Modal
         isOpen={!!viewItem}
-        onClose={() => setViewItem(null)}
-        title={viewItem?._decrypted?.type?.startsWith('portfolio_')
-          ? 'Portfolio Share'
-          : (viewItem?._decrypted?.title || 'Shared Entry')}
+        onClose={() => { setViewItem(null); setDetailIdx(null); }}
+        title={
+          viewItem?.[0]?._decrypted?.type?.startsWith('portfolio_')
+            ? 'Portfolio Share'
+            : viewItem?.length > 1
+              ? `Shared Entries (${viewItem.length})`
+              : (viewItem?.[0]?._decrypted?.title || 'Shared Entry')
+        }
+        size={viewItem?.[0]?._decrypted?.type?.startsWith('portfolio_') ? 'lg' : undefined}
       >
         {viewItem && (() => {
-          const d = viewItem._decrypted;
+          const primary = viewItem[0];
+          const d = primary._decrypted;
           if (!d) return <p className="text-muted">Unable to decrypt this entry.</p>;
 
           const header = (
             <div style={{ marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>
               <div className="flex items-center gap-2 mb-1">
-                <span className="badge">{viewItem.source_type || viewItem.entry_type}</span>
-                {renderSyncBadge(viewItem.sync_mode)}
-                <span className={`badge ${viewItem.status === 'pending' ? 'badge-warning' : 'badge-success'}`}>
-                  {viewItem.status === 'pending' ? 'Pending' : 'Active'}
+                <span className="badge">{primary.source_type || primary.entry_type}</span>
+                {renderSyncBadge(primary.sync_mode)}
+                <span className={`badge ${primary.status === 'pending' ? 'badge-warning' : 'badge-success'}`}>
+                  {primary.status === 'pending' ? 'Pending' : 'Active'}
                 </span>
               </div>
               <div className="text-muted" style={{ fontSize: 13 }}>
-                Shared by <strong>{viewItem.sender_username || 'Unknown'}</strong> on {new Date(viewItem.created_at).toLocaleDateString()}
+                Shared by <strong>{primary.sender_username || 'Unknown'}</strong> on {new Date(primary.created_at).toLocaleDateString()}
               </div>
-              {viewItem.label && (
+              {primary.label && (
                 <div className="text-muted" style={{ fontSize: 13, marginTop: 4 }}>
-                  Label: <strong>{viewItem.label}</strong>
+                  Label: <strong>{primary.label}</strong>
                 </div>
               )}
             </div>
@@ -835,129 +897,68 @@ export default function SharingPage() {
 
           // Portfolio share rendering
           if (d.type && d.type.startsWith('portfolio_')) {
-            const fmtVal = (v) => typeof v === 'number'
-              ? v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-              : String(v ?? '');
-            const cur = d.display_currency || '';
-
             return (
               <>
                 {header}
-                {d.snapshot_date && (
-                  <div className="text-muted" style={{ fontSize: 13, marginBottom: 12 }}>
-                    Snapshot date: <strong>{new Date(d.snapshot_date).toLocaleDateString()}</strong>
-                    {d.type === 'portfolio_snapshot' ? ' (Saved)' : ''}
-                  </div>
-                )}
-
-                {/* Summary tiles */}
-                {d.summary && (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 8, marginBottom: 16 }}>
-                    {[
-                      { label: 'Net Worth', val: d.summary.net_worth },
-                      { label: 'Total Assets', val: d.summary.total_assets },
-                      { label: 'Total Liabilities', val: d.summary.total_liabilities },
-                      { label: 'Asset Count', val: d.summary.asset_count },
-                    ].map(tile => (
-                      <div key={tile.label} className="card" style={{ padding: '10px 12px', textAlign: 'center' }}>
-                        <div className="text-muted" style={{ fontSize: 11 }}>{tile.label}</div>
-                        <div style={{ fontWeight: 600, fontSize: 14 }}>
-                          {tile.label === 'Asset Count' ? tile.val : `${cur} ${fmtVal(tile.val)}`}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Meta for saved snapshots */}
-                {d.meta && typeof d.meta === 'object' && Object.keys(d.meta).length > 0 && !d.summary && (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 8, marginBottom: 16 }}>
-                    {Object.entries(d.meta).filter(([k]) => typeof d.meta[k] === 'number').map(([k, v]) => (
-                      <div key={k} className="card" style={{ padding: '10px 12px', textAlign: 'center' }}>
-                        <div className="text-muted" style={{ fontSize: 11, textTransform: 'capitalize' }}>{k.replace(/_/g, ' ')}</div>
-                        <div style={{ fontWeight: 600, fontSize: 14 }}>{fmtVal(v)}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Assets table */}
-                {d.assets && d.assets.length > 0 && (
-                  <div style={{ marginBottom: 16 }}>
-                    <label className="form-label" style={{ marginBottom: 8 }}>Assets ({d.assets.length})</label>
-                    <div className="table-wrapper">
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>Name</th>
-                            <th style={{ textAlign: 'right' }}>Value</th>
-                            <th>Type</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {d.assets.map((a, i) => (
-                            <tr key={i}>
-                              <td className="font-medium">{a.name || a.title || `Asset ${i + 1}`}</td>
-                              <td style={{ textAlign: 'right' }}>
-                                {a.currency || cur} {fmtVal(a.displayValue ?? a.rawValue ?? a.raw_value ?? '')}
-                                {a.is_liability && <span className="badge badge-danger" style={{ marginLeft: 4, fontSize: 10 }}>Liability</span>}
-                              </td>
-                              <td><span className="text-muted" style={{ fontSize: 12 }}>{a.subtype || a.template_name || ''}</span></td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-
-                {/* By country breakdown */}
-                {d.by_country && Object.keys(d.by_country).length > 0 && (
-                  <div style={{ marginBottom: 16 }}>
-                    <label className="form-label" style={{ marginBottom: 8 }}>By Country</label>
-                    <div className="table-wrapper">
-                      <table>
-                        <thead><tr><th>Country</th><th style={{ textAlign: 'right' }}>Total</th><th style={{ textAlign: 'right' }}>Count</th></tr></thead>
-                        <tbody>
-                          {Object.entries(d.by_country).map(([country, data]) => (
-                            <tr key={country}>
-                              <td>{country}</td>
-                              <td style={{ textAlign: 'right' }}>{cur} {fmtVal(data.total)}</td>
-                              <td style={{ textAlign: 'right' }}>{data.count}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-
-                {/* By type breakdown */}
-                {d.by_type && Object.keys(d.by_type).length > 0 && (
-                  <div style={{ marginBottom: 16 }}>
-                    <label className="form-label" style={{ marginBottom: 8 }}>By Type</label>
-                    <div className="table-wrapper">
-                      <table>
-                        <thead><tr><th>Type</th><th style={{ textAlign: 'right' }}>Total</th><th style={{ textAlign: 'right' }}>Count</th></tr></thead>
-                        <tbody>
-                          {Object.entries(d.by_type).map(([type, data]) => (
-                            <tr key={type}>
-                              <td style={{ textTransform: 'capitalize' }}>{data.label || type}</td>
-                              <td style={{ textAlign: 'right' }}>{cur} {fmtVal(data.total)}</td>
-                              <td style={{ textAlign: 'right' }}>{data.count}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
+                <SharedPortfolioView data={d} />
               </>
             );
           }
 
-          // Standard entry rendering
-          const tplFields = viewItem.template?.fields;
+          // Multi-entry bundle: show list or detail
+          if (viewItem.length > 1) {
+            if (detailIdx !== null) {
+              const item = viewItem[detailIdx];
+              const itemData = item?._decrypted;
+              if (!itemData) return <p className="text-muted">Unable to decrypt this entry.</p>;
+
+              const tplFields = item.template?.fields;
+              const fields = !tplFields ? [] : (typeof tplFields === 'string' ? JSON.parse(tplFields) : tplFields);
+
+              return (
+                <>
+                  {header}
+                  <button className="btn btn-ghost btn-sm mb-3" onClick={() => setDetailIdx(null)}>
+                    <X size={14} /> Back to list
+                  </button>
+                  <h4 style={{ marginBottom: 12 }}>{itemData.title || `Entry ${detailIdx + 1}`}</h4>
+                  {fields.length === 0 ? (
+                    Object.entries(itemData).map(([k, v]) => (
+                      <div key={k} className="form-group">
+                        <label className="form-label" style={{ textTransform: 'capitalize' }}>{k.replace(/_/g, ' ')}</label>
+                        <div className="form-control-static">{typeof v === 'string' ? v : JSON.stringify(v)}</div>
+                      </div>
+                    ))
+                  ) : (
+                    fields.map(field => {
+                      const val = itemData[field.key];
+                      if (val === undefined || val === null || val === '') return null;
+                      return <FieldDisplay key={field.key} field={field} value={String(val)} />;
+                    })
+                  )}
+                </>
+              );
+            }
+
+            return (
+              <>
+                {header}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {viewItem.map((item, i) => (
+                    <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', borderRadius: 6, background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+                      <span className="font-medium">{item._decrypted?.title || `Entry ${i + 1}`}</span>
+                      <button className="btn btn-ghost btn-sm" onClick={() => setDetailIdx(i)}>
+                        <Eye size={14} /> View
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            );
+          }
+
+          // Single entry rendering
+          const tplFields = primary.template?.fields;
           const fields = !tplFields ? [] : (typeof tplFields === 'string' ? JSON.parse(tplFields) : tplFields);
 
           if (fields.length === 0) {

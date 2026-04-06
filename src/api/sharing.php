@@ -85,6 +85,130 @@ if ($method === 'GET' && $action === 'recipient-key') {
 }
 
 // ---------------------------------------------------------------------------
+// POST ?action=share-group — Create multiple share records in one group
+// Single recipient, multiple items (entries + portfolio) in one batch.
+// ---------------------------------------------------------------------------
+if ($method === 'POST' && $action === 'share-group') {
+    $body = Response::getBody();
+    $token      = $body['recipient_token'] ?? '';
+    $identifier = trim($body['identifier'] ?? '');
+    $syncMode   = $body['sync_mode'] ?? 'snapshot';
+    $label      = isset($body['label']) && $body['label'] !== '' ? $body['label'] : null;
+    $expiresAt  = Response::sanitizeDateTime($body['expires_at'] ?? null);
+    $items      = $body['items'] ?? [];
+
+    if (empty($token)) {
+        Response::error('recipient_token is required.', 400);
+    }
+    if (!is_array($items) || empty($items)) {
+        Response::error('items array is required and must not be empty.', 400);
+    }
+    if (count($items) > 100) {
+        Response::error('Maximum 100 items per share group.', 400);
+    }
+    if (!in_array($syncMode, ['snapshot', 'continuous'], true)) {
+        $syncMode = 'snapshot';
+    }
+
+    // Validate signed token — extracts recipient_id, checks HMAC + expiry
+    $recipientId = SharingToken::validate($token);
+    if ($recipientId === null) {
+        Response::error('Invalid or expired recipient token.', 400);
+    }
+
+    // Self-share check
+    if ($recipientId === $userId) {
+        Response::error('Cannot share with yourself.', 400);
+    }
+
+    // Resolve display identifier
+    if ($recipientId !== 0) {
+        $recipientUsername = $storage->getUsernameById($recipientId);
+        $identifier = $recipientUsername ?: ($identifier ?: 'unknown');
+    } elseif (!$identifier) {
+        $identifier = 'unknown';
+    }
+
+    // Generate group ID
+    $groupId = bin2hex(random_bytes(18));
+
+    // Build items array
+    $builtItems = [];
+    foreach ($items as $item) {
+        $encryptedData  = $item['encrypted_data'] ?? '';
+        $sourceEntryId  = isset($item['source_entry_id']) ? (int)$item['source_entry_id'] : null;
+
+        if (empty($encryptedData)) {
+            Response::error('Each item must have encrypted_data.', 400);
+        }
+
+        if ($sourceEntryId) {
+            // Entry-based share — verify sender owns the entry
+            $entry = $storage->getEntry($userId, $sourceEntryId);
+            if (!$entry) {
+                Response::error('Entry not found: ' . $sourceEntryId, 404);
+            }
+            $builtItems[] = [
+                'recipient_identifier' => $identifier,
+                'recipient_id'         => $recipientId,
+                'source_entry_id'      => $sourceEntryId,
+                'entry_type'           => $entry['entry_type'],
+                'source_type'          => 'entry',
+                'template_id'          => $entry['template_id'] ?? null,
+                'encrypted_data'       => $encryptedData,
+                'sync_mode'            => $syncMode,
+                'label'                => $label,
+                'expires_at'           => $expiresAt,
+            ];
+        } else {
+            // Portfolio or other non-entry share
+            $builtItems[] = [
+                'recipient_identifier' => $identifier,
+                'recipient_id'         => $recipientId,
+                'source_entry_id'      => null,
+                'entry_type'           => $item['entry_type'] ?? 'portfolio',
+                'source_type'          => $item['source_type'] ?? 'portfolio',
+                'template_id'          => null,
+                'encrypted_data'       => $encryptedData,
+                'sync_mode'            => $syncMode,
+                'label'                => $label,
+                'expires_at'           => $expiresAt,
+            ];
+        }
+    }
+
+    $shareIds = $storage->createShareGroup($userId, $groupId, $builtItems);
+
+    $ipHash = Auth::clientIpHash();
+    $storage->logAction($userId, 'share_created', null, null, $ipHash);
+
+    Response::success([
+        'share_group_id' => $groupId,
+        'share_ids'      => $shareIds,
+        'count'          => count($shareIds),
+    ]);
+}
+
+// ---------------------------------------------------------------------------
+// POST ?action=revoke-group — Revoke all shares in a group
+// ---------------------------------------------------------------------------
+if ($method === 'POST' && $action === 'revoke-group') {
+    $body = Response::getBody();
+    $groupId = $body['share_group_id'] ?? '';
+
+    if (empty($groupId)) {
+        Response::error('share_group_id is required.', 400);
+    }
+
+    $revoked = $storage->revokeShareGroup($userId, $groupId);
+
+    $ipHash = Auth::clientIpHash();
+    $storage->logAction($userId, 'share_revoked', null, null, $ipHash);
+
+    Response::success(['revoked' => $revoked]);
+}
+
+// ---------------------------------------------------------------------------
 // POST ?action=share — Batch share entry with recipients (token-based)
 // Accepts signed recipient_token from recipient-key, not raw identifiers.
 // Upserts: re-sharing with same recipient updates the encrypted blob.
@@ -99,7 +223,7 @@ if ($method === 'POST' && $action === 'share') {
     // New share fields (top-level, apply to all recipients in this batch)
     $syncMode   = $body['sync_mode'] ?? 'snapshot';
     $label      = isset($body['label']) && $body['label'] !== '' ? $body['label'] : null;
-    $expiresAt  = isset($body['expires_at']) && $body['expires_at'] !== '' ? $body['expires_at'] : null;
+    $expiresAt  = Response::sanitizeDateTime($body['expires_at'] ?? null);
 
     // Validate sync_mode
     if (!in_array($syncMode, ['snapshot', 'continuous'], true)) {

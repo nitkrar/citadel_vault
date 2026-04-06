@@ -315,6 +315,7 @@ class InMemoryAdapter implements StorageAdapter {
                 'template'             => $this->findTemplate($s['template_id'] ?? null),
                 'created_at'           => $s['created_at'],
                 'updated_at'           => $s['updated_at'],
+                'share_group_id'       => $s['share_group_id'] ?? null,
             ];
         }, array_values($results));
     }
@@ -347,6 +348,7 @@ class InMemoryAdapter implements StorageAdapter {
                 'template'        => $this->findTemplate($s['template_id'] ?? null),
                 'created_at'      => $s['created_at'],
                 'updated_at'      => $s['updated_at'],
+                'share_group_id'  => $s['share_group_id'] ?? null,
             ];
         }, array_values($results));
     }
@@ -391,6 +393,70 @@ class InMemoryAdapter implements StorageAdapter {
         }
         // No existing — create new
         return $this->createShare($shareData);
+    }
+
+    public function createShareGroup(int $userId, string $groupId, array $items): array {
+        $created = [];
+        foreach ($items as $item) {
+            $sourceEntryId = $item['source_entry_id'] ?? null;
+            $recipientId   = $item['recipient_id'];
+            $now = date('Y-m-d H:i:s');
+
+            // Check for existing share with same (sender, source_entry, recipient)
+            $existingId = null;
+            foreach ($this->sharedItems as $id => $existing) {
+                if ($existing['sender_id'] === $userId
+                    && $existing['source_entry_id'] === $sourceEntryId
+                    && $existing['recipient_id'] === $recipientId) {
+                    $existingId = $id;
+                    break;
+                }
+            }
+
+            if ($existingId !== null) {
+                // Update existing — mirror MariaDB ON DUPLICATE KEY UPDATE behavior
+                $this->sharedItems[$existingId]['encrypted_data'] = $item['encrypted_data'];
+                $this->sharedItems[$existingId]['sync_mode'] = $item['sync_mode'] ?? 'snapshot';
+                $this->sharedItems[$existingId]['label'] = $item['label'] ?? null;
+                $this->sharedItems[$existingId]['expires_at'] = $item['expires_at'] ?? null;
+                $this->sharedItems[$existingId]['share_group_id'] = $groupId;
+                $this->sharedItems[$existingId]['updated_at'] = $now;
+                $created[] = $existingId;
+            } else {
+                // Insert new record
+                $id = ++$this->shareSeq;
+                $this->sharedItems[$id] = [
+                    'id'                   => $id,
+                    'sender_id'            => $userId,
+                    'recipient_identifier' => $item['recipient_identifier'],
+                    'recipient_id'         => $recipientId,
+                    'source_entry_id'      => $sourceEntryId,
+                    'entry_type'           => $item['entry_type'],
+                    'source_type'          => $item['source_type'] ?? 'entry',
+                    'template_id'          => $item['template_id'] ?? null,
+                    'encrypted_data'       => $item['encrypted_data'],
+                    'sync_mode'            => $item['sync_mode'] ?? 'snapshot',
+                    'label'                => $item['label'] ?? null,
+                    'expires_at'           => $item['expires_at'] ?? null,
+                    'share_group_id'       => $groupId,
+                    'created_at'           => $now,
+                    'updated_at'           => $now,
+                ];
+                $created[] = $id;
+            }
+        }
+        return $created;
+    }
+
+    public function revokeShareGroup(int $userId, string $groupId): int {
+        $count = 0;
+        foreach ($this->sharedItems as $id => $item) {
+            if ($item['sender_id'] === $userId && ($item['share_group_id'] ?? null) === $groupId) {
+                unset($this->sharedItems[$id]);
+                $count++;
+            }
+        }
+        return $count;
     }
 
     public function updateShare(int $shareId, string $encryptedData): bool {

@@ -1006,6 +1006,221 @@ describe('Sharing API (Redesigned)', () => {
     });
   });
 
+  // ── Batch sharing (share-group) ──────────────────────────────────────────
+  describe('Batch sharing (share-group)', () => {
+    let batchEntryId1 = null;
+    let batchEntryId2 = null;
+    let batchGroupId = null;
+
+    // Create test entries for batch tests
+    beforeAll(async () => {
+      const [resp1, resp2] = await Promise.all([
+        api.post('/vault.php', {
+          json: { entry_type: 'password', template_id: 1, encrypted_data: 'YmF0Y2gtZW50cnktMQ==' },
+        }),
+        api.post('/vault.php', {
+          json: { entry_type: 'password', template_id: 1, encrypted_data: 'YmF0Y2gtZW50cnktMg==' },
+        }),
+      ]);
+      if (resp1.status === 201) {
+        batchEntryId1 = (await extractData(resp1)).id;
+      }
+      if (resp2.status === 201) {
+        batchEntryId2 = (await extractData(resp2)).id;
+      }
+    });
+
+    afterAll(async () => {
+      // Cleanup entries (revoke any remaining shares first)
+      for (const eid of [batchEntryId1, batchEntryId2]) {
+        if (eid) {
+          await api.post('/sharing.php?action=revoke', { json: { source_entry_id: eid } });
+          await api.delete(`/vault.php?id=${eid}`);
+        }
+      }
+    });
+
+    it('batch share creates grouped records', async () => {
+      expect(batchEntryId1).toBeTruthy();
+
+      // Get recipient token
+      const keyResp = await api.get('/sharing.php?action=recipient-key&identifier=test_regular_user');
+      expect(keyResp.status).toBe(200);
+      const keyData = await extractData(keyResp);
+      const token = keyData.recipient_token;
+
+      // POST share-group with one entry
+      const resp = await api.post('/sharing.php?action=share-group', {
+        json: {
+          recipient_token: token,
+          identifier: 'test_regular_user',
+          items: [
+            {
+              source_entry_id: batchEntryId1,
+              encrypted_data: btoa(JSON.stringify({ title: 'Batch test 1' })),
+            },
+          ],
+        },
+      });
+      expect(resp.status).toBe(200);
+      const data = await extractData(resp);
+      expect(data).toHaveProperty('share_group_id');
+      expect(data).toHaveProperty('count', 1);
+      expect(data.share_group_id).toBeTruthy();
+
+      // Verify the share appears in shared-by-me with share_group_id
+      const byMeResp = await api.get('/sharing.php?action=shared-by-me');
+      const byMeData = await extractData(byMeResp);
+      const grouped = byMeData.find(
+        s => Number(s.source_entry_id) === Number(batchEntryId1) && s.share_group_id,
+      );
+      expect(grouped).toBeDefined();
+      expect(grouped.share_group_id).toBe(data.share_group_id);
+
+      // Cleanup this share so it doesn't interfere with later tests
+      await api.post('/sharing.php?action=revoke-group', {
+        json: { share_group_id: data.share_group_id },
+      });
+    });
+
+    it('batch share with multiple items shows same group_id', async () => {
+      expect(batchEntryId1).toBeTruthy();
+      expect(batchEntryId2).toBeTruthy();
+
+      const keyResp = await api.get('/sharing.php?action=recipient-key&identifier=test_regular_user');
+      expect(keyResp.status).toBe(200);
+      const keyData = await extractData(keyResp);
+      const token = keyData.recipient_token;
+
+      // POST share-group with two items
+      const resp = await api.post('/sharing.php?action=share-group', {
+        json: {
+          recipient_token: token,
+          identifier: 'test_regular_user',
+          items: [
+            { source_entry_id: batchEntryId1, encrypted_data: btoa('item-one') },
+            { source_entry_id: batchEntryId2, encrypted_data: btoa('item-two') },
+          ],
+        },
+      });
+      expect(resp.status).toBe(200);
+      const data = await extractData(resp);
+      expect(data).toHaveProperty('share_group_id');
+      expect(data).toHaveProperty('count', 2);
+      expect(data.share_ids).toHaveLength(2);
+      batchGroupId = data.share_group_id;
+
+      // Verify both shares have the same share_group_id in shared-by-me
+      const byMeResp = await api.get('/sharing.php?action=shared-by-me');
+      const byMeData = await extractData(byMeResp);
+      const groupedShares = byMeData.filter(s => s.share_group_id === batchGroupId);
+      expect(groupedShares).toHaveLength(2);
+      const entryIds = groupedShares.map(s => Number(s.source_entry_id)).sort();
+      expect(entryIds).toEqual([batchEntryId1, batchEntryId2].sort());
+    });
+
+    it('revoke-group deletes all shares in group', async () => {
+      // batchGroupId was set in the previous test
+      expect(batchGroupId).toBeTruthy();
+
+      // Revoke the group
+      const resp = await api.post('/sharing.php?action=revoke-group', {
+        json: { share_group_id: batchGroupId },
+      });
+      expect(resp.status).toBe(200);
+      const data = await extractData(resp);
+      expect(data).toHaveProperty('revoked', 2);
+
+      // Verify both shares are gone from shared-by-me
+      const byMeResp = await api.get('/sharing.php?action=shared-by-me');
+      const byMeData = await extractData(byMeResp);
+      const remaining = byMeData.filter(s => s.share_group_id === batchGroupId);
+      expect(remaining).toHaveLength(0);
+    });
+
+    it('batch share with portfolio item (null source_entry_id)', async () => {
+      const keyResp = await api.get('/sharing.php?action=recipient-key&identifier=test_regular_user');
+      expect(keyResp.status).toBe(200);
+      const keyData = await extractData(keyResp);
+      const token = keyData.recipient_token;
+
+      const resp = await api.post('/sharing.php?action=share-group', {
+        json: {
+          recipient_token: token,
+          identifier: 'test_regular_user',
+          items: [
+            {
+              source_entry_id: null,
+              source_type: 'portfolio',
+              entry_type: 'portfolio',
+              encrypted_data: btoa(JSON.stringify({ title: 'Portfolio batch' })),
+            },
+          ],
+        },
+      });
+      expect(resp.status).toBe(200);
+      const data = await extractData(resp);
+      expect(data).toHaveProperty('share_group_id');
+      expect(data).toHaveProperty('count', 1);
+      expect(data.share_group_id).toBeTruthy();
+
+      // Cleanup
+      await api.post('/sharing.php?action=revoke-group', {
+        json: { share_group_id: data.share_group_id },
+      });
+    });
+
+    it('rejects empty items array', async () => {
+      const keyResp = await api.get('/sharing.php?action=recipient-key&identifier=test_regular_user');
+      const keyData = await extractData(keyResp);
+
+      const resp = await api.post('/sharing.php?action=share-group', {
+        json: {
+          recipient_token: keyData.recipient_token,
+          items: [],
+        },
+      });
+      expect(resp.status).toBe(400);
+    });
+
+    it('rejects invalid recipient token', async () => {
+      const resp = await api.post('/sharing.php?action=share-group', {
+        json: {
+          recipient_token: 'invalid',
+          items: [
+            { source_entry_id: batchEntryId1, encrypted_data: btoa('data') },
+          ],
+        },
+      });
+      expect(resp.status).toBe(400);
+    });
+
+    it('blocks self-sharing', async () => {
+      // Admin trying to share with themselves — recipient-key blocks this
+      const resp = await api.get('/sharing.php?action=recipient-key&identifier=initial_user');
+      expect(resp.status).toBe(400);
+      const body = await resp.json();
+      expect(body.error || body.message).toMatch(/yourself/i);
+    });
+
+    it('POST share-group returns 401 without auth', async () => {
+      const resp = await unauthRequest('POST', '/sharing.php?action=share-group', {
+        json: {
+          recipient_token: 'any',
+          items: [{ source_entry_id: 1, encrypted_data: 'blob' }],
+        },
+      });
+      expect(resp.status).toBe(401);
+    });
+
+    it('POST revoke-group returns 401 without auth', async () => {
+      const resp = await unauthRequest('POST', '/sharing.php?action=revoke-group', {
+        json: { share_group_id: 'any-group-id' },
+      });
+      expect(resp.status).toBe(401);
+    });
+  });
+
   // ── invalid action fallback ─────────────────────────────────────────────
   describe('invalid request', () => {
     it('returns 400 for unknown action', async () => {
