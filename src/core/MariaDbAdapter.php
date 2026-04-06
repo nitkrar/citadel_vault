@@ -1327,6 +1327,14 @@ class MariaDbAdapter implements StorageAdapter {
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
+    public function getStaleTickers(int $ttlSeconds): array {
+        $stmt = $this->db->prepare(
+            "SELECT ticker FROM ticker_prices WHERE fetched_at <= DATE_SUB(NOW(), INTERVAL ? SECOND)"
+        );
+        $stmt->execute([$ttlSeconds]);
+        return $stmt->fetchAll(PDO::FETCH_COLUMN);
+    }
+
     public function clearPriceCache(): void {
         $this->db->exec('TRUNCATE TABLE ticker_prices');
     }

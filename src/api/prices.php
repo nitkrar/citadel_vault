@@ -1,8 +1,14 @@
 <?php
 /**
- * Prices API — Fetch, cache, and serve stock/crypto prices from Yahoo Finance.
+ * Prices API — Unified market data refresh and ticker price management.
  *
- * POST /prices.php           — Fetch prices for given tickers (batch)
+ * POST /prices.php?action=refresh — Refresh market data
+ *   body.type = "all"     — refresh forex + all stale tickers (default)
+ *   body.type = "forex"   — refresh exchange rates only
+ *   body.type = "ticker"  — refresh tickers only
+ *     body.tickers = [...]  — optional: specific tickers (cache-aware, fetches stale/missing)
+ *                             omit for all stale cached tickers
+ *
  * GET  /prices.php?action=cache — Admin: view cached prices
  * DELETE /prices.php?action=cache — Admin: clear price cache
  */
@@ -11,6 +17,8 @@ require_once __DIR__ . '/../core/Response.php';
 require_once __DIR__ . '/../../config/config.php';
 require_once __DIR__ . '/../core/Auth.php';
 require_once __DIR__ . '/../core/Storage.php';
+require_once __DIR__ . '/../core/TickerPrices.php';
+require_once __DIR__ . '/../core/ExchangeRates.php';
 
 Response::setCors();
 $payload = Auth::requireAuth();
@@ -22,124 +30,84 @@ $action = $_GET['action'] ?? null;
 $storage = Storage::adapter();
 
 // ============================================================================
-// POST — Fetch prices for tickers
+// POST ?action=refresh — Unified market data refresh
 // ============================================================================
-if ($method === 'POST' && !$action) {
+if ($method === 'POST' && $action === 'refresh') {
     $body = Response::getBody();
-    $tickers = $body['tickers'] ?? [];
+    $type = $body['type'] ?? 'all';
+    $force = !empty($body['force']);
 
-    if (!is_array($tickers) || empty($tickers)) {
-        Response::error('tickers array is required.', 400);
+    if (!in_array($type, ['all', 'forex', 'ticker'], true)) {
+        Response::error('Invalid type. Must be: all, forex, or ticker.', 400);
     }
 
-    // Sanitize + limit
-    $tickers = array_slice(array_unique(array_map('trim', $tickers)), 0, 50);
-    $tickers = array_filter($tickers, fn($t) => preg_match('/^[A-Za-z0-9.\-^=]+$/', $t));
+    $response = [];
 
-    if (empty($tickers)) {
-        Response::error('No valid tickers provided.', 400);
-    }
-
-    // Get TTL from system settings
-    $ttl = (int)($storage->getSystemSetting('ticker_price_ttl') ?? 86400);
-
-    // Check cache
-    $cached = $storage->getCachedPrices(array_values($tickers), $ttl);
-
-    $results = [];
-    $cachedTickers = [];
-    foreach ($cached as $row) {
-        $results[$row['ticker']] = [
-            'price'    => (float)$row['price'],
-            'currency' => $row['currency'],
-            'exchange' => $row['exchange'],
-            'name'     => $row['name'],
-            'cached'   => true,
-        ];
-        $cachedTickers[] = $row['ticker'];
-    }
-
-    // Fetch stale/missing from Yahoo
-    $staleTickers = array_diff($tickers, $cachedTickers);
-    $errors = [];
-
-    if (!empty($staleTickers)) {
-        foreach ($staleTickers as $ticker) {
-            // Use v8 chart API (v7 quote API now requires auth)
-            $url = 'https://query1.finance.yahoo.com/v8/finance/chart/'
-                 . urlencode($ticker) . '?interval=1d&range=1d';
-
-            $response = false;
-            if (function_exists('curl_init')) {
-                $ch = curl_init($url);
-                curl_setopt_array($ch, [
-                    CURLOPT_RETURNTRANSFER => true,
-                    CURLOPT_TIMEOUT        => 10,
-                    CURLOPT_USERAGENT      => 'Mozilla/5.0',
-                    CURLOPT_FOLLOWLOCATION => true,
-                    CURLOPT_SSL_VERIFYPEER => true,
-                ]);
-                $response = curl_exec($ch);
-                if (curl_errno($ch)) $response = false;
-                curl_close($ch);
-            }
-
-            if ($response === false) {
-                $ctx = stream_context_create([
-                    'http' => [
-                        'method'  => 'GET',
-                        'header'  => "User-Agent: Mozilla/5.0\r\n",
-                        'timeout' => 10,
-                    ],
-                ]);
-                $response = @file_get_contents($url, false, $ctx);
-            }
-
-            if ($response === false) {
-                $errors[$ticker] = 'Price service temporarily unavailable';
-                continue;
-            }
-
-            $data = json_decode($response, true);
-            $meta = $data['chart']['result'][0]['meta'] ?? null;
-
-            if (!$meta || !isset($meta['regularMarketPrice'])) {
-                $errors[$ticker] = 'Ticker not found';
-                continue;
-            }
-
-            $price = $meta['regularMarketPrice'];
-            $currency = $meta['currency'] ?? 'USD';
-            $exchange = $meta['fullExchangeName'] ?? $meta['exchangeName'] ?? '';
-            $name = $meta['longName'] ?? $meta['shortName'] ?? $ticker;
-
-            // Normalize GBp (pence) to GBP
-            if ($currency === 'GBp') {
-                $price = $price / 100;
-                $currency = 'GBP';
-            }
-
-            // Upsert cache
-            $storage->upsertPrice($ticker, $exchange, $price, $currency, $name);
-
-            // Upsert history
-            $storage->addPriceHistory($ticker, $exchange, $price, $currency);
-
-            $results[$ticker] = [
-                'price'    => (float)$price,
-                'currency' => $currency,
-                'exchange' => $exchange,
-                'name'     => $name,
-                'cached'   => false,
-            ];
+    // ── Forex refresh ──
+    if ($type === 'all' || $type === 'forex') {
+        try {
+            $response['forex'] = $force ? ExchangeRates::refresh() : ExchangeRates::refreshIfStale();
+        } catch (Exception $e) {
+            $response['forex'] = ['updated' => 0, 'skipped' => true, 'reason' => $e->getMessage()];
         }
     }
 
-    Response::success([
-        'prices'     => $results,
-        'errors'     => $errors,
-        'fetched_at' => date('c'),
-    ]);
+    // ── Ticker refresh ──
+    if ($type === 'all' || $type === 'ticker') {
+        $tickers = $body['tickers'] ?? null;
+
+        if (is_array($tickers) && !empty($tickers)) {
+            // Specific tickers requested — cache-aware fetch (stale/missing only)
+            $tickers = array_slice(array_unique(array_map('trim', $tickers)), 0, 50);
+            $tickers = array_filter($tickers, fn($t) => preg_match('/^[A-Za-z0-9.\-^=]+$/', $t));
+
+            if (empty($tickers)) {
+                Response::error('No valid tickers provided.', 400);
+            }
+
+            $ttl = (int)($storage->getSystemSetting('ticker_price_ttl') ?? 86400);
+            $cached = $storage->getCachedPrices(array_values($tickers), $ttl);
+
+            $results = [];
+            $cachedTickers = [];
+            foreach ($cached as $row) {
+                $results[$row['ticker']] = [
+                    'price'    => (float)$row['price'],
+                    'currency' => $row['currency'],
+                    'exchange' => $row['exchange'],
+                    'name'     => $row['name'],
+                    'cached'   => true,
+                ];
+                $cachedTickers[] = $row['ticker'];
+            }
+
+            $staleTickers = array_values(array_diff($tickers, $cachedTickers));
+            $errors = [];
+
+            if (!empty($staleTickers)) {
+                $fetched = TickerPrices::fetch($staleTickers);
+                foreach ($fetched['results'] as $ticker => $data) {
+                    $results[$ticker] = $data + ['cached' => false];
+                }
+                $errors = $fetched['errors'];
+            }
+
+            $response['ticker'] = [
+                'prices'     => $results,
+                'errors'     => $errors,
+                'fetched_at' => date('c'),
+            ];
+        } else {
+            // No tickers specified — refresh all cached tickers (force) or stale only
+            try {
+                $response['ticker'] = $force ? TickerPrices::refreshAll() : TickerPrices::refreshIfStale();
+            } catch (Exception $e) {
+                $response['ticker'] = ['updated' => 0, 'skipped' => true, 'reason' => $e->getMessage()];
+            }
+        }
+    }
+
+    Response::success($response);
 }
 
 // ============================================================================

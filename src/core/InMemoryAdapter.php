@@ -1144,6 +1144,17 @@ class InMemoryAdapter implements StorageAdapter {
         return $results;
     }
 
+    public function getStaleTickers(int $ttlSeconds): array {
+        $cutoff = gmdate('Y-m-d H:i:s', time() - $ttlSeconds);
+        $stale = [];
+        foreach ($this->tickerPrices as $row) {
+            if ($row['fetched_at'] <= $cutoff) {
+                $stale[] = $row['ticker'];
+            }
+        }
+        return $stale;
+    }
+
     public function clearPriceCache(): void {
         $this->tickerPrices = [];
     }

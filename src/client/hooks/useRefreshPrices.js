@@ -49,8 +49,8 @@ export default function useRefreshPrices() {
 
     // Fetch from API
     const unique = [...new Set(tickerEntries.map(e => e.ticker))];
-    const { data: resp } = await api.post('/prices.php', { tickers: unique });
-    const prices = (resp?.data || resp)?.prices || {};
+    const { data: resp } = await api.post('/prices.php?action=refresh', { type: 'ticker', tickers: unique });
+    const prices = (resp?.data || resp)?.ticker?.prices || {};
 
     // Apply to entries (encrypt → server → IndexedDB → React state)
     let count = 0;
