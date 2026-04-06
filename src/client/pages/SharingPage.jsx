@@ -94,6 +94,7 @@ export default function SharingPage() {
   const [showShareModal, setShowShareModal] = useState(false);
   const [viewItem, setViewItem] = useState(null);
   const [detailIdx, setDetailIdx] = useState(null);
+  const [sharePreview, setSharePreview] = useState(null); // { items: [{label, data}], portfolioData }
 
   // Mobile header event
   useEffect(() => {
@@ -297,14 +298,13 @@ export default function SharingPage() {
     setShowShareModal(true);
   };
 
-  // ── Share ────────────────────────────────────────────────────────
+  // ── Share: Phase 1 — build preview ───────────────────────────────
   const handleShare = async (e) => {
     e.preventDefault();
     setShareError('');
     if (!form.recipient.trim()) { setShareError('Enter a recipient.'); return; }
 
     if (form.source_type === 'portfolio') {
-      // Portfolio sharing
       if (!portfolio && portfolioMode !== 'saved_snapshot') {
         setShareError('Portfolio data not available. Unlock vault and wait for portfolio to load.');
         return;
@@ -338,7 +338,6 @@ export default function SharingPage() {
         if (!snapshotId) { setShareError('Select a snapshot.'); return; }
         const snap = savedSnapshots.find(s => s.snapshot_date === snapshotId);
         if (!snap) { setShareError('Snapshot not found.'); return; }
-        // Decrypt snapshot entries
         const decryptedEntries = [];
         if (snap.entries && snap.entries.length > 0) {
           for (const se of snap.entries) {
@@ -348,7 +347,6 @@ export default function SharingPage() {
             } catch { /* skip */ }
           }
         }
-        // Decrypt snapshot meta
         let meta = {};
         try { meta = await decryptWithFallback(snap.data, cryptoLib.AAD_SNAPSHOT_META); } catch { /* skip */ }
         dataToShare = {
@@ -372,14 +370,51 @@ export default function SharingPage() {
         };
       }
 
-      // Encrypt and share
-      setSharing(true);
-      try {
-        const { data: keyResp } = await api.get(`/sharing.php?action=recipient-key&identifier=${encodeURIComponent(form.recipient.trim())}`);
-        const { public_key, recipient_token } = apiData({ data: keyResp });
-        const recipientPubKey = await cryptoLib.importPublicKey(public_key);
-        const encryptedData = await cryptoLib.hybridEncrypt(JSON.stringify(dataToShare), recipientPubKey);
+      setSharePreview({ portfolioData: dataToShare, items: null });
+      return;
+    }
 
+    if (itemSelection.selected.length === 0) { setShareError('Select at least one item.'); return; }
+
+    // Build entry items for preview
+    let itemIds = [...itemSelection.selected];
+    if (form.source_type === 'account' && includeConnected) {
+      for (const asset of connectedAssets) {
+        if (!itemIds.includes(asset.id)) itemIds.push(asset.id);
+      }
+    }
+
+    const previewItems = [];
+    for (const id of itemIds) {
+      const entry = entries.find(en => en.id === id);
+      const plainData = decryptedCache[id];
+      if (!plainData || !entry) continue;
+      let enriched = plainData;
+      if (plainData.linked_account_id) {
+        const acctData = decryptedCache[plainData.linked_account_id];
+        if (acctData?.title) {
+          enriched = { ...plainData, linked_account_name: acctData.title };
+        }
+      }
+      previewItems.push({ id, label: plainData.title || `Entry ${id}`, type: entry.entry_type, data: enriched });
+    }
+    if (previewItems.length === 0) { setShareError('No items to share.'); return; }
+
+    setSharePreview({ items: previewItems, portfolioData: null });
+  };
+
+  // ── Share: Phase 2 — encrypt and send ──────────────────────────
+  const confirmShare = async () => {
+    if (!sharePreview) return;
+    setSharing(true);
+    setShareError('');
+    try {
+      const { data: keyResp } = await api.get(`/sharing.php?action=recipient-key&identifier=${encodeURIComponent(form.recipient.trim())}`);
+      const { public_key, recipient_token } = apiData({ data: keyResp });
+      const recipientPubKey = await cryptoLib.importPublicKey(public_key);
+
+      if (sharePreview.portfolioData) {
+        const encryptedData = await cryptoLib.hybridEncrypt(JSON.stringify(sharePreview.portfolioData), recipientPubKey);
         await api.post('/sharing.php?action=share-group', {
           recipient_token,
           identifier: form.recipient.trim(),
@@ -393,54 +428,23 @@ export default function SharingPage() {
             encrypted_data: encryptedData,
           }],
         });
-
-        setShowShareModal(false);
-        refetchByMe();
-      } catch (err) {
-        setShareError(err.response?.data?.error || err.message || 'Share failed.');
-      } finally {
-        setSharing(false);
-      }
-      return;
-    }
-
-    if (itemSelection.selected.length === 0) { setShareError('Select at least one item.'); return; }
-
-    setSharing(true);
-    try {
-      // Get recipient key
-      const { data: keyResp } = await api.get(`/sharing.php?action=recipient-key&identifier=${encodeURIComponent(form.recipient.trim())}`);
-      const { public_key, recipient_token } = apiData({ data: keyResp });
-      const recipientPubKey = await cryptoLib.importPublicKey(public_key);
-
-      // Build items to share
-      let itemIds = [...itemSelection.selected];
-      if (form.source_type === 'account' && includeConnected) {
-        for (const asset of connectedAssets) {
-          if (!itemIds.includes(asset.id)) itemIds.push(asset.id);
+      } else {
+        const items = [];
+        for (const pi of sharePreview.items) {
+          const encryptedData = await cryptoLib.hybridEncrypt(JSON.stringify(pi.data), recipientPubKey);
+          items.push({ source_entry_id: pi.id, encrypted_data: encryptedData });
         }
+        await api.post('/sharing.php?action=share-group', {
+          recipient_token,
+          identifier: form.recipient.trim(),
+          sync_mode: form.sync_mode,
+          label: form.label.trim() || null,
+          expires_at: form.expires_at || null,
+          items,
+        });
       }
 
-      // Build all items
-      const items = [];
-      for (const id of itemIds) {
-        const entry = entries.find(en => en.id === id);
-        const plainData = decryptedCache[id];
-        if (!plainData || !entry) continue;
-        const encryptedData = await cryptoLib.hybridEncrypt(JSON.stringify(plainData), recipientPubKey);
-        items.push({ source_entry_id: id, encrypted_data: encryptedData });
-      }
-      if (items.length === 0) { setShareError('No items to share.'); setSharing(false); return; }
-
-      await api.post('/sharing.php?action=share-group', {
-        recipient_token,
-        identifier: form.recipient.trim(),
-        sync_mode: form.sync_mode,
-        label: form.label.trim() || null,
-        expires_at: form.expires_at || null,
-        items,
-      });
-
+      setSharePreview(null);
       setShowShareModal(false);
       setForm({ ...defaultForm });
       itemSelection.clear();
@@ -857,6 +861,81 @@ export default function SharingPage() {
         </form>
       </Modal>
 
+      {/* ── Share Preview / Confirmation Modal ─────────────────────── */}
+      <Modal
+        isOpen={!!sharePreview}
+        onClose={() => setSharePreview(null)}
+        title="Review before sharing"
+        size={sharePreview?.portfolioData ? 'lg' : undefined}
+      >
+        {sharePreview && (() => {
+          const infoHeader = (
+            <div style={{ marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>
+              <div className="text-muted" style={{ fontSize: 13 }}>
+                Sharing with <strong>{form.recipient}</strong>
+                {form.label && <> &middot; Label: <strong>{form.label}</strong></>}
+                {form.sync_mode === 'continuous' && <> &middot; <span className="badge badge-success">Continuous</span></>}
+              </div>
+            </div>
+          );
+
+          // Portfolio preview
+          if (sharePreview.portfolioData) {
+            return (
+              <>
+                {infoHeader}
+                <SharedPortfolioView data={sharePreview.portfolioData} />
+                {shareError && <div className="alert alert-danger mt-3"><AlertTriangle size={14} /> {shareError}</div>}
+                <div className="flex gap-2 mt-4" style={{ justifyContent: 'flex-end' }}>
+                  <button className="btn btn-secondary" onClick={() => setSharePreview(null)}>Back</button>
+                  <button className="btn btn-primary" onClick={confirmShare} disabled={sharing}>
+                    {sharing ? 'Sharing...' : 'Confirm Share'}
+                  </button>
+                </div>
+              </>
+            );
+          }
+
+          // Entry preview
+          const previewItems = sharePreview.items || [];
+          return (
+            <>
+              {infoHeader}
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12 }}>
+                {previewItems.length} {previewItems.length === 1 ? 'item' : 'items'} will be shared:
+              </div>
+              {previewItems.map((pi, idx) => (
+                <details key={pi.id} style={{ marginBottom: 8, border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden' }}>
+                  <summary style={{ padding: '8px 12px', cursor: 'pointer', background: 'var(--bg-secondary)', fontWeight: 500, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span className="badge" style={{ fontSize: 10 }}>{pi.type}</span>
+                    {pi.label}
+                  </summary>
+                  <div style={{ padding: '12px' }}>
+                    {Object.entries(pi.data).filter(([k]) => k !== 'linked_account_id' || !pi.data.linked_account_name).map(([k, v]) => {
+                      if (v === null || v === undefined || v === '') return null;
+                      const label = k === 'linked_account_name' ? 'Linked Account' : k.replace(/_/g, ' ');
+                      return (
+                        <div key={k} style={{ marginBottom: 6 }}>
+                          <span className="text-muted" style={{ fontSize: 11, textTransform: 'capitalize' }}>{label}</span>
+                          <div style={{ fontSize: 13 }}>{typeof v === 'object' ? JSON.stringify(v) : String(v)}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </details>
+              ))}
+              {shareError && <div className="alert alert-danger mt-3"><AlertTriangle size={14} /> {shareError}</div>}
+              <div className="flex gap-2 mt-4" style={{ justifyContent: 'flex-end' }}>
+                <button className="btn btn-secondary" onClick={() => setSharePreview(null)}>Back</button>
+                <button className="btn btn-primary" onClick={confirmShare} disabled={sharing}>
+                  {sharing ? 'Sharing...' : 'Confirm Share'}
+                </button>
+              </div>
+            </>
+          );
+        })()}
+      </Modal>
+
       {/* ── Detail Modal (received shares) ───────────────────────── */}
       <Modal
         isOpen={!!viewItem}
@@ -931,6 +1010,12 @@ export default function SharingPage() {
                     ))
                   ) : (
                     fields.map(field => {
+                      if (field.key === 'linked_account_id') {
+                        const name = itemData.linked_account_name;
+                        const val = name || itemData[field.key];
+                        if (val === undefined || val === null || val === '') return null;
+                        return <FieldDisplay key={field.key} field={{ ...field, label: 'Linked Account' }} value={String(val)} />;
+                      }
                       const val = itemData[field.key];
                       if (val === undefined || val === null || val === '') return null;
                       return <FieldDisplay key={field.key} field={field} value={String(val)} />;
@@ -971,6 +1056,13 @@ export default function SharingPage() {
           }
 
           return <>{header}{fields.map(field => {
+            // Show account name instead of raw ID for linked_account_id
+            if (field.key === 'linked_account_id') {
+              const name = d.linked_account_name;
+              const val = name || d[field.key];
+              if (val === undefined || val === null || val === '') return null;
+              return <FieldDisplay key={field.key} field={{ ...field, label: 'Linked Account' }} value={String(val)} />;
+            }
             const val = d[field.key];
             if (val === undefined || val === null || val === '') return null;
             return <FieldDisplay key={field.key} field={field} value={String(val)} />;

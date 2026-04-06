@@ -30,6 +30,16 @@ Full audit report: `docs/SECURITY_AUDIT_2026-03-27.md`. All critical (C1-C7) and
 - **Test review P3** — cosmetic: naming, selectors, locale assertions
 - **Edge cases remaining**: soft-delete purge timing, changeVaultKey empty, workerDispatcher.terminate, modal scroll lock
 
+## Sharing — Needs Fix
+
+- **Continuous share: re-encrypt must update entire share group, not just edited entry**
+  When a user shares an account + linked assets as a continuous share (all in one `share_group_id`), then later edits one entry and clicks "Update recipients", only that single entry's share record gets re-encrypted. The other entries in the same group keep stale encrypted blobs. Recipient sees mix of old and new data.
+  - **Root cause**: `VaultPage.handleReEncrypt` (line ~664) only targets `sharesByEntry[editEntry.id]` — it doesn't know about `share_group_id` or sibling entries in the same group.
+  - **Fix approach**: When re-encrypting, look up the `share_group_id` for the edited entry's share. Find all other shares in the same group. Re-encrypt each one using its current `decryptedCache[source_entry_id]` data. This way editing any entry in a group triggers a full group re-encrypt.
+  - **Files**: `src/client/pages/VaultPage.jsx` (handleReEncrypt), `src/client/hooks/useShareData.js` (sharesByEntry needs group awareness)
+  - **Edge case**: If a linked asset was deleted since the share was created, skip it (don't fail the whole re-encrypt).
+  - **Verified**: DB update works fine for individual entries — the `action=update` API correctly finds and updates the share via `getShareByKey(sender, entry, recipient)`. The issue is purely that sibling entries aren't included.
+
 ## Feature Requests
 
 - **#5b Asset type updatable** — Template type is currently immutable after creation (by design). Consider controlled type migration with field mapping.
