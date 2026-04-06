@@ -137,51 +137,12 @@ export default function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies,
         const entries = [];
         for (let j = 0; j < decryptedEntries.length; j++) {
           if (decryptedEntries[j]) {
-            entries.push({ ...decryptedEntries[j], entry_id: s.entries[j].entry_id });
+            const entry = { ...decryptedEntries[j], entry_id: s.entries[j].entry_id };
+            // Normalize missing fields — older snapshots may lack these
+            if (entry.country === undefined) entry.country = null;
+            if (entry.linked_account === undefined) entry.linked_account = null;
+            entries.push(entry);
           }
-        }
-        // Backfill entries missing country/linked_account or with "Unknown Account".
-        // Resolves from decryptedCache (live vault data). If vault entry was deleted,
-        // sets explicit nulls. Persists fixes back to server so backfill is one-time.
-        const entriesToUpdate = [];
-        for (let j = 0; j < entries.length; j++) {
-          const entry = entries[j];
-          const needsCountry = entry.country === undefined;
-          const needsAccount = entry.linked_account === undefined
-            || entry.linked_account?.name === 'Unknown Account';
-
-          if (needsCountry || needsAccount) {
-            const vaultEntry = decryptedCache?.[entry.entry_id];
-            if (vaultEntry) {
-              if (needsCountry) entry.country = vaultEntry.country || null;
-              if (needsAccount) {
-                const acctId = vaultEntry.linked_account_id;
-                entry.linked_account = acctId
-                  ? { id: acctId, name: decryptedCache?.[acctId]?.title || 'Unknown Account' }
-                  : null;
-              }
-            } else {
-              if (needsCountry) entry.country = null;
-              if (needsAccount) entry.linked_account = null;
-            }
-            entriesToUpdate.push(j);
-          }
-        }
-
-        // Persist backfilled entries to server
-        if (entriesToUpdate.length > 0) {
-          try {
-            const blobsToEncrypt = entriesToUpdate.map(j => {
-              const { entry_id, ...blob } = entries[j];
-              return blob;
-            });
-            const encryptedBlobs = await workerDispatcher.encryptBatch(blobsToEncrypt, null, AAD_SNAPSHOT_ENTRY);
-            const updatePayload = entriesToUpdate.map((j, idx) => ({
-              entry_id: entries[j].entry_id,
-              encrypted_data: encryptedBlobs[idx],
-            }));
-            await api.put('/snapshots.php', { snapshot_id: s.id, entries: updatePayload });
-          } catch { /* backfill save failed — display still corrected in-memory */ }
         }
 
         decrypted.push({ ...s, _entries: entries });
