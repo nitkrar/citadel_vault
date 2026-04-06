@@ -1,9 +1,10 @@
-import { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { isTruthy } from '../lib/checks';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useEncryption } from '../contexts/EncryptionContext';
 import PageNotice from './PageNotice';
+import SaveToast from './SaveToast';
 import ShortcutOverlay from './ShortcutOverlay';
 import SyncToast from './SyncToast';
 import useKeyboardShortcuts from '../hooks/useKeyboardShortcuts';
@@ -272,6 +273,28 @@ export default function Layout() {
   const [showPasskeyBanner, setShowPasskeyBanner] = useState(false);
   const [passkeyBannerLoading, setPasskeyBannerLoading] = useState(false);
   const [kdfBannerDismissed, setKdfBannerDismissed] = useState(false);
+  const [marketRefreshToast, setMarketRefreshToast] = useState(null);
+  const marketRefreshDone = useRef(false);
+
+  // Auto-refresh market data (forex + tickers) on login
+  useEffect(() => {
+    if (!user || marketRefreshDone.current) return;
+    marketRefreshDone.current = true;
+    setMarketRefreshToast({ message: 'Refreshing market data…', type: 'info', key: Date.now() });
+    api.post('/prices.php?action=refresh', { type: 'all' })
+      .then(res => {
+        const d = res.data?.data || res.data;
+        const parts = [];
+        if (d?.forex?.updated > 0) parts.push(`${d.forex.updated} rates`);
+        if (d?.ticker?.updated > 0) parts.push(`${d.ticker.updated} prices`);
+        setMarketRefreshToast(parts.length > 0
+          ? { message: `Updated ${parts.join(', ')}`, type: 'success', key: Date.now() }
+          : { message: 'Market data up to date', type: 'success', key: Date.now() });
+      })
+      .catch(() => {
+        setMarketRefreshToast({ message: 'Market refresh failed', type: 'error', key: Date.now() });
+      });
+  }, [user]);
 
   // Show KDF banner only when preference was never explicitly set by the user
   const showKdfBanner = isUnlocked && !kdfBannerDismissed
@@ -724,6 +747,9 @@ export default function Layout() {
           <ShortcutOverlay onClose={() => setShowShortcuts(false)} settings={shortcutSettings} />
         )}
         <SyncToast />
+        {marketRefreshToast && (
+          <SaveToast key={marketRefreshToast.key} message={marketRefreshToast.message} type={marketRefreshToast.type} onDismiss={() => setMarketRefreshToast(null)} />
+        )}
       </div>
     </HideAmountsContext.Provider>
   );

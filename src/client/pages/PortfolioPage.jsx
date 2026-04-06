@@ -74,8 +74,8 @@ export default function PortfolioPage() {
   }, [portfolio]);
 
   const plaidItemIds = useMemo(
-    () => [...new Set(plaidEntries.map(e => getIntegration(e, getIntegrationType(e))?.item_id).filter(Boolean))],
-    [plaidEntries]
+    () => plaidEnabled ? [...new Set(plaidEntries.map(e => getIntegration(e, getIntegrationType(e))?.item_id).filter(Boolean))] : [],
+    [plaidEnabled, plaidEntries]
   );
 
   // Mobile header events
