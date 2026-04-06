@@ -135,6 +135,8 @@ if ($method === 'POST' && $action === 'auth-verify') {
     // Check account lockout before issuing JWT
     Auth::enforceAccountLockout((int)$result['user']['id']);
 
+    try { Storage::adapter()->logAction((int)$result['user']['id'], 'login', 'users', null, Auth::clientIpHash()); } catch (Exception $e) {}
+
     Response::success([
         'token'      => $result['user']['token'],
         'user'       => [

@@ -107,6 +107,8 @@ if ($method === 'POST' && $action === 'login') {
 
     $authUser = Auth::issueAuthToken((int)$user['id']);
 
+    try { Storage::adapter()->logAction((int)$user['id'], 'login', 'users', null, Auth::clientIpHash()); } catch (Exception $e) {}
+
     // Once-per-day exchange rate refresh on first login of the day
     try {
         ExchangeRates::refreshIfStale();

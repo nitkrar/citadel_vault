@@ -29,6 +29,7 @@ export const POSITIVE_COLOR  = '#3B9EFF';   // gains — bright blue (NOT green)
 export const NEGATIVE_COLOR  = '#E8A838';   // losses — golden amber (NOT red)
 
 export function getBreakdownColor(key, breakdown, index) {
+  if (breakdown === 'none') return NET_WORTH_COLOR;
   if (breakdown === 'type') return getTypeColor(key);
   return CHART_COLORS[index % CHART_COLORS.length];
 }

@@ -19,7 +19,7 @@ export default function AssetsTab({ portfolio, fmtD, groupBy, setGroupBy, expand
     <>
       {/* Toolbar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-        <label style={{ fontSize: 13, fontWeight: 600 }}>Group By:</label>
+        <label style={{ fontSize: 13, fontWeight: 600 }}>Breakdown:</label>
         <select
           className="form-control"
           style={{ width: 'auto', minWidth: 140, fontSize: 13 }}
