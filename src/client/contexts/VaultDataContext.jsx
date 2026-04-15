@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import api from '../api/client';
 import { apiData } from '../lib/checks';
 import { entryStore } from '../lib/entryStore';
@@ -18,6 +18,7 @@ export function VaultDataProvider({ children }) {
   const [entries, setEntries] = useState([]);
   const [decryptedCache, setDecryptedCache] = useState({});
   const [loading, setLoading] = useState(true);
+  const refetchInFlight = useRef(false);
 
   // ── Notify other tabs of data changes ─────────────────────────
   const notifyOtherTabs = useCallback(() => {
@@ -47,17 +48,22 @@ export function VaultDataProvider({ children }) {
 
   // ── Refresh from server ───────────────────────────────────────
   const refetch = useCallback(async () => {
-    if (!isUnlocked) return;
-    const { data: resp } = await api.get('/vault.php');
-    const raw = apiData({ data: resp }) || [];
-    await entryStore.replaceAllEntries(raw);
-    markCacheRefreshed();
-    const cache = {};
-    for (const entry of raw) {
-      try { cache[entry.id] = await decryptWithFallback(entry.encrypted_data, AAD_VAULT_ENTRY); } catch { cache[entry.id] = null; }
+    if (!isUnlocked || refetchInFlight.current) return;
+    refetchInFlight.current = true;
+    try {
+      const { data: resp } = await api.get('/vault.php');
+      const raw = apiData({ data: resp }) || [];
+      await entryStore.replaceAllEntries(raw);
+      markCacheRefreshed();
+      const cache = {};
+      for (const entry of raw) {
+        try { cache[entry.id] = await decryptWithFallback(entry.encrypted_data, AAD_VAULT_ENTRY); } catch { cache[entry.id] = null; }
+      }
+      setEntries(raw);
+      setDecryptedCache(cache);
+    } finally {
+      refetchInFlight.current = false;
     }
-    setEntries(raw);
-    setDecryptedCache(cache);
   }, [isUnlocked, decryptWithFallback]);
 
   // ── Cross-tab sync: refetch when tab regains focus ────────────
