@@ -192,6 +192,31 @@ export function recalculateSnapshot(entries, rateMap, displayCurrency) {
 }
 
 /**
+ * Build snapshot-shaped blobs from aggregated portfolio assets.
+ * Used by both snapshot saving and portfolio sharing to produce a consistent entry shape.
+ *
+ * @param {Array} assets - Portfolio asset items from aggregatePortfolio().assets
+ * @param {object} accounts - Account map from aggregatePortfolio().accounts (id → {id, name, ...})
+ * @returns {Array} Snapshot-shaped blobs [{name, template_name, entry_type, subtype, is_liability, currency, raw_value, icon, country, linked_account}]
+ */
+export function buildSnapshotBlobs(assets, accounts) {
+  return assets.map(asset => ({
+    name: asset.name,
+    template_name: asset.template_name,
+    entry_type: asset.entry_type,
+    subtype: asset.subtype,
+    is_liability: asset.is_liability,
+    currency: asset.currency,
+    raw_value: asset.rawValue,
+    icon: asset.icon,
+    country: asset.country || null,
+    linked_account: asset.linked_account_id
+      ? { id: asset.linked_account_id, name: accounts?.[asset.linked_account_id]?.name || 'Unknown Account' }
+      : null,
+  }));
+}
+
+/**
  * Main aggregation function. Returns structured portfolio data.
  *
  * @param {Array} entries - Decrypted vault entries [{id, entry_type, decrypted, template}]

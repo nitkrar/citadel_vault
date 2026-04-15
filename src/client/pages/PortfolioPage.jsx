@@ -27,6 +27,7 @@ import * as workerDispatcher from '../lib/workerDispatcher';
 import { AAD_SNAPSHOT_META, AAD_SNAPSHOT_ENTRY } from '../lib/crypto';
 import { hasAnyIntegration, getIntegration, getIntegrationType } from '../integrations/helpers';
 import { CHART_COLORS, getTypeColor, abbreviateNumber } from '../lib/chartColors';
+import { buildSnapshotBlobs } from '../lib/portfolioAggregator';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Filler, Title, CJSTooltip, CJSLegend, TimeScale);
 
@@ -116,20 +117,7 @@ export default function PortfolioPage() {
       };
       const encryptedMeta = await encrypt(meta, AAD_SNAPSHOT_META);
 
-      const entryBlobs = portfolio.assets.map(asset => ({
-        name: asset.name,
-        template_name: asset.template_name,
-        entry_type: asset.entry_type,
-        subtype: asset.subtype,
-        is_liability: asset.is_liability,
-        currency: asset.currency,
-        raw_value: asset.rawValue,
-        icon: asset.icon,
-        country: asset.country || null,
-        linked_account: asset.linked_account_id
-          ? { id: asset.linked_account_id, name: portfolio.accounts?.[asset.linked_account_id]?.name || 'Unknown Account' }
-          : null,
-      }));
+      const entryBlobs = buildSnapshotBlobs(portfolio.assets, portfolio.accounts);
       const encryptedBlobs = await workerDispatcher.encryptBatch(entryBlobs, null, AAD_SNAPSHOT_ENTRY);
       const entries = portfolio.assets.map((a, i) => ({
         entry_id: a.id,

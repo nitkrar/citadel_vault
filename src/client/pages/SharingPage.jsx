@@ -15,6 +15,7 @@ import useVaultData from '../hooks/useVaultData';
 import usePortfolioData from '../hooks/usePortfolioData';
 import { apiData } from '../lib/checks';
 import SharedPortfolioView from '../components/portfolio/SharedPortfolioView';
+import { buildSnapshotBlobs } from '../lib/portfolioAggregator';
 
 // ── Constants ──────────────────────────────────────────────────────────
 
@@ -313,26 +314,27 @@ export default function SharingPage() {
       let dataToShare;
 
       if (portfolioMode === 'summary') {
+        // Strip items arrays from breakdowns — they contain full asset objects with integrations
+        const stripItems = (groups) => {
+          const clean = {};
+          for (const [k, v] of Object.entries(groups || {})) {
+            clean[k] = { total: v.total, count: v.count, label: v.label };
+          }
+          return clean;
+        };
         dataToShare = {
           type: 'portfolio_summary',
-          snapshot_date: new Date().toISOString(),
+          snapshot_date: new Date().toISOString().split('T')[0],
           display_currency: displayCurrency,
           summary: portfolio.summary,
-          by_country: portfolio.by_country,
-          by_type: portfolio.by_type,
+          by_country: stripItems(portfolio.by_country),
+          by_type: stripItems(portfolio.by_type),
         };
       } else if (portfolioMode === 'full_snapshot') {
         dataToShare = {
           type: 'portfolio_full',
-          snapshot_date: new Date().toISOString(),
-          display_currency: displayCurrency,
-          summary: portfolio.summary,
-          assets: portfolio.assets.map(a => ({
-            name: a.name, currency: a.currency, rawValue: a.rawValue,
-            displayValue: a.displayValue, subtype: a.subtype, is_liability: a.is_liability,
-          })),
-          by_country: portfolio.by_country,
-          by_type: portfolio.by_type,
+          snapshot_date: new Date().toISOString().split('T')[0],
+          assets: buildSnapshotBlobs(portfolio.assets, portfolio.accounts),
         };
       } else if (portfolioMode === 'saved_snapshot') {
         if (!snapshotId) { setShareError('Select a snapshot.'); return; }
@@ -352,7 +354,6 @@ export default function SharingPage() {
         dataToShare = {
           type: 'portfolio_snapshot',
           snapshot_date: snap.snapshot_date,
-          display_currency: displayCurrency,
           meta,
           assets: decryptedEntries,
         };
@@ -361,12 +362,8 @@ export default function SharingPage() {
         const selectedAssets = portfolio.assets.filter(a => selectiveSelection.selected.includes(a.id));
         dataToShare = {
           type: 'portfolio_selective',
-          snapshot_date: new Date().toISOString(),
-          display_currency: displayCurrency,
-          assets: selectedAssets.map(a => ({
-            name: a.name, currency: a.currency, rawValue: a.rawValue,
-            displayValue: a.displayValue, subtype: a.subtype, is_liability: a.is_liability,
-          })),
+          snapshot_date: new Date().toISOString().split('T')[0],
+          assets: buildSnapshotBlobs(selectedAssets, portfolio.accounts),
         };
       }
 
@@ -389,14 +386,19 @@ export default function SharingPage() {
       const entry = entries.find(en => en.id === id);
       const plainData = decryptedCache[id];
       if (!plainData || !entry) continue;
-      let enriched = plainData;
-      if (plainData.linked_account_id) {
-        const acctData = decryptedCache[plainData.linked_account_id];
+      // Strip internal fields: integrations, _prefixed keys
+      const filtered = {};
+      for (const [k, v] of Object.entries(plainData)) {
+        if (k === 'integrations' || k.startsWith('_')) continue;
+        filtered[k] = v;
+      }
+      if (filtered.linked_account_id) {
+        const acctData = decryptedCache[filtered.linked_account_id];
         if (acctData?.title) {
-          enriched = { ...plainData, linked_account_name: acctData.title };
+          filtered.linked_account_name = acctData.title;
         }
       }
-      previewItems.push({ id, label: plainData.title || `Entry ${id}`, type: entry.entry_type, data: enriched });
+      previewItems.push({ id, label: filtered.title || `Entry ${id}`, type: entry.entry_type, data: filtered });
     }
     if (previewItems.length === 0) { setShareError('No items to share.'); return; }
 
@@ -418,7 +420,7 @@ export default function SharingPage() {
         await api.post('/sharing.php?action=share-group', {
           recipient_token,
           identifier: form.recipient.trim(),
-          sync_mode: form.sync_mode,
+          sync_mode: 'snapshot',
           label: form.label.trim() || null,
           expires_at: form.expires_at || null,
           items: [{
@@ -598,7 +600,7 @@ export default function SharingPage() {
       )}
 
       {/* ── Share Modal ──────────────────────────────────────────── */}
-      <Modal isOpen={showShareModal} onClose={() => setShowShareModal(false)} title="Share Entry">
+      <Modal isOpen={showShareModal} onClose={() => { if (!sharePreview) setShowShareModal(false); }} title="Share Entry">
         <form onSubmit={handleShare}>
           {/* Error */}
           {shareError && <div className="alert alert-danger mb-3"><AlertTriangle size={14} /> {shareError}</div>}
@@ -792,31 +794,31 @@ export default function SharingPage() {
             </div>
           )}
 
-          {/* Sync mode */}
-          <div className="form-group">
-            <label className="form-label">Sync Mode</label>
-            <select
-              className="form-control"
-              value={form.sync_mode}
-              onChange={e => setField('sync_mode', e.target.value)}
-            >
-              {SYNC_MODES.map(m => (
-                <option key={m.value} value={m.value}>{m.label}</option>
-              ))}
-            </select>
-            <div className="text-muted" style={{ fontSize: 12, marginTop: 4 }}>
-              {SYNC_MODES.find(m => m.value === form.sync_mode)?.desc}
+          {/* Sync mode — only for entry shares; portfolio is always snapshot */}
+          {form.source_type !== 'portfolio' && (
+            <div className="form-group">
+              <label className="form-label">Sync Mode</label>
+              <select
+                className="form-control"
+                value={form.sync_mode}
+                onChange={e => setField('sync_mode', e.target.value)}
+              >
+                {SYNC_MODES.map(m => (
+                  <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
+              </select>
+              <div className="text-muted" style={{ fontSize: 12, marginTop: 4 }}>
+                {SYNC_MODES.find(m => m.value === form.sync_mode)?.desc}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Continuous warning */}
-          {form.sync_mode === 'continuous' && (
+          {form.sync_mode === 'continuous' && form.source_type !== 'portfolio' && (
             <div className="alert alert-warning mb-3" style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
               <Info size={16} style={{ flexShrink: 0, marginTop: 2 }} />
               <span>
-                {form.source_type === 'portfolio'
-                  ? 'Continuous portfolio shares require you to manually re-share updated data.'
-                  : 'When you edit a continuous share, you will be prompted to re-encrypt and push the update to the recipient.'}
+                When you edit a continuous share, you will be prompted to re-encrypt and push the update to the recipient.
               </span>
             </div>
           )}
@@ -884,7 +886,7 @@ export default function SharingPage() {
             return (
               <>
                 {infoHeader}
-                <SharedPortfolioView data={sharePreview.portfolioData} />
+                <SharedPortfolioView data={sharePreview.portfolioData} displayCurrency={displayCurrency} />
                 {shareError && <div className="alert alert-danger mt-3"><AlertTriangle size={14} /> {shareError}</div>}
                 <div className="flex gap-2 mt-4" style={{ justifyContent: 'flex-end' }}>
                   <button className="btn btn-secondary" onClick={() => setSharePreview(null)}>Back</button>
@@ -979,7 +981,7 @@ export default function SharingPage() {
             return (
               <>
                 {header}
-                <SharedPortfolioView data={d} />
+                <SharedPortfolioView data={d} displayCurrency={displayCurrency} />
               </>
             );
           }
