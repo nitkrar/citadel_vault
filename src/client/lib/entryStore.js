@@ -260,6 +260,19 @@ class EntryStore {
         return this._clearStore(db, 'snapshots');
     }
 
+    /** Clear entries store and write fresh set in a single transaction. */
+    async replaceAllEntries(items) {
+        const db = await this._open();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction('entries', 'readwrite');
+            const store = tx.objectStore('entries');
+            store.clear();
+            for (const item of items) { store.put(item); }
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+        });
+    }
+
     // ── Clear All ───────────────────────────────────────────────────────
 
     async clear() {

@@ -115,6 +115,20 @@ function MobileHeader({ routeMeta, navigate, location, isUnlocked, vaultKeyExist
             ) : null}
           </>
         )}
+        <button className="mobile-native-header-btn" title="Refresh app"
+          onClick={async () => {
+            if ('serviceWorker' in navigator) {
+              const regs = await navigator.serviceWorker.getRegistrations();
+              await Promise.all(regs.map(r => r.unregister()));
+            }
+            if ('caches' in window) {
+              const keys = await caches.keys();
+              await Promise.all(keys.map(k => caches.delete(k)));
+            }
+            window.location.reload();
+          }}>
+          <RefreshCw size={20} />
+        </button>
       </div>
     </header>
   );

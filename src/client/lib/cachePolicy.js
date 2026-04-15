@@ -12,7 +12,7 @@ import { entryStore } from './entryStore';
 
 const CACHE_TIMESTAMP_KEY = 'pv_cache_timestamp';
 
-let config = { mode: 'instant_unlock', ttlHours: 0 };
+let config = { mode: 'instant_unlock', ttlHours: 1 };
 
 /**
  * Configure cache policy from system settings.
@@ -21,7 +21,7 @@ let config = { mode: 'instant_unlock', ttlHours: 0 };
 export function configure({ cacheMode, cacheTtlHours }) {
   config = {
     mode: cacheMode === 'always_fetch' ? 'always_fetch' : 'instant_unlock',
-    ttlHours: parseInt(cacheTtlHours, 10) || 0,
+    ttlHours: Number.isNaN(parseInt(cacheTtlHours, 10)) ? 1 : parseInt(cacheTtlHours, 10),
   };
 }
 
