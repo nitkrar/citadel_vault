@@ -7,10 +7,14 @@ const api = axios.create({
   timeout: 15000, // 15s — prevents iOS PWA from hanging forever on dead requests
 });
 
-// Offline check: block mutations when offline
+// Offline check: block mutations when offline (skip auth endpoints — let them fail naturally)
+const AUTH_OFFLINE_SKIP = ['auth.php', 'webauthn.php'];
 api.interceptors.request.use((config) => {
   if (!navigator.onLine && config.method !== 'get') {
-    return Promise.reject(new Error('You are offline. Changes require an internet connection.'));
+    const isAuth = AUTH_OFFLINE_SKIP.some((ep) => config.url?.includes(ep));
+    if (!isAuth) {
+      return Promise.reject(new Error('You are offline. Changes require an internet connection.'));
+    }
   }
   return config;
 });
