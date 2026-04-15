@@ -1,40 +1,85 @@
 import { useState, useMemo, useEffect } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import SegmentedControl from '../SegmentedControl';
-
-function computeSummary(assets) {
-  if (!assets?.length) return null;
-  const s = { net_worth: 0, total_assets: 0, total_liabilities: 0, asset_count: assets.length };
-  for (const a of assets) {
-    const v = a.displayValue ?? a.rawValue ?? a.raw_value ?? 0;
-    if (a.is_liability) s.total_liabilities += Math.abs(v);
-    else s.total_assets += v;
-  }
-  s.net_worth = s.total_assets - s.total_liabilities;
-  return s;
-}
+import { recalculateSnapshot, buildRateMap } from '../../lib/portfolioAggregator';
+import useCurrencies from '../../hooks/useCurrencies';
+import api from '../../api/client';
+import { apiData } from '../../lib/checks';
 
 const fmtVal = (v) => typeof v === 'number'
   ? v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   : String(v ?? '');
 
-export default function SharedPortfolioView({ data }) {
+export default function SharedPortfolioView({ data, displayCurrency: displayCurrencyProp }) {
   const [groupBy, setGroupBy] = useState('type');
   const [expandedGroups, setExpandedGroups] = useState({});
+  const [rateMode, setRateMode] = useState('snapshot');
+  const [historicalRateMap, setHistoricalRateMap] = useState(null);
+  const [loadingRates, setLoadingRates] = useState(false);
+
+  const { currencies } = useCurrencies();
+  const currentRateMap = useMemo(() => buildRateMap(currencies || []), [currencies]);
+
+  const displayCurrency = displayCurrencyProp || data?.display_currency || '';
+  const hasAssets = data?.assets && data.assets.length > 0;
+  const snapshotDate = data?.snapshot_date || null;
+
+  // -- Fetch historical rates for snapshot_date --------------------------------
+  useEffect(() => {
+    if (!snapshotDate || !hasAssets) return;
+    let cancelled = false;
+    setLoadingRates(true);
+    api.get(`/reference.php?resource=historical-rates&date=${snapshotDate}`)
+      .then(resp => {
+        if (cancelled) return;
+        const ratesData = apiData({ data: resp.data });
+        if (ratesData?.rates) {
+          setHistoricalRateMap(ratesData.rates);
+        }
+      })
+      .catch(() => { /* fallback to current rates */ })
+      .finally(() => { if (!cancelled) setLoadingRates(false); });
+    return () => { cancelled = true; };
+  }, [snapshotDate, hasAssets]);
+
+  // -- Compute portfolio via recalculateSnapshot --------------------------------
+  const selectedRateMap = rateMode === 'snapshot'
+    ? (historicalRateMap || currentRateMap)
+    : currentRateMap;
+
+  const computed = useMemo(() => {
+    if (!hasAssets || !selectedRateMap || Object.keys(selectedRateMap).length === 0) return null;
+    return recalculateSnapshot(data.assets, selectedRateMap, displayCurrency);
+  }, [data?.assets, selectedRateMap, displayCurrency, hasAssets]);
 
   if (!data) return null;
 
-  const summary = data.summary || computeSummary(data.assets);
-  const currencyPrefix = data.display_currency || '';
   const isSnapshot = data.type === 'portfolio_snapshot';
   const isSummaryType = data.type === 'portfolio_summary';
-  const assets = data.assets || [];
 
-  // -- a. Snapshot date -------------------------------------------------------
+  // Use computed data when available, fall back to data.summary for old portfolio_summary shares
+  const summary = computed
+    ? { net_worth: computed.net_worth, total_assets: computed.total_assets, total_liabilities: computed.total_liabilities, asset_count: computed.asset_count }
+    : data.summary || null;
+  const assets = computed?.entries || data.assets || [];
+
+  // -- a. Snapshot date + rate toggle ------------------------------------------
   const snapshotDateBlock = data.snapshot_date ? (
-    <div style={{ marginBottom: 16, fontSize: 13, color: 'var(--color-text-muted)' }}>
-      Snapshot: <strong>{data.snapshot_date}</strong>
-      {isSnapshot && <span className="badge badge-primary" style={{ marginLeft: 8 }}>(Saved)</span>}
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, fontSize: 13, color: 'var(--color-text-muted)', flexWrap: 'wrap' }}>
+      <span>
+        Snapshot: <strong>{data.snapshot_date}</strong>
+        {isSnapshot && <span className="badge badge-primary" style={{ marginLeft: 8 }}>(Saved)</span>}
+      </span>
+      {hasAssets && (
+        <SegmentedControl
+          options={[
+            { value: 'snapshot', label: loadingRates ? 'Loading...' : 'As shared' },
+            { value: 'current', label: 'Current rates' },
+          ]}
+          value={rateMode}
+          onChange={setRateMode}
+        />
+      )}
     </div>
   ) : null;
 
@@ -53,7 +98,7 @@ export default function SharedPortfolioView({ data }) {
         }}>
           <div className="text-muted" style={{ fontSize: 11, marginBottom: 4 }}>{c.label}</div>
           <div style={{ fontSize: 18, fontWeight: 600, color: c.color }}>
-            {c.raw ? c.value : `${currencyPrefix}${fmtVal(c.value)}`}
+            {c.raw ? c.value : `${displayCurrency}${fmtVal(c.value)}`}
           </div>
         </div>
       ))}
@@ -123,7 +168,7 @@ export default function SharedPortfolioView({ data }) {
               <span className="text-muted" style={{ fontSize: 12 }}>({group.entries.length})</span>
             </span>
             <span style={{ fontWeight: 500, fontSize: 13, color: group.isLiability ? 'var(--danger)' : undefined }}>
-              {currencyPrefix}{fmtVal(group.total)}
+              {displayCurrency}{fmtVal(group.total)}
             </span>
           </button>
           {isOpen && (
@@ -134,7 +179,7 @@ export default function SharedPortfolioView({ data }) {
                     <th>Name</th>
                     {groupBy === 'account' && <th>Type</th>}
                     <th>Currency</th>
-                    <th style={{ textAlign: 'right' }}>Value ({currencyPrefix})</th>
+                    <th style={{ textAlign: 'right' }}>Value ({displayCurrency})</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -159,8 +204,8 @@ export default function SharedPortfolioView({ data }) {
     })
   ) : null;
 
-  // -- e. Breakdown tables (portfolio_summary only) ---------------------------
-  const breakdownTables = isSummaryType ? (
+  // -- e. Breakdown tables (portfolio_summary fallback) -----------------------
+  const breakdownTables = isSummaryType && !computed ? (
     <>
       {data.by_country && Object.keys(data.by_country).length > 0 && (
         <div style={{ marginTop: 16 }}>
@@ -178,7 +223,7 @@ export default function SharedPortfolioView({ data }) {
                 {Object.entries(data.by_country).map(([country, info]) => (
                   <tr key={country}>
                     <td>{country}</td>
-                    <td style={{ textAlign: 'right' }}>{currencyPrefix}{fmtVal(info.total ?? info)}</td>
+                    <td style={{ textAlign: 'right' }}>{displayCurrency}{fmtVal(info.total ?? info)}</td>
                     <td style={{ textAlign: 'right' }}>{info.count ?? '--'}</td>
                   </tr>
                 ))}
@@ -203,7 +248,7 @@ export default function SharedPortfolioView({ data }) {
                 {Object.entries(data.by_type).map(([type, info]) => (
                   <tr key={type}>
                     <td>{type}</td>
-                    <td style={{ textAlign: 'right' }}>{currencyPrefix}{fmtVal(info.total ?? info)}</td>
+                    <td style={{ textAlign: 'right' }}>{displayCurrency}{fmtVal(info.total ?? info)}</td>
                     <td style={{ textAlign: 'right' }}>{info.count ?? '--'}</td>
                   </tr>
                 ))}

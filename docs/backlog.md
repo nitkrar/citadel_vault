@@ -18,6 +18,9 @@ Full audit report: `docs/SECURITY_AUDIT_2026-03-27.md`. All critical (C1-C7) and
 - `source_type` on shares not validated against allowlist
 - `updateShare()` has no `sender_id` in SQL (defense-in-depth gap)
 - `validateEntryShape` only warns in production, doesn't throw
+- `NULL source_entry_id` defeats UNIQUE constraint on `shared_items` — portfolio re-shares to same recipient create duplicate rows instead of upsert
+- Old `POST /prices.php` (no action param) removed — cached service worker / old bundles will 405. Add backward-compat shim.
+- `sanitizeDateTime` in `Response.php` silently drops timezone-offset ISO 8601 dates (e.g., `+05:30`) — share expiry lost
 - Ghost user RSA key generation race condition
 - Recovery key input always unmasked (`type="text"`)
 - Multiple empty catch blocks swallow errors in EncryptionContext
@@ -68,9 +71,16 @@ Full audit report: `docs/SECURITY_AUDIT_2026-03-27.md`. All critical (C1-C7) and
 ## Active
 
 - **Playwright E2E** — Blocked by macOS 15 MDM. Works in CI. Test files ready.
+- **Normalize portfolio share payload** — `portfolio_full` and `portfolio_selective` should send the same per-asset shape as snapshots: `{name, template_name, entry_type, subtype, is_liability, currency, raw_value, icon, country, linked_account}`. Drop pre-computed `summary`, `by_country`, `by_type` — recipient computes via `recalculateSnapshot()`. `portfolio_summary` unchanged.
+- **Ensure rate history exists for snapshot/share dates** — `SharedPortfolioView` now fetches historical rates via `GET /reference.php?resource=historical-rates&date=YYYY-MM-DD`. If no rates exist for that date, it silently falls back to current rates (toggle shows "As shared" but values are wrong). Two parts to fix:
+  1. **Ensure rates are fresh for PWA users** — Login-based auto-refresh doesn't trigger for PWA users who stay logged in. Options:
+     - **(A) Refresh on Portfolio page load** — Call `prices.php?action=refresh&type=forex` from `usePortfolioData` or `PortfolioPage`. `refreshIfStale` is cheap (one DB check, external API only once/day). Covers all paths since snapshot save and portfolio share flows start from Portfolio page.
+     - **(B) Refresh on visibility change** — When PWA comes to foreground after being backgrounded, trigger stale check. Broader coverage but more complex. Could use `document.visibilitychange` event in `Layout.jsx`.
+  2. **Record rates on snapshot save** — In `POST /snapshots.php`, after saving, copy current rates from `currencies` table to `currency_rate_history` for the snapshot date via `INSERT ... SELECT ... ON DUPLICATE KEY UPDATE`. Single SQL query, ~1ms, guarantees every snapshot date has rates. Requires part 1 to ensure rates in `currencies` table are fresh first.
 
 ## To Think About
 
+- **Snapshot/share rate map** — Resolved: no rate map in payload. Recipient pulls historical rates from server via `historical-rates?date=<snapshot_date>`. Remaining work: ensure rates exist for every snapshot date (see Active item above).
 - **Import redesign** — Match new export structure, 3rd-party CSV imports (1Password, Bitwarden, LastPass).
 - **Component-level rendering tests** — VaultPage, PortfolioPage, SharingPage have no component render tests.
 - **GitHub Actions CI** — Automated test runs on push/PR.
