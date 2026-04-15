@@ -140,6 +140,9 @@ export function EncryptionProvider({ children, user }) {
         const entries = apiData({ data: entriesResp }) || [];
         await entryStore.putAll(entries);
         cachePolicy.markCacheRefreshed();
+      } else {
+        // Stale-while-revalidate: show cached data now, refresh in background
+        setTimeout(() => window.dispatchEvent(new CustomEvent('vault-background-refresh')), 100);
       }
 
       // 5. Set state
@@ -376,6 +379,8 @@ export function EncryptionProvider({ children, user }) {
               const { data: er } = await api.get('/vault.php');
               await entryStore.putAll(apiData({ data: er }) || []);
               cachePolicy.markCacheRefreshed();
+            } else {
+              setTimeout(() => window.dispatchEvent(new CustomEvent('vault-background-refresh')), 100);
             }
 
             if (!cancelled) {

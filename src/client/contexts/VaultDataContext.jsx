@@ -3,6 +3,7 @@ import api from '../api/client';
 import { apiData } from '../lib/checks';
 import { entryStore } from '../lib/entryStore';
 import { AAD_VAULT_ENTRY } from '../lib/crypto';
+import { markCacheRefreshed } from '../lib/cachePolicy';
 import { useEncryption } from './EncryptionContext';
 
 const VaultDataContext = createContext();
@@ -49,7 +50,8 @@ export function VaultDataProvider({ children }) {
     if (!isUnlocked) return;
     const { data: resp } = await api.get('/vault.php');
     const raw = apiData({ data: resp }) || [];
-    await entryStore.putAll(raw);
+    await entryStore.replaceAllEntries(raw);
+    markCacheRefreshed();
     const cache = {};
     for (const entry of raw) {
       try { cache[entry.id] = await decryptWithFallback(entry.encrypted_data, AAD_VAULT_ENTRY); } catch { cache[entry.id] = null; }
@@ -83,6 +85,13 @@ export function VaultDataProvider({ children }) {
     const handler = () => refetch();
     window.addEventListener('vault-sync-refresh', handler);
     return () => window.removeEventListener('vault-sync-refresh', handler);
+  }, [refetch]);
+
+  // ── Background refresh: stale-while-revalidate after cached unlock ─
+  useEffect(() => {
+    const handler = () => { refetch().catch(() => {}); };
+    window.addEventListener('vault-background-refresh', handler);
+    return () => window.removeEventListener('vault-background-refresh', handler);
   }, [refetch]);
 
   // ── CRUD: Create ──────────────────────────────────────────────

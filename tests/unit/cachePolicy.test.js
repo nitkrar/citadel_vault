@@ -42,9 +42,9 @@ describe('cachePolicy', () => {
       expect(getConfig().ttlHours).toBe(24);
     });
 
-    it('defaults ttlHours to 0 for invalid', () => {
+    it('defaults ttlHours to 1 for invalid', () => {
       configure({ cacheTtlHours: 'abc' });
-      expect(getConfig().ttlHours).toBe(0);
+      expect(getConfig().ttlHours).toBe(1);
     });
   });
 
