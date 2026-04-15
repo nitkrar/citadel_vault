@@ -71,6 +71,18 @@ const ROUTE_META = {
   '/admin/settings': { title: 'System Settings', isTab: false },
 };
 
+async function forceRefreshApp() {
+  if ('serviceWorker' in navigator) {
+    const regs = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(regs.map(r => r.unregister()));
+  }
+  if ('caches' in window) {
+    const keys = await caches.keys();
+    await Promise.all(keys.map(k => caches.delete(k)));
+  }
+  window.location.reload();
+}
+
 // ── Mobile Native Header ──
 function MobileHeader({ routeMeta, navigate, location, isUnlocked, vaultKeyExists, lockVault, promptVault, toggleHideAmounts, hideAmounts }) {
   const meta = routeMeta[location.pathname] || { title: 'Citadel', isTab: true };
@@ -115,20 +127,6 @@ function MobileHeader({ routeMeta, navigate, location, isUnlocked, vaultKeyExist
             ) : null}
           </>
         )}
-        <button className="mobile-native-header-btn" title="Refresh app"
-          onClick={async () => {
-            if ('serviceWorker' in navigator) {
-              const regs = await navigator.serviceWorker.getRegistrations();
-              await Promise.all(regs.map(r => r.unregister()));
-            }
-            if ('caches' in window) {
-              const keys = await caches.keys();
-              await Promise.all(keys.map(k => caches.delete(k)));
-            }
-            window.location.reload();
-          }}>
-          <RefreshCw size={20} />
-        </button>
       </div>
     </header>
   );
@@ -246,6 +244,10 @@ function MoreSheet({ open, onClose, navigate, isSiteAdmin, darkMode, toggleDarkM
 
           {/* Layout switch */}
           <div className="more-sheet-group">
+            <button className="more-sheet-item" onClick={() => { forceRefreshApp(); onClose(); }}>
+              <RefreshCw size={20} className="more-icon" />
+              <span>Refresh App</span>
+            </button>
             <button className="more-sheet-item" onClick={() => { setPreference('classic'); onClose(); }}>
               <Monitor size={20} className="more-icon" />
               <span>Switch to Classic Layout</span>
@@ -479,18 +481,7 @@ export default function Layout() {
                 {appName}
               </span>
               <div className="mobile-header-actions">
-                <button className="icon-btn" title="Refresh app"
-                  onClick={async () => {
-                    if ('serviceWorker' in navigator) {
-                      const regs = await navigator.serviceWorker.getRegistrations();
-                      await Promise.all(regs.map(r => r.unregister()));
-                    }
-                    if ('caches' in window) {
-                      const keys = await caches.keys();
-                      await Promise.all(keys.map(k => caches.delete(k)));
-                    }
-                    window.location.reload();
-                  }}>
+                <button className="icon-btn" title="Refresh app" aria-label="Refresh app" onClick={forceRefreshApp}>
                   <RefreshCw size={18} />
                 </button>
                 <button className="icon-btn" onClick={toggleDarkMode} title={darkMode ? 'Light mode' : 'Dark mode'}>
@@ -623,17 +614,8 @@ export default function Layout() {
                 <span>v{import.meta.env.VITE_APP_VERSION || '?'} build {import.meta.env.VITE_BUILD_ID || '?'}</span>
                 <button
                   title="Force refresh"
-                  onClick={async () => {
-                    if ('serviceWorker' in navigator) {
-                      const regs = await navigator.serviceWorker.getRegistrations();
-                      await Promise.all(regs.map(r => r.unregister()));
-                    }
-                    if ('caches' in window) {
-                      const keys = await caches.keys();
-                      await Promise.all(keys.map(k => caches.delete(k)));
-                    }
-                    window.location.reload();
-                  }}
+                  aria-label="Force refresh"
+                  onClick={forceRefreshApp}
                   style={{ background: 'none', border: 'none', padding: 2, cursor: 'pointer', color: 'inherit', display: 'inline-flex' }}
                 >
                   <RefreshCw size={11} />
