@@ -1,11 +1,11 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useVaultEntries } from '../contexts/VaultDataContext';
 import * as workerDispatcher from '../lib/workerDispatcher';
 import useCurrencies from './useCurrencies';
 import useTemplates from './useTemplates';
 import useAppConfig from './useAppConfig';
-import api from '../api/client';
+import useDisplayCurrency from './useDisplayCurrency';
 
 const PRICE_CACHE_KEY = 'pv_ticker_prices';
 
@@ -35,8 +35,8 @@ export default function usePortfolioData() {
   const { user } = useAuth();
   const { entries: allEntries, decryptedCache, loading: entriesLoading, refetch } = useVaultEntries();
 
-  // Display currency: initialized from user preference, overridable locally
-  const [displayCurrencyOverride, setDisplayCurrencyOverride] = useState(null);
+  // Session-scoped display currency override (sessionStorage-backed, no server write).
+  const { override: displayCurrencyOverride, setDisplayCurrency } = useDisplayCurrency();
 
   const { currencies, loading: currLoading } = useCurrencies();
   const { templates, loading: tplLoading } = useTemplates();
@@ -88,13 +88,6 @@ export default function usePortfolioData() {
       .catch(() => { if (!cancelled) setPortfolio(null); });
     return () => { cancelled = true; };
   }, [decryptedEntries, currencies, baseCurrency, displayCurrency]);
-
-  // Save display currency preference to server
-  const setDisplayCurrency = useCallback((code) => {
-    setDisplayCurrencyOverride(code);
-    // Persist to server (fire and forget)
-    api.put('/preferences.php', { display_currency: code }).catch(() => {});
-  }, []);
 
   return {
     portfolio,

@@ -5,6 +5,7 @@ import api from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 import useKeyboardShortcuts from '../hooks/useKeyboardShortcuts';
 import useCurrencies from '../hooks/useCurrencies';
+import { clearDisplayCurrencyOverride } from '../hooks/useDisplayCurrency';
 import { getUserPreference } from '../lib/defaults';
 import useAppConfig from '../hooks/useAppConfig';
 
@@ -42,6 +43,7 @@ export default function ProfilePage() {
     setSavingCurrency(true);
     try {
       await api.put('/preferences.php', { display_currency: val || '' });
+      clearDisplayCurrencyOverride();
       setCurrencySuccess('Display currency updated.');
       if (refreshUser) refreshUser();
     } catch {}
