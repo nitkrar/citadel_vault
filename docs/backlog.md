@@ -71,7 +71,6 @@ Full audit report: `docs/SECURITY_AUDIT_2026-03-27.md`. All critical (C1-C7) and
 ## Active
 
 - **Playwright E2E** — Blocked by macOS 15 MDM. Works in CI. Test files ready.
-- **Normalize portfolio share payload** — `portfolio_full` and `portfolio_selective` should send the same per-asset shape as snapshots: `{name, template_name, entry_type, subtype, is_liability, currency, raw_value, icon, country, linked_account}`. Drop pre-computed `summary`, `by_country`, `by_type` — recipient computes via `recalculateSnapshot()`. `portfolio_summary` unchanged.
 - **Ensure rate history exists for snapshot/share dates** — `SharedPortfolioView` now fetches historical rates via `GET /reference.php?resource=historical-rates&date=YYYY-MM-DD`. If no rates exist for that date, it silently falls back to current rates (toggle shows "As shared" but values are wrong). Two parts to fix:
   1. **Ensure rates are fresh for PWA users** — Login-based auto-refresh doesn't trigger for PWA users who stay logged in. Options:
      - **(A) Refresh on Portfolio page load** — Call `prices.php?action=refresh&type=forex` from `usePortfolioData` or `PortfolioPage`. `refreshIfStale` is cheap (one DB check, external API only once/day). Covers all paths since snapshot save and portfolio share flows start from Portfolio page.
