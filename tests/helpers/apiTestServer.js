@@ -14,6 +14,7 @@ const ROOT = resolve(import.meta.dirname, '..', '..');
 const ENV_FILE = resolve(ROOT, 'config', '.env.test');
 const DB_NAME = 'citadel_vault_test_db';
 const DB_USER = 'nitinkum';
+const TEST_CRON_TOKEN = 'test-cron-token';
 
 let serverProcess = null;
 
@@ -35,7 +36,7 @@ export async function setup() {
   // 4. Start PHP server with test config
   serverProcess = spawn('php', ['-S', `localhost:${PORT}`, 'router.php'], {
     cwd: ROOT,
-    env: { ...process.env, CITADEL_ENV_FILE: ENV_FILE, PHP_CLI_SERVER_WORKERS: '4' },
+    env: { ...process.env, CITADEL_ENV_FILE: ENV_FILE, CRON_TOKEN: TEST_CRON_TOKEN, PHP_CLI_SERVER_WORKERS: '4' },
     stdio: 'ignore',
   });
 
