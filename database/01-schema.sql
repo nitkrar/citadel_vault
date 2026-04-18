@@ -342,6 +342,8 @@ CREATE TABLE `ticker_prices` (
     `price`      DECIMAL(15,8) NOT NULL,
     `currency`   VARCHAR(10) NOT NULL,
     `name`       VARCHAR(255) DEFAULT NULL,
+    `previous_close` DECIMAL(15,8) DEFAULT NULL,
+    `after_hours` TINYINT(1) NOT NULL DEFAULT 0,
     `fetched_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`ticker`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

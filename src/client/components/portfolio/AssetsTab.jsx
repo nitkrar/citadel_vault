@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Trash2 } from 'lucide-react';
 import SortableTh from '../SortableTh';
 import useSort from '../../hooks/useSort';
 import api from '../../api/client';
+import { useHideAmounts } from '../Layout';
 
 /**
  * AssetsTab — Consolidated data grid with "Group By" dropdown.
@@ -15,6 +16,8 @@ import api from '../../api/client';
  *   currency → flat currency summary table
  */
 export default function AssetsTab({ portfolio, fmtD, groupBy, setGroupBy, expandedGroups, toggleGroup }) {
+  const hideAmounts = useHideAmounts()?.hideAmounts ?? false;
+
   return (
     <>
       {/* Toolbar */}
@@ -44,9 +47,24 @@ export default function AssetsTab({ portfolio, fmtD, groupBy, setGroupBy, expand
       {groupBy === 'account' && <GroupView groups={portfolio.by_account} fmtD={fmtD} expanded={expandedGroups} toggle={toggleGroup} />}
       {groupBy === 'type' && <TypeView groups={portfolio.by_type} fmtD={fmtD} />}
       {groupBy === 'currency' && <CurrencyView groups={portfolio.by_currency} fmtD={fmtD} />}
-      {groupBy === 'ticker' && <TickerView groups={portfolio.by_ticker} fmtD={fmtD} expanded={expandedGroups} toggle={toggleGroup} />}
+      {groupBy === 'ticker' && <TickerView groups={portfolio.by_ticker} fmtD={fmtD} expanded={expandedGroups} toggle={toggleGroup} hideAmounts={hideAmounts} />}
     </>
   );
+}
+
+function percentCellStyle(value) {
+  return {
+    textAlign: 'right',
+    fontWeight: 500,
+    color: value > 0 ? 'var(--color-success, #16a34a)' : value < 0 ? 'var(--color-danger, #dc2626)' : 'var(--color-text-muted, #6b7280)',
+  };
+}
+
+function formatPercent(value, hideAmounts) {
+  if (hideAmounts) return '***';
+  if (value == null) return '—';
+  const sign = value > 0 ? '+' : '';
+  return `${sign}${value.toFixed(2)}%`;
 }
 
 // ── Flat Assets (with sort, checkboxes, bulk delete) ─────────────
@@ -291,7 +309,7 @@ function CurrencyView({ groups, fmtD }) {
 
 // ── Ticker View (Expandable stock holdings) ──────────────────────
 
-function TickerView({ groups, fmtD, expanded, toggle }) {
+function TickerView({ groups, fmtD, expanded, toggle, hideAmounts }) {
   const sortedGroups = useMemo(() =>
     Object.entries(groups || {})
       .sort((a, b) => {
@@ -315,86 +333,110 @@ function TickerView({ groups, fmtD, expanded, toggle }) {
         const hasGainLoss = group.items.some(item => item.gainLoss !== undefined);
 
         return (
-          <div key={key} className="card">
-            <button
-              type="button"
-              onClick={() => toggle(key)}
-              style={{
-                width: '100%', display: 'flex', alignItems: 'center', gap: 8,
-                padding: '12px 16px', background: 'none', border: 'none', cursor: 'pointer',
-                textAlign: 'left', fontSize: 14, fontWeight: 600, color: 'var(--color-text)',
-              }}
-            >
-              {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-              <span style={{ flex: 1 }}>{group.label}</span>
-              {!isOther && group.totalShares > 0 && (
-                <span className="text-muted" style={{ fontSize: 12, marginRight: 8 }}>
-                  {group.totalShares.toLocaleString()} shares
-                </span>
-              )}
-              {!isOther && avgCost !== null && (
-                <span className="text-muted" style={{ fontSize: 12, marginRight: 8 }}>
-                  Avg {fmtD(avgCost)}
-                </span>
-              )}
-              <span className="badge badge-muted" style={{ marginRight: 8 }}>{group.count}</span>
-              {hasGainLoss && !isOther && (
-                <span style={{
-                  fontSize: 12, marginRight: 8, fontWeight: 500,
-                  color: totalGainLoss > 0 ? 'var(--color-success, #16a34a)' : totalGainLoss < 0 ? 'var(--color-danger, #dc2626)' : 'inherit',
-                }}>
-                  {fmtD(totalGainLoss)}
-                </span>
-              )}
-              <span style={{ fontWeight: 700, fontSize: 15 }}>{fmtD(group.total)}</span>
-            </button>
-            {isOpen && (
-              <div className="table-wrapper">
-                <table className="table-sticky-header">
-                  <thead>
-                    <tr>
-                      <th>Name</th>
-                      {!isOther && <th style={{ textAlign: 'right' }}>Shares</th>}
-                      {!isOther && <th style={{ textAlign: 'right' }}>Price</th>}
-                      {!isOther && <th style={{ textAlign: 'right' }}>Cost</th>}
-                      <th>Currency</th>
-                      <th style={{ textAlign: 'right' }}>Value</th>
-                      {hasGainLoss && <th style={{ textAlign: 'right' }}>Gain/Loss</th>}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {group.items.map(item => (
-                      <tr key={item.id}>
-                        <td className="font-medium">{item.name}</td>
-                        {!isOther && <td style={{ textAlign: 'right' }}>{item.shares ?? '—'}</td>}
-                        {!isOther && <td style={{ textAlign: 'right' }}>{item.pricePerShare != null ? fmtD(item.pricePerShare) : '—'}</td>}
-                        {!isOther && <td style={{ textAlign: 'right' }}>{item.costPrice != null ? fmtD(item.costPrice) : '—'}</td>}
-                        <td className="td-muted">{item.currency}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 500 }}>{fmtD(item.displayValue)}</td>
-                        {hasGainLoss && (
-                          <td style={{
-                            textAlign: 'right', fontWeight: 500,
-                            color: item.gainLoss > 0 ? 'var(--color-success, #16a34a)' : item.gainLoss < 0 ? 'var(--color-danger, #dc2626)' : 'inherit',
-                          }}>
-                            {item.gainLoss !== undefined ? (
-                              <>
-                                {fmtD(item.gainLoss)}
-                                <span style={{ fontSize: 11, opacity: 0.7, marginLeft: 4 }}>
-                                  ({item.gainLossPercent >= 0 ? '+' : ''}{item.gainLossPercent.toFixed(1)}%)
-                                </span>
-                              </>
-                            ) : '—'}
-                          </td>
-                        )}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+          <TickerGroupCard
+            key={key}
+            group={group}
+            groupKey={key}
+            isOpen={isOpen}
+            isOther={isOther}
+            avgCost={avgCost}
+            totalGainLoss={totalGainLoss}
+            hasGainLoss={hasGainLoss}
+            fmtD={fmtD}
+            hideAmounts={hideAmounts}
+            toggle={toggle}
+          />
         );
       })}
+    </div>
+  );
+}
+
+function TickerGroupCard({ group, groupKey, isOpen, isOther, avgCost, totalGainLoss, hasGainLoss, fmtD, hideAmounts, toggle }) {
+  const { sorted, sortKey, sortDir, onSort } = useSort(group.items, 'displayValue', 'desc');
+
+  return (
+    <div className="card">
+      <button
+        type="button"
+        onClick={() => toggle(groupKey)}
+        style={{
+          width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+          padding: '12px 16px', background: 'none', border: 'none', cursor: 'pointer',
+          textAlign: 'left', fontSize: 14, fontWeight: 600, color: 'var(--color-text)',
+        }}
+      >
+        {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+        <span style={{ flex: 1 }}>{group.label}</span>
+        {!isOther && group.totalShares > 0 && (
+          <span className="text-muted" style={{ fontSize: 12, marginRight: 8 }}>
+            {group.totalShares.toLocaleString()} shares
+          </span>
+        )}
+        {!isOther && avgCost !== null && (
+          <span className="text-muted" style={{ fontSize: 12, marginRight: 8 }}>
+            Avg {fmtD(avgCost)}
+          </span>
+        )}
+        <span className="badge badge-muted" style={{ marginRight: 8 }}>{group.count}</span>
+        {hasGainLoss && !isOther && (
+          <span style={{
+            fontSize: 12, marginRight: 8, fontWeight: 500,
+            color: totalGainLoss > 0 ? 'var(--color-success, #16a34a)' : totalGainLoss < 0 ? 'var(--color-danger, #dc2626)' : 'inherit',
+          }}>
+            {fmtD(totalGainLoss)}
+          </span>
+        )}
+        <span style={{ fontWeight: 700, fontSize: 15 }}>{fmtD(group.total)}</span>
+      </button>
+      {isOpen && (
+        <div className="table-wrapper">
+          <table className="table-sticky-header">
+            <thead>
+              <tr>
+                <SortableTh sortKey="name" current={sortKey} dir={sortDir} onSort={onSort}>Name</SortableTh>
+                {!isOther && <SortableTh sortKey="shares" current={sortKey} dir={sortDir} onSort={onSort} style={{ textAlign: 'right' }}>Shares</SortableTh>}
+                {!isOther && <SortableTh sortKey="pricePerShare" current={sortKey} dir={sortDir} onSort={onSort} style={{ textAlign: 'right' }}>Price</SortableTh>}
+                {!isOther && <SortableTh sortKey="costPrice" current={sortKey} dir={sortDir} onSort={onSort} style={{ textAlign: 'right' }}>Cost</SortableTh>}
+                <SortableTh sortKey="currency" current={sortKey} dir={sortDir} onSort={onSort}>Currency</SortableTh>
+                <SortableTh sortKey="displayValue" current={sortKey} dir={sortDir} onSort={onSort} style={{ textAlign: 'right' }}>Value</SortableTh>
+                <SortableTh sortKey="change_1d_pct" current={sortKey} dir={sortDir} onSort={onSort} style={{ textAlign: 'right' }}>1D %</SortableTh>
+                <SortableTh sortKey="change_1w_pct" current={sortKey} dir={sortDir} onSort={onSort} style={{ textAlign: 'right' }}>1W %</SortableTh>
+                {hasGainLoss && <SortableTh sortKey="gainLoss" current={sortKey} dir={sortDir} onSort={onSort} style={{ textAlign: 'right' }}>Gain/Loss</SortableTh>}
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map(item => (
+                <tr key={item.id}>
+                  <td className="font-medium">{item.name}</td>
+                  {!isOther && <td style={{ textAlign: 'right' }}>{item.shares ?? '—'}</td>}
+                  {!isOther && <td style={{ textAlign: 'right' }}>{item.pricePerShare != null ? fmtD(item.pricePerShare) : '—'}</td>}
+                  {!isOther && <td style={{ textAlign: 'right' }}>{item.costPrice != null ? fmtD(item.costPrice) : '—'}</td>}
+                  <td className="td-muted">{item.currency}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 500 }}>{fmtD(item.displayValue)}</td>
+                  <td style={percentCellStyle(item.change_1d_pct)}>{formatPercent(item.change_1d_pct, hideAmounts)}</td>
+                  <td style={percentCellStyle(item.change_1w_pct)}>{formatPercent(item.change_1w_pct, hideAmounts)}</td>
+                  {hasGainLoss && (
+                    <td style={{
+                      textAlign: 'right', fontWeight: 500,
+                      color: item.gainLoss > 0 ? 'var(--color-success, #16a34a)' : item.gainLoss < 0 ? 'var(--color-danger, #dc2626)' : 'inherit',
+                    }}>
+                      {item.gainLoss !== undefined ? (
+                        <>
+                          {fmtD(item.gainLoss)}
+                          <span style={{ fontSize: 11, opacity: 0.7, marginLeft: 4 }}>
+                            ({item.gainLossPercent >= 0 ? '+' : ''}{item.gainLossPercent.toFixed(1)}%)
+                          </span>
+                        </>
+                      ) : '—'}
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

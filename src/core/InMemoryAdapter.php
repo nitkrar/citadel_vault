@@ -1147,27 +1147,39 @@ class InMemoryAdapter implements StorageAdapter {
         foreach ($this->tickerPrices as $row) {
             if (in_array($row['ticker'], $tickers, true) && $row['fetched_at'] > $cutoff) {
                 $results[] = [
-                    'ticker'     => $row['ticker'],
-                    'exchange'   => $row['exchange'],
-                    'price'      => $row['price'],
-                    'currency'   => $row['currency'],
-                    'name'       => $row['name'],
-                    'fetched_at' => $row['fetched_at'],
+                    'ticker'         => $row['ticker'],
+                    'exchange'       => $row['exchange'],
+                    'price'          => $row['price'],
+                    'currency'       => $row['currency'],
+                    'name'           => $row['name'],
+                    'previous_close' => $row['previous_close'] ?? null,
+                    'after_hours'    => $row['after_hours'] ?? 0,
+                    'fetched_at'     => $row['fetched_at'],
                 ];
             }
         }
         return $results;
     }
 
-    public function upsertPrice(string $ticker, string $exchange, float $price, string $currency, string $name): void {
+    public function upsertPrice(
+        string $ticker,
+        string $exchange,
+        float $price,
+        string $currency,
+        string $name,
+        ?float $previousClose = null,
+        bool $afterHours = false
+    ): void {
         $now = gmdate('Y-m-d H:i:s');
         // ON DUPLICATE KEY UPDATE on ticker
         foreach ($this->tickerPrices as &$row) {
             if ($row['ticker'] === $ticker) {
-                $row['exchange']   = $exchange;
-                $row['price']      = $price;
-                $row['currency']   = $currency;
-                $row['name']       = $name;
+                $row['exchange'] = $exchange;
+                $row['price'] = $price;
+                $row['currency'] = $currency;
+                $row['name'] = $name;
+                $row['previous_close'] = $previousClose;
+                $row['after_hours'] = $afterHours ? 1 : 0;
                 $row['fetched_at'] = $now;
                 return;
             }
@@ -1175,11 +1187,13 @@ class InMemoryAdapter implements StorageAdapter {
         unset($row);
         // Insert new
         $this->tickerPrices[] = [
-            'ticker'     => $ticker,
-            'exchange'   => $exchange,
-            'price'      => $price,
-            'currency'   => $currency,
-            'name'       => $name,
+            'ticker' => $ticker,
+            'exchange' => $exchange,
+            'price' => $price,
+            'currency' => $currency,
+            'name' => $name,
+            'previous_close' => $previousClose,
+            'after_hours' => $afterHours ? 1 : 0,
             'fetched_at' => $now,
         ];
     }
@@ -1205,12 +1219,47 @@ class InMemoryAdapter implements StorageAdapter {
         ];
     }
 
+    public function getPriceHistoryNear(string $ticker, int $daysAgo, int $toleranceDays = 3): ?array {
+        $target = strtotime(gmdate('Y-m-d', strtotime("-{$daysAgo} days")));
+        $windowStart = strtotime(gmdate('Y-m-d', strtotime('-' . ($daysAgo + $toleranceDays) . ' days')));
+        $windowEnd = strtotime(gmdate('Y-m-d', strtotime('-' . max(0, $daysAgo - $toleranceDays) . ' days')));
+
+        $matches = array_values(array_filter($this->priceHistory, function ($row) use ($ticker, $windowStart, $windowEnd) {
+            if ($row['ticker'] !== $ticker) {
+                return false;
+            }
+            $recordedAt = strtotime($row['recorded_at']);
+            return $recordedAt >= $windowStart && $recordedAt <= $windowEnd;
+        }));
+
+        if (empty($matches)) {
+            return null;
+        }
+
+        usort($matches, function ($a, $b) use ($target) {
+            $diffA = abs(strtotime($a['recorded_at']) - $target);
+            $diffB = abs(strtotime($b['recorded_at']) - $target);
+
+            if ($diffA === $diffB) {
+                return strcmp($b['recorded_at'], $a['recorded_at']);
+            }
+
+            return $diffA <=> $diffB;
+        });
+
+        return $matches[0];
+    }
+
     public function getAllCachedPrices(): array {
         $results = $this->tickerPrices;
         usort($results, function ($a, $b) {
             return strcmp($b['fetched_at'], $a['fetched_at']);
         });
-        return $results;
+        return array_map(function ($row) {
+            $row['previous_close'] = $row['previous_close'] ?? null;
+            $row['after_hours'] = $row['after_hours'] ?? 0;
+            return $row;
+        }, $results);
     }
 
     public function getStaleTickers(int $ttlSeconds): array {

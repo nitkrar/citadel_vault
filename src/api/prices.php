@@ -177,6 +177,48 @@ function logCronRefreshAudit(string $summary): void {
     }
 }
 
+function nullableFloat(mixed $value): ?float {
+    return is_numeric($value) ? (float)$value : null;
+}
+
+function percentChange(float $price, ?float $baseline): ?float {
+    if ($baseline === null || abs($baseline) < 0.00000001) {
+        return null;
+    }
+
+    return (($price - $baseline) / $baseline) * 100;
+}
+
+function findPreviousCloseFromHistory($storage, string $ticker): ?float {
+    for ($daysAgo = 1; $daysAgo <= 4; $daysAgo++) {
+        $row = $storage->getPriceHistoryNear($ticker, $daysAgo, 0);
+        if ($row && is_numeric($row['price'] ?? null)) {
+            return (float)$row['price'];
+        }
+    }
+
+    return null;
+}
+
+function enrichTickerPriceRow($storage, string $ticker, array $row): array {
+    $price = (float)$row['price'];
+    $previousClose = nullableFloat($row['previous_close'] ?? null);
+
+    if ($previousClose === null) {
+        $previousClose = findPreviousCloseFromHistory($storage, $ticker);
+    }
+
+    $weekHistory = $storage->getPriceHistoryNear($ticker, 7, 3);
+    $weekBaseline = nullableFloat($weekHistory['price'] ?? null);
+
+    $row['previous_close'] = $previousClose;
+    $row['change_1d_pct'] = percentChange($price, $previousClose);
+    $row['change_1w_pct'] = percentChange($price, $weekBaseline);
+    $row['after_hours'] = !empty($row['after_hours']);
+
+    return $row;
+}
+
 Response::setCors();
 $method = $_SERVER['REQUEST_METHOD'];
 $action = $_GET['action'] ?? null;
@@ -268,15 +310,16 @@ if ($method === 'POST' && $action === 'refresh') {
             $canonicalResults = [];
             $cachedTickers = [];
             foreach ($cached as $row) {
-                $canonicalResults[$row['ticker']] = [
+                $canonicalResults[$row['ticker']] = enrichTickerPriceRow($storage, $row['ticker'], [
                     'price'            => (float)$row['price'],
                     'currency'         => $row['currency'],
                     'exchange'         => $row['exchange'],
                     'name'             => $row['name'],
+                    'previous_close'   => $row['previous_close'] ?? null,
+                    'after_hours'      => $row['after_hours'] ?? false,
                     'cached'           => true,
                     'canonical_ticker' => $row['ticker'],
-                    'after_hours'      => false,
-                ];
+                ]);
                 $cachedTickers[] = $row['ticker'];
             }
 
@@ -286,10 +329,10 @@ if ($method === 'POST' && $action === 'refresh') {
             if (!empty($staleTickers)) {
                 $fetched = TickerPrices::fetch($staleTickers);
                 foreach ($fetched['results'] as $ticker => $data) {
-                    $canonicalResults[$ticker] = $data + [
+                    $canonicalResults[$ticker] = enrichTickerPriceRow($storage, $ticker, $data + [
                         'cached' => false,
                         'canonical_ticker' => $ticker,
-                    ];
+                    ]);
                 }
                 $canonicalErrors = $fetched['errors'];
             }
