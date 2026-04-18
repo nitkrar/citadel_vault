@@ -12,6 +12,10 @@ import { BASE_URL, api, noAuthRequest, unauthRequest } from '../helpers/apiClien
 
 const TEST_CRON_TOKEN = 'test-cron-token';
 
+function runMysql(sql) {
+  execFileSync('mysql', ['-u', 'nitinkum', 'citadel_vault_test_db', '-e', sql], { stdio: 'ignore' });
+}
+
 /**
  * Extract data from API response, tolerating PHP deprecation warnings
  * that may prefix the JSON body (e.g. curl_close() in PHP 8.5).
@@ -202,6 +206,42 @@ describe('Prices API — refresh with ticker list', () => {
     const priceCount = Array.isArray(data.ticker.prices) ? 0 : Object.keys(data.ticker.prices).length;
     const errorCount = Array.isArray(data.ticker.errors) ? data.ticker.errors.length : Object.keys(data.ticker.errors).length;
     expect(priceCount + errorCount).toBeLessThanOrEqual(50);
+  });
+
+  it('returns previous_close and change_1d_pct from cached rows when available', async () => {
+    runMysql(`
+      DELETE FROM ticker_price_history WHERE ticker = 'AAPL';
+      DELETE FROM ticker_prices WHERE ticker = 'AAPL';
+      INSERT INTO ticker_prices (ticker, exchange, price, currency, name, previous_close, after_hours, fetched_at)
+      VALUES ('AAPL', 'NASDAQ', 200.00, 'USD', 'Apple Inc.', 190.00, 0, NOW());
+    `);
+
+    const resp = await api.post('/prices.php?action=refresh', { json: { type: 'ticker', tickers: ['AAPL'] } });
+    expect(resp.status).toBe(200);
+    const data = await extractData(resp);
+    const priceData = data.ticker.prices.AAPL;
+
+    expect(priceData.cached).toBe(true);
+    expect(priceData.previous_close).toBeCloseTo(190, 4);
+    expect(priceData.change_1d_pct).toBeCloseTo(((200 - 190) / 190) * 100, 4);
+  });
+
+  it('returns null change fields gracefully when previous_close is missing', async () => {
+    runMysql(`
+      DELETE FROM ticker_price_history WHERE ticker = 'NOCLOSE1';
+      DELETE FROM ticker_prices WHERE ticker = 'NOCLOSE1';
+      INSERT INTO ticker_prices (ticker, exchange, price, currency, name, previous_close, after_hours, fetched_at)
+      VALUES ('NOCLOSE1', 'NASDAQ', 120.00, 'USD', 'No Close Inc.', NULL, 0, NOW());
+    `);
+
+    const resp = await api.post('/prices.php?action=refresh', { json: { type: 'ticker', tickers: ['NOCLOSE1'] } });
+    expect(resp.status).toBe(200);
+    const data = await extractData(resp);
+    const priceData = data.ticker.prices.NOCLOSE1;
+
+    expect(priceData.previous_close).toBeNull();
+    expect(priceData.change_1d_pct).toBeNull();
+    expect(priceData.change_1w_pct).toBeNull();
   });
 });
 

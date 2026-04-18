@@ -619,7 +619,7 @@ interface StorageAdapter {
      * Get cached ticker prices within TTL window.
      * @param array $tickers List of ticker symbols to look up
      * @param int   $ttlSeconds Cache TTL in seconds
-     * @return array List of rows with ticker, exchange, price, currency, name, fetched_at
+     * @return array List of rows with ticker, exchange, price, currency, name, previous_close, after_hours, fetched_at
      */
     function getCachedPrices(array $tickers, int $ttlSeconds): array;
 
@@ -630,9 +630,19 @@ interface StorageAdapter {
      * @param string $exchange Exchange name
      * @param float  $price    Current price
      * @param string $currency Price currency code
-     * @param string $name     Ticker display name
+     * @param string     $name          Ticker display name
+     * @param float|null $previousClose Previous close when available
+     * @param bool       $afterHours    After-hours flag when available
      */
-    function upsertPrice(string $ticker, string $exchange, float $price, string $currency, string $name): void;
+    function upsertPrice(
+        string $ticker,
+        string $exchange,
+        float $price,
+        string $currency,
+        string $name,
+        ?float $previousClose = null,
+        bool $afterHours = false
+    ): void;
 
     /**
      * Add or update a price history entry for today.
@@ -643,6 +653,17 @@ interface StorageAdapter {
      * @param string $currency Price currency code
      */
     function addPriceHistory(string $ticker, string $exchange, float $price, string $currency): void;
+
+    /**
+     * Get the closest historical price row near N days ago within a tolerance window.
+     * Returns null when no row exists in the requested window.
+     *
+     * @param string $ticker        Ticker symbol
+     * @param int    $daysAgo       Target day distance from today
+     * @param int    $toleranceDays Allowed +/- tolerance around the target day
+     * @return array|null Historical price row or null
+     */
+    function getPriceHistoryNear(string $ticker, int $daysAgo, int $toleranceDays = 3): ?array;
 
     /**
      * Get all cached ticker prices (admin view).

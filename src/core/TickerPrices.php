@@ -81,7 +81,7 @@ class TickerPrices {
 
     /**
      * Parse Yahoo Finance v8 chart API response.
-     * @return array{price:float,currency:string,exchange:string,name:string,after_hours:bool}|string — result or error string
+     * @return array{price:float,currency:string,exchange:string,name:string,previous_close:?float,after_hours:bool}|string — result or error string
      */
     public static function parseResponse(string $ticker, string $body): array|string {
         $data = json_decode($body, true);
@@ -96,6 +96,7 @@ class TickerPrices {
         $marketState = $meta['marketState'] ?? '';
         $postTime = $meta['postMarketTime'] ?? 0;
         $regularTime = $meta['regularMarketTime'] ?? 0;
+        $previousClose = $meta['chartPreviousClose'] ?? $meta['regularMarketPreviousClose'] ?? null;
 
         // After-hours preference is opt-in via system setting (default off).
         // Citadel uses a once-per-day refresh model, so extended-hours quotes
@@ -121,15 +122,19 @@ class TickerPrices {
         // Normalize GBp (pence) to GBP
         if ($currency === 'GBp') {
             $price = $price / 100;
+            if (is_numeric($previousClose)) {
+                $previousClose = $previousClose / 100;
+            }
             $currency = 'GBP';
         }
 
         return [
-            'price'       => (float)$price,
-            'currency'    => $currency,
-            'exchange'    => $exchange,
-            'name'        => $name,
-            'after_hours' => $useAfterHours,
+            'price'          => (float)$price,
+            'currency'       => $currency,
+            'exchange'       => $exchange,
+            'name'           => $name,
+            'previous_close' => is_numeric($previousClose) ? (float)$previousClose : null,
+            'after_hours'    => $useAfterHours,
         ];
     }
 
@@ -187,7 +192,15 @@ class TickerPrices {
                     continue;
                 }
 
-                $storage->upsertPrice($ticker, $parsed['exchange'], $parsed['price'], $parsed['currency'], $parsed['name']);
+                $storage->upsertPrice(
+                    $ticker,
+                    $parsed['exchange'],
+                    $parsed['price'],
+                    $parsed['currency'],
+                    $parsed['name'],
+                    $parsed['previous_close'],
+                    $parsed['after_hours']
+                );
                 $storage->addPriceHistory($ticker, $parsed['exchange'], $parsed['price'], $parsed['currency']);
                 $results[$ticker] = $parsed;
             }
@@ -217,7 +230,15 @@ class TickerPrices {
                     continue;
                 }
 
-                $storage->upsertPrice($ticker, $parsed['exchange'], $parsed['price'], $parsed['currency'], $parsed['name']);
+                $storage->upsertPrice(
+                    $ticker,
+                    $parsed['exchange'],
+                    $parsed['price'],
+                    $parsed['currency'],
+                    $parsed['name'],
+                    $parsed['previous_close'],
+                    $parsed['after_hours']
+                );
                 $storage->addPriceHistory($ticker, $parsed['exchange'], $parsed['price'], $parsed['currency']);
                 $results[$ticker] = $parsed;
             }

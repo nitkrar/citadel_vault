@@ -23,9 +23,42 @@ class MariaDbAdapter implements StorageAdapter {
     ];
 
     private PDO $db;
+    private ?bool $hasPriceExtraColumns = null;
 
     public function __construct() {
         $this->db = Database::getInstance();
+    }
+
+    private function hasPriceExtraColumns(): bool {
+        if ($this->hasPriceExtraColumns !== null) {
+            return $this->hasPriceExtraColumns;
+        }
+
+        try {
+            $stmt = $this->db->query(
+                "SELECT COUNT(*)
+                   FROM information_schema.COLUMNS
+                  WHERE TABLE_SCHEMA = DATABASE()
+                    AND TABLE_NAME = 'ticker_prices'
+                    AND COLUMN_NAME = 'previous_close'"
+            );
+            $this->hasPriceExtraColumns = ((int)$stmt->fetchColumn() === 1);
+        } catch (Throwable $e) {
+            $this->hasPriceExtraColumns = false;
+        }
+
+        return $this->hasPriceExtraColumns;
+    }
+
+    private function shapeTickerPriceRow(array $row, bool $hasExtraColumns): array {
+        if (!$hasExtraColumns) {
+            $row['previous_close'] = null;
+            $row['after_hours'] = 0;
+            return $row;
+        }
+
+        $row['after_hours'] = isset($row['after_hours']) ? (int)$row['after_hours'] : 0;
+        return $row;
     }
 
     // =========================================================================
@@ -1362,9 +1395,13 @@ class MariaDbAdapter implements StorageAdapter {
         if (empty($tickers)) {
             return [];
         }
+        $hasExtraColumns = $this->hasPriceExtraColumns();
         $placeholders = str_repeat('?,', count($tickers) - 1) . '?';
+        $select = $hasExtraColumns
+            ? 'ticker, exchange, price, currency, name, previous_close, after_hours, fetched_at'
+            : 'ticker, exchange, price, currency, name, fetched_at';
         $stmt = $this->db->prepare(
-            "SELECT ticker, exchange, price, currency, name, fetched_at
+            "SELECT $select
              FROM ticker_prices
              WHERE ticker IN ($placeholders)
              AND fetched_at > DATE_SUB(NOW(), INTERVAL ? SECOND)"
@@ -1372,10 +1409,33 @@ class MariaDbAdapter implements StorageAdapter {
         $params = array_values($tickers);
         $params[] = $ttlSeconds;
         $stmt->execute($params);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return array_map(
+            fn($row) => $this->shapeTickerPriceRow($row, $hasExtraColumns),
+            $stmt->fetchAll(PDO::FETCH_ASSOC)
+        );
     }
 
-    public function upsertPrice(string $ticker, string $exchange, float $price, string $currency, string $name): void {
+    public function upsertPrice(
+        string $ticker,
+        string $exchange,
+        float $price,
+        string $currency,
+        string $name,
+        ?float $previousClose = null,
+        bool $afterHours = false
+    ): void {
+        if ($this->hasPriceExtraColumns()) {
+            $stmt = $this->db->prepare(
+                'INSERT INTO ticker_prices (ticker, exchange, price, currency, name, previous_close, after_hours, fetched_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+                 ON DUPLICATE KEY UPDATE exchange = VALUES(exchange), price = VALUES(price),
+                 currency = VALUES(currency), name = VALUES(name), previous_close = VALUES(previous_close),
+                 after_hours = VALUES(after_hours), fetched_at = NOW()'
+            );
+            $stmt->execute([$ticker, $exchange, $price, $currency, $name, $previousClose, $afterHours ? 1 : 0]);
+            return;
+        }
+
         $stmt = $this->db->prepare(
             'INSERT INTO ticker_prices (ticker, exchange, price, currency, name, fetched_at)
              VALUES (?, ?, ?, ?, ?, NOW())
@@ -1394,9 +1454,35 @@ class MariaDbAdapter implements StorageAdapter {
         $stmt->execute([$ticker, $exchange, $price, $currency]);
     }
 
+    public function getPriceHistoryNear(string $ticker, int $daysAgo, int $toleranceDays = 3): ?array {
+        $targetDate = gmdate('Y-m-d', strtotime("-{$daysAgo} days"));
+        $windowStart = gmdate('Y-m-d', strtotime('-' . ($daysAgo + $toleranceDays) . ' days'));
+        $windowEnd = gmdate('Y-m-d', strtotime('-' . max(0, $daysAgo - $toleranceDays) . ' days'));
+
+        $stmt = $this->db->prepare(
+            'SELECT ticker, exchange, price, currency, recorded_at
+               FROM ticker_price_history
+              WHERE ticker = ?
+                AND recorded_at BETWEEN ? AND ?
+              ORDER BY ABS(DATEDIFF(recorded_at, ?)) ASC, recorded_at DESC
+              LIMIT 1'
+        );
+        $stmt->execute([$ticker, $windowStart, $windowEnd, $targetDate]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row ?: null;
+    }
+
     public function getAllCachedPrices(): array {
-        $stmt = $this->db->query('SELECT * FROM ticker_prices ORDER BY fetched_at DESC');
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $hasExtraColumns = $this->hasPriceExtraColumns();
+        $select = $hasExtraColumns
+            ? 'ticker, exchange, price, currency, name, previous_close, after_hours, fetched_at'
+            : 'ticker, exchange, price, currency, name, fetched_at';
+        $stmt = $this->db->query("SELECT $select FROM ticker_prices ORDER BY fetched_at DESC");
+        return array_map(
+            fn($row) => $this->shapeTickerPriceRow($row, $hasExtraColumns),
+            $stmt->fetchAll(PDO::FETCH_ASSOC)
+        );
     }
 
     public function getStaleTickers(int $ttlSeconds): array {

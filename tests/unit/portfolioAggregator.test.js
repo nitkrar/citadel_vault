@@ -439,6 +439,34 @@ describe('aggregatePortfolio gain/loss integration', () => {
     expect(typeof result.summary.total_gain_loss).toBe('number');
   });
 
+  it('passes through 1D/1W ticker change fields when present on decrypted entries', () => {
+    const entries = [{
+      id: 1,
+      entry_type: 'asset',
+      decrypted: {
+        title: 'Apple Stock',
+        ticker: 'AAPL',
+        shares: '10',
+        price_per_share: '200',
+        cost_price: '150',
+        currency: 'USD',
+        previous_close: '190',
+        change_1d_pct: '5.26',
+        change_1w_pct: '-1.75',
+      },
+      template: {
+        name: 'Stock', icon: 'trending-up', key: 'asset', subtype: 'stock',
+        is_liability: false, fields: STOCK_FIELDS,
+      },
+    }];
+
+    const result = aggregatePortfolio(entries, CURRENCIES, 'GBP', 'USD');
+    expect(result.assets[0].previous_close).toBe(190);
+    expect(result.assets[0].change_1d_pct).toBeCloseTo(5.26, 2);
+    expect(result.assets[0].change_1w_pct).toBeCloseTo(-1.75, 2);
+    expect(result.by_ticker.AAPL.items[0].change_1d_pct).toBeCloseTo(5.26, 2);
+  });
+
   it('does not include gainLoss when cost_price is absent', () => {
     const entries = [{
       id: 1,

@@ -124,6 +124,11 @@ function accumulateGroup(groups, key, value, defaults) {
   return groups[key];
 }
 
+function parseNullableNumber(value) {
+  const parsed = parseFloat(value);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
 /**
  * Recalculate a snapshot from its per-entry blobs using a given rate map.
  * Used by HistoryTab to recompute totals at snapshot-time or current rates.
@@ -314,6 +319,9 @@ export function aggregatePortfolio(entries, currencies, baseCurrency, displayCur
       ticker: d.ticker || null,
       shares,
       pricePerShare,
+      previous_close: parseNullableNumber(d.previous_close),
+      change_1d_pct: parseNullableNumber(d.change_1d_pct),
+      change_1w_pct: parseNullableNumber(d.change_1w_pct),
     };
 
     // Add gain/loss if cost_price is available

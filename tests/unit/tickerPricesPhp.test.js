@@ -101,6 +101,7 @@ describe('TickerPrices PHP helpers', () => {
       currency: 'USD',
       exchange: 'NasdaqGS',
       name: 'Test Corp',
+      previous_close: null,
       after_hours: false,
     });
   });
@@ -120,6 +121,7 @@ describe('TickerPrices PHP helpers', () => {
       currency: 'USD',
       exchange: 'NasdaqGS',
       name: 'Test Corp',
+      previous_close: null,
       after_hours: false,
     });
   });
@@ -139,6 +141,7 @@ describe('TickerPrices PHP helpers', () => {
       currency: 'USD',
       exchange: 'NasdaqGS',
       name: 'Test Corp',
+      previous_close: null,
       after_hours: true,
     });
   });
@@ -158,6 +161,7 @@ describe('TickerPrices PHP helpers', () => {
       currency: 'USD',
       exchange: 'NasdaqGS',
       name: 'Test Corp',
+      previous_close: null,
       after_hours: false,
     });
   });
@@ -177,6 +181,7 @@ describe('TickerPrices PHP helpers', () => {
       currency: 'USD',
       exchange: 'NasdaqGS',
       name: 'Test Corp',
+      previous_close: null,
       after_hours: false,
     });
   });
@@ -196,6 +201,7 @@ describe('TickerPrices PHP helpers', () => {
       currency: 'USD',
       exchange: 'NasdaqGS',
       name: 'Test Corp',
+      previous_close: null,
       after_hours: false,
     });
   });
