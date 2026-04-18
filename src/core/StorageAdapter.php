@@ -245,13 +245,14 @@ interface StorageAdapter {
     function createSnapshotWithEntries(int $userId, string $date, string $encryptedMeta, array $entries): int;
 
     /**
-     * Update encrypted_data on existing snapshot entries.
-     * @param int   $userId     Owner user ID (for ownership check)
-     * @param int   $snapshotId Snapshot to update
-     * @param array $entries    Array of [entry_id => int, encrypted_data => string]
-     * @return int Number of entries updated
+     * Update snapshot header metadata and/or entry blobs.
+     * @param int         $userId        Owner user ID (for ownership check)
+     * @param int         $snapshotId    Snapshot to update
+     * @param array       $entries       Array of [entry_id => int, encrypted_data => string]
+     * @param string|null $encryptedMeta Optional encrypted header blob replacement
+     * @return int Number of rows updated
      */
-    function updateSnapshotEntries(int $userId, int $snapshotId, array $entries): int;
+    function updateSnapshotEntries(int $userId, int $snapshotId, array $entries, ?string $encryptedMeta = null): int;
 
     /**
      * Get snapshots with per-entry data for a user.
