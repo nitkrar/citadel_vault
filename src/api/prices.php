@@ -16,29 +16,215 @@
 require_once __DIR__ . '/../core/Response.php';
 require_once __DIR__ . '/../../config/config.php';
 require_once __DIR__ . '/../core/Auth.php';
+require_once __DIR__ . '/../core/Encryption.php';
 require_once __DIR__ . '/../core/Storage.php';
 require_once __DIR__ . '/../core/TickerPrices.php';
 require_once __DIR__ . '/../core/ExchangeRates.php';
 
+function marketRefreshPdo(): ?PDO {
+    static $pdo = null;
+    static $connectFailed = false;
+
+    if ($pdo instanceof PDO) {
+        return $pdo;
+    }
+
+    if ($connectFailed || (defined('STORAGE_ADAPTER') && STORAGE_ADAPTER !== 'mariadb')) {
+        return null;
+    }
+
+    try {
+        $pdo = new PDO(
+            sprintf('mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4', DB_HOST, DB_PORT, DB_NAME),
+            DB_USER,
+            DB_PASS,
+            [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            ]
+        );
+        return $pdo;
+    } catch (Throwable $e) {
+        $connectFailed = true;
+        return null;
+    }
+}
+
+function marketRefreshStateTableExists(): bool {
+    static $exists = null;
+
+    if ($exists !== null) {
+        return $exists;
+    }
+
+    $pdo = marketRefreshPdo();
+    if (!$pdo) {
+        $exists = false;
+        return false;
+    }
+
+    try {
+        $stmt = $pdo->prepare(
+            "SELECT 1
+               FROM information_schema.TABLES
+              WHERE TABLE_SCHEMA = DATABASE()
+                AND TABLE_NAME = 'market_refresh_state'
+              LIMIT 1"
+        );
+        $stmt->execute();
+        $exists = (bool)$stmt->fetchColumn();
+    } catch (Throwable $e) {
+        $exists = false;
+    }
+
+    return $exists;
+}
+
+function marketRefreshRecentlyAttempted(int $windowSeconds = 60): bool {
+    if (!marketRefreshStateTableExists()) {
+        return false;
+    }
+
+    $pdo = marketRefreshPdo();
+    if (!$pdo) {
+        return false;
+    }
+
+    try {
+        $stmt = $pdo->prepare(
+            "SELECT last_refresh_attempt
+               FROM market_refresh_state
+              WHERE state_key = 'global'
+              LIMIT 1"
+        );
+        $stmt->execute();
+        $lastAttempt = $stmt->fetchColumn();
+
+        if (!$lastAttempt) {
+            return false;
+        }
+
+        return strtotime((string)$lastAttempt) >= (time() - $windowSeconds);
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
+function recordMarketRefreshAttempt(): void {
+    if (!marketRefreshStateTableExists()) {
+        return;
+    }
+
+    $pdo = marketRefreshPdo();
+    if (!$pdo) {
+        return;
+    }
+
+    try {
+        $stmt = $pdo->prepare(
+            "INSERT INTO market_refresh_state (state_key, last_refresh_attempt)
+             VALUES ('global', NOW())
+             ON DUPLICATE KEY UPDATE last_refresh_attempt = VALUES(last_refresh_attempt)"
+        );
+        $stmt->execute();
+    } catch (Throwable $e) {
+        // Migration may not be deployed yet — fail open.
+    }
+}
+
+function recentRefreshResponse(string $type): array {
+    $segment = ['updated' => 0, 'skipped' => true, 'reason' => 'recent_refresh'];
+
+    return match ($type) {
+        'forex' => ['forex' => $segment],
+        'ticker' => ['ticker' => $segment],
+        default => ['forex' => $segment, 'ticker' => $segment],
+    };
+}
+
+function cronRefreshSummaryFromResponse(array $response): string {
+    foreach (['forex', 'ticker'] as $segment) {
+        if (!isset($response[$segment]) || !is_array($response[$segment])) {
+            continue;
+        }
+
+        if (($response[$segment]['reason'] ?? null) === 'recent_refresh') {
+            return 'recent_refresh';
+        }
+
+        if (($response[$segment]['reason'] ?? null) === 'concurrent_refresh_in_progress') {
+            return 'concurrent_refresh_in_progress';
+        }
+    }
+
+    return 'success';
+}
+
+function logCronRefreshAudit(string $summary): void {
+    $pdo = marketRefreshPdo();
+    if (!$pdo) {
+        return;
+    }
+
+    try {
+        $stmt = $pdo->prepare(
+            'INSERT INTO audit_log (user_id, action, resource_type, resource_id, ip_hash)
+             VALUES (NULL, ?, ?, NULL, ?)'
+        );
+        $stmt->execute(['cron_refresh', substr($summary, 0, 100), Auth::clientIpHash()]);
+    } catch (Throwable $e) {
+        // Audit log is best-effort.
+    }
+}
+
 Response::setCors();
-$payload = Auth::requireAuth();
-$userId = Auth::userId($payload);
-$isSiteAdmin = $payload['role'] === 'admin';
 $method = $_SERVER['REQUEST_METHOD'];
 $action = $_GET['action'] ?? null;
+$body = ($method === 'POST' && $action === 'refresh') ? Response::getBody() : [];
+$expectedCronToken = (string)env('CRON_TOKEN', '');
+$cronToken = (string)($_SERVER['HTTP_X_CRON_TOKEN'] ?? '');
+$hasTickerList = is_array($body['tickers'] ?? null) && !empty($body['tickers']);
+$isCronRefreshRequest = $action === 'refresh'
+    && $expectedCronToken !== ''
+    && hash_equals($expectedCronToken, $cronToken)
+    && !$hasTickerList;
 
-$storage = Storage::adapter();
+$userId = null;
+$isSiteAdmin = false;
+
+if ($isCronRefreshRequest) {
+    $storage = Storage::adapter();
+} else {
+    $payload = Auth::requireAuth();
+    $userId = Auth::userId($payload);
+    $isSiteAdmin = $payload['role'] === 'admin';
+    $storage = Storage::adapter();
+}
 
 // ============================================================================
 // POST ?action=refresh — Unified market data refresh
 // ============================================================================
 if ($method === 'POST' && $action === 'refresh') {
-    $body = Response::getBody();
     $type = $body['type'] ?? 'all';
     $force = !empty($body['force']);
 
     if (!in_array($type, ['all', 'forex', 'ticker'], true)) {
+        if ($isCronRefreshRequest) {
+            logCronRefreshAudit('invalid_type');
+        }
         Response::error('Invalid type. Must be: all, forex, or ticker.', 400);
+    }
+
+    $rateLimitKey = Auth::enforceIpRateLimit('market_refresh', 20, 3600);
+    Auth::recordRateLimit('market_refresh', $rateLimitKey);
+
+    if (!$force && !$hasTickerList && marketRefreshRecentlyAttempted()) {
+        recordMarketRefreshAttempt();
+        $response = recentRefreshResponse($type);
+        if ($isCronRefreshRequest) {
+            logCronRefreshAudit(cronRefreshSummaryFromResponse($response));
+        }
+        Response::success($response);
     }
 
     $response = [];
@@ -62,6 +248,9 @@ if ($method === 'POST' && $action === 'refresh') {
             $tickers = array_filter($tickers, fn($t) => preg_match('/^[A-Za-z0-9.\-^=]+$/', $t));
 
             if (empty($tickers)) {
+                if ($isCronRefreshRequest) {
+                    logCronRefreshAudit('no_valid_tickers');
+                }
                 Response::error('No valid tickers provided.', 400);
             }
 
@@ -107,6 +296,12 @@ if ($method === 'POST' && $action === 'refresh') {
         }
     }
 
+    if (!$hasTickerList) {
+        recordMarketRefreshAttempt();
+    }
+    if ($isCronRefreshRequest) {
+        logCronRefreshAudit(cronRefreshSummaryFromResponse($response));
+    }
     Response::success($response);
 }
 
@@ -127,6 +322,10 @@ if ($method === 'DELETE' && $action === 'cache') {
 
     $storage->clearPriceCache();
     Response::success(['cleared' => true]);
+}
+
+if ($action === 'refresh' && $isCronRefreshRequest) {
+    logCronRefreshAudit('method_not_allowed');
 }
 
 Response::error('Method not allowed.', 405);
