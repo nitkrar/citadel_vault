@@ -6,8 +6,11 @@
  *
  * Requires: php -S localhost:8081 router.php
  */
-import { describe, it, expect } from 'vitest';
-import { api, unauthRequest } from '../helpers/apiClient.js';
+import { execFileSync, spawn } from 'child_process';
+import { afterEach, beforeEach, describe, it, expect } from 'vitest';
+import { BASE_URL, api, noAuthRequest, unauthRequest } from '../helpers/apiClient.js';
+
+const TEST_CRON_TOKEN = 'test-cron-token';
 
 /**
  * Extract data from API response, tolerating PHP deprecation warnings
@@ -20,6 +23,76 @@ async function extractData(resp) {
   const body = JSON.parse(text.slice(jsonStart));
   return body?.data ?? body;
 }
+
+function runSql(sql) {
+  return execFileSync('mysql', ['-N', '-u', 'nitinkum', 'citadel_vault_test_db', '-e', sql], {
+    encoding: 'utf8',
+  }).trim();
+}
+
+async function rawRequest(method, path, { json, params, headers = {} } = {}) {
+  let url = `${BASE_URL}${path}`;
+  if (params) {
+    const qs = new URLSearchParams(params).toString();
+    url += (url.includes('?') ? '&' : '?') + qs;
+  }
+
+  return fetch(url, {
+    method,
+    headers: {
+      ...(json ? { 'Content-Type': 'application/json' } : {}),
+      ...headers,
+    },
+    ...(json ? { body: JSON.stringify(json) } : {}),
+  });
+}
+
+function holdRefreshLock(seconds = 3) {
+  const script = `
+    $pdo = new PDO("mysql:host=localhost;port=3306;dbname=citadel_vault_test_db;charset=utf8mb4", "nitinkum", "");
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $locked = (int)$pdo->query("SELECT GET_LOCK('citadel_market_refresh', 10)")->fetchColumn();
+    if ($locked !== 1) { fwrite(STDERR, "lock_failed\\n"); exit(1); }
+    echo "locked\\n";
+    flush();
+    sleep(${seconds});
+    $pdo->query("DO RELEASE_LOCK('citadel_market_refresh')");
+  `;
+
+  return new Promise((resolve, reject) => {
+    const child = spawn('php', ['-r', script], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stderr = '';
+
+    child.stderr.on('data', chunk => {
+      stderr += chunk.toString();
+    });
+
+    child.once('error', reject);
+    child.stdout.on('data', chunk => {
+      if (chunk.toString().includes('locked')) {
+        resolve(child);
+      }
+    });
+
+    child.once('exit', code => {
+      if (code !== 0) {
+        reject(new Error(stderr || `lock helper exited with ${code}`));
+      }
+    });
+  });
+}
+
+beforeEach(() => {
+  runSql(`
+    DELETE FROM rate_limits WHERE action = 'market_refresh';
+    DELETE FROM market_refresh_state;
+    DELETE FROM audit_log WHERE action = 'cron_refresh';
+  `);
+});
+
+afterEach(() => {
+  runSql("DO RELEASE_LOCK('citadel_market_refresh');");
+});
 
 // ── POST ?action=refresh — Ticker refresh with explicit list ────────
 describe('Prices API — refresh with ticker list', () => {
@@ -194,5 +267,88 @@ describe('Prices API — auth enforcement', () => {
   it('GET cache without auth returns 401', async () => {
     const resp = await unauthRequest('GET', '/prices.php', { params: { action: 'cache' } });
     expect(resp.status).toBe(401);
+  });
+});
+
+describe('Prices API — cron token hardening', () => {
+  it('accepts a valid X-Cron-Token for POST refresh and writes an audit entry', async () => {
+    const resp = await rawRequest('POST', '/prices.php?action=refresh', {
+      json: { type: 'ticker' },
+      headers: { 'X-Cron-Token': TEST_CRON_TOKEN },
+    });
+
+    expect(resp.status).toBe(200);
+    const data = await extractData(resp);
+    expect(data).toHaveProperty('ticker');
+
+    const auditCount = Number(runSql("SELECT COUNT(*) FROM audit_log WHERE action = 'cron_refresh'"));
+    expect(auditCount).toBe(1);
+  });
+
+  it('returns 401 for missing token without JWT', async () => {
+    const resp = await noAuthRequest('POST', '/prices.php?action=refresh', { json: { type: 'ticker' } });
+    expect(resp.status).toBe(401);
+  });
+
+  it('returns 401 for wrong token without JWT', async () => {
+    const resp = await rawRequest('POST', '/prices.php?action=refresh', {
+      json: { type: 'ticker' },
+      headers: { 'X-Cron-Token': 'wrong-token' },
+    });
+
+    expect(resp.status).toBe(401);
+  });
+
+  it('returns 405 for valid token on the wrong method', async () => {
+    const resp = await rawRequest('GET', '/prices.php', {
+      params: { action: 'refresh' },
+      headers: { 'X-Cron-Token': TEST_CRON_TOKEN },
+    });
+
+    expect(resp.status).toBe(405);
+  });
+
+  it('does not bypass JWT for cache endpoints', async () => {
+    const resp = await rawRequest('GET', '/prices.php', {
+      params: { action: 'cache' },
+      headers: { 'X-Cron-Token': TEST_CRON_TOKEN },
+    });
+
+    expect(resp.status).toBe(401);
+  });
+
+  it('rate limits the 21st refresh request from the same IP within an hour', async () => {
+    for (let i = 0; i < 20; i++) {
+      const resp = await rawRequest('POST', '/prices.php?action=refresh', {
+        json: { type: 'ticker' },
+        headers: { 'X-Cron-Token': TEST_CRON_TOKEN },
+      });
+      expect(resp.status).toBe(200);
+    }
+
+    const resp = await rawRequest('POST', '/prices.php?action=refresh', {
+      json: { type: 'ticker' },
+      headers: { 'X-Cron-Token': TEST_CRON_TOKEN },
+    });
+
+    expect(resp.status).toBe(429);
+  });
+
+  it('returns concurrent_refresh_in_progress when another refresh already holds the advisory lock', async () => {
+    const lockHolder = await holdRefreshLock();
+
+    try {
+      const resp = await rawRequest('POST', '/prices.php?action=refresh', {
+        json: { type: 'ticker' },
+        headers: { 'X-Cron-Token': TEST_CRON_TOKEN },
+      });
+
+      expect(resp.status).toBe(200);
+      const data = await extractData(resp);
+      expect(data.ticker.skipped).toBe(true);
+      expect(data.ticker.reason).toBe('concurrent_refresh_in_progress');
+    } finally {
+      lockHolder.kill('SIGTERM');
+    }
   });
 });

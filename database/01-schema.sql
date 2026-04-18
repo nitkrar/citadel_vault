@@ -32,6 +32,7 @@ DROP TABLE IF EXISTS `user_vault_keys`;
 DROP TABLE IF EXISTS `webauthn_challenges`;
 DROP TABLE IF EXISTS `user_credentials_webauthn`;
 DROP TABLE IF EXISTS `rate_limits`;
+DROP TABLE IF EXISTS `market_refresh_state`;
 DROP TABLE IF EXISTS `password_history`;
 DROP TABLE IF EXISTS `plaid_items`;
 DROP TABLE IF EXISTS `ticker_price_history`;
@@ -435,6 +436,13 @@ CREATE TABLE `rate_limits` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_rate_limits_action_id` (`action`, `identifier`),
     KEY `idx_rate_limits_window` (`window_start`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `market_refresh_state` (
+    `state_key`             VARCHAR(50) NOT NULL,
+    `last_refresh_attempt`  TIMESTAMP NULL DEFAULT NULL,
+    `updated_at`            TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`state_key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================================================

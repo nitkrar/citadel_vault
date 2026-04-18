@@ -6,6 +6,64 @@
 require_once __DIR__ . '/Storage.php';
 
 class ExchangeRates {
+    private static function lockConnection(): ?PDO {
+        static $pdo = null;
+        static $connectFailed = false;
+
+        if ($pdo instanceof PDO) {
+            return $pdo;
+        }
+
+        if ($connectFailed || (defined('STORAGE_ADAPTER') && STORAGE_ADAPTER !== 'mariadb')) {
+            return null;
+        }
+
+        try {
+            $pdo = new PDO(
+                sprintf('mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4', DB_HOST, DB_PORT, DB_NAME),
+                DB_USER,
+                DB_PASS,
+                [
+                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                ]
+            );
+            return $pdo;
+        } catch (Throwable $e) {
+            $connectFailed = true;
+            return null;
+        }
+    }
+
+    private static function withRefreshLock(callable $callback): array {
+        $pdo = self::lockConnection();
+        if (!$pdo) {
+            return $callback();
+        }
+
+        $lockAcquired = false;
+
+        try {
+            $lockAcquired = (int)$pdo->query("SELECT GET_LOCK('citadel_market_refresh', 0)")->fetchColumn() === 1;
+            if (!$lockAcquired) {
+                return ['updated' => 0, 'skipped' => true, 'reason' => 'concurrent_refresh_in_progress'];
+            }
+        } catch (Throwable $e) {
+            return $callback();
+        }
+
+        try {
+            return $callback();
+        } finally {
+            if ($lockAcquired) {
+                try {
+                    $pdo->query("DO RELEASE_LOCK('citadel_market_refresh')");
+                } catch (Throwable $e) {
+                    // Best-effort unlock.
+                }
+            }
+        }
+    }
 
     /**
      * Check whether rates need refreshing (last update before today UTC, or never).
@@ -75,9 +133,11 @@ class ExchangeRates {
      * Refresh only if rates are stale (not yet updated today).
      */
     public static function refreshIfStale(): array {
-        if (!self::needsRefresh()) {
-            return ['updated' => 0, 'skipped' => true, 'reason' => 'already_fresh'];
-        }
-        return self::refresh();
+        return self::withRefreshLock(function (): array {
+            if (!self::needsRefresh()) {
+                return ['updated' => 0, 'skipped' => true, 'reason' => 'already_fresh'];
+            }
+            return self::refresh();
+        });
     }
 }
