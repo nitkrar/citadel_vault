@@ -614,13 +614,18 @@ class InMemoryAdapter implements StorageAdapter {
         return $id;
     }
 
-    public function updateSnapshotEntries(int $userId, int $snapshotId, array $entries): int {
+    public function updateSnapshotEntries(int $userId, int $snapshotId, array $entries, ?string $encryptedMeta = null): int {
         // Verify snapshot belongs to user
         if (!isset($this->snapshots[$snapshotId]) || $this->snapshots[$snapshotId]['user_id'] !== $userId) {
             throw new \RuntimeException('Snapshot not found or access denied.');
         }
 
         $updated = 0;
+        if ($encryptedMeta !== null) {
+            $this->snapshots[$snapshotId]['encrypted_data'] = $encryptedMeta;
+            $updated++;
+        }
+
         foreach ($entries as $entry) {
             foreach ($this->snapshotEntries as &$se) {
                 if ($se['snapshot_id'] === $snapshotId && $se['entry_id'] === ($entry['entry_id'] ?? null)) {

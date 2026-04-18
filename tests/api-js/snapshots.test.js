@@ -147,6 +147,69 @@ describe('Snapshot API', () => {
     });
   });
 
+  // ── PUT — Update snapshots ───────────────────────────────────────
+  describe('PUT (update snapshot)', () => {
+    it('updates encrypted_meta without requiring entry rewrites', async () => {
+      await api.post('/snapshots.php', {
+        json: {
+          snapshot_date: TODAY,
+          encrypted_meta: JSON.stringify({
+            base_currency: 'GBP',
+            date: '2026-03-14T10:00:00.000Z',
+            comment: null,
+          }),
+          entries: [
+            {
+              entry_id: 123,
+              encrypted_data: JSON.stringify({
+                name: 'AAPL Shares',
+                template_name: 'Stocks',
+                subtype: 'stocks',
+                is_liability: false,
+                currency: 'USD',
+                raw_value: 5000,
+              }),
+            },
+          ],
+        },
+      });
+
+      const listResp = await api.get('/snapshots.php', {
+        params: { from: TODAY, to: TODAY },
+      });
+      const snapshots = await extractData(listResp);
+      const snapshot = snapshots.find(s => s.snapshot_date === TODAY);
+
+      expect(snapshot).toBeTruthy();
+
+      const putResp = await api.put('/snapshots.php', {
+        json: {
+          snapshot_id: snapshot.id,
+          encrypted_meta: JSON.stringify({
+            base_currency: 'GBP',
+            date: '2026-03-14T10:00:00.000Z',
+            comment: 'After quarterly rebalance',
+          }),
+        },
+      });
+      expect(putResp.status).toBe(200);
+
+      const afterResp = await api.get('/snapshots.php', {
+        params: { from: TODAY, to: TODAY },
+      });
+      const afterSnapshots = await extractData(afterResp);
+      const updated = afterSnapshots.find(s => s.id === snapshot.id);
+
+      expect(JSON.parse(updated.data)).toEqual({
+        base_currency: 'GBP',
+        date: '2026-03-14T10:00:00.000Z',
+        comment: 'After quarterly rebalance',
+      });
+      expect(updated.entries).toHaveLength(snapshot.entries.length);
+      expect(updated.entries.map(entry => entry.encrypted_data)).toEqual(snapshot.entries.map(entry => entry.encrypted_data));
+    });
+  });
+
   // ── Auth enforcement ────────────────────────────────────────────
   describe('auth enforcement', () => {
     it('GET returns 401 without auth', async () => {
@@ -160,6 +223,16 @@ describe('Snapshot API', () => {
           snapshot_date: TODAY,
           encrypted_meta: 'x',
           entries: [{ encrypted_data: 'x' }],
+        },
+      });
+      expect(resp.status).toBe(401);
+    });
+
+    it('PUT returns 401 without auth', async () => {
+      const resp = await unauthRequest('PUT', '/snapshots.php', {
+        json: {
+          snapshot_id: 1,
+          encrypted_meta: 'x',
         },
       });
       expect(resp.status).toBe(401);

@@ -84,18 +84,25 @@ if ($method === 'POST') {
 }
 
 // ---------------------------------------------------------------------------
-// PUT — Update encrypted_data on existing snapshot entries
+// PUT — Update snapshot header metadata and/or existing snapshot entries
 // ---------------------------------------------------------------------------
 if ($method === 'PUT') {
     $body = Response::getBody();
     $snapshotId = (int)($body['snapshot_id'] ?? 0);
     $entries = $body['entries'] ?? [];
+    $encryptedMeta = $body['encrypted_meta'] ?? null;
 
     if (!$snapshotId) {
         Response::error('snapshot_id is required.', 400);
     }
-    if (!is_array($entries) || empty($entries)) {
-        Response::error('entries must be a non-empty array.', 400);
+    if (!is_array($entries)) {
+        Response::error('entries must be an array.', 400);
+    }
+    if ($encryptedMeta !== null && $encryptedMeta === '') {
+        Response::error('encrypted_meta cannot be empty.', 400);
+    }
+    if (empty($entries) && $encryptedMeta === null) {
+        Response::error('Provide encrypted_meta and/or entries.', 400);
     }
 
     foreach ($entries as $entry) {
@@ -104,8 +111,8 @@ if ($method === 'PUT') {
         }
     }
 
-    $updated = $storage->updateSnapshotEntries($userId, $snapshotId, $entries);
-    Response::success(['message' => "Updated $updated entries."]);
+    $updated = $storage->updateSnapshotEntries($userId, $snapshotId, $entries, $encryptedMeta);
+    Response::success(['message' => "Updated $updated rows."]);
 }
 
 // ---------------------------------------------------------------------------

@@ -14,15 +14,15 @@ import {
 } from 'chart.js';
 import 'chartjs-adapter-date-fns';
 import { useEncryption } from '../contexts/EncryptionContext';
-import { useVaultEntries } from '../contexts/VaultDataContext';
 import { useHideAmounts } from '../components/Layout';
 import usePortfolioData from '../hooks/usePortfolioData';
 import AssetsTab from '../components/portfolio/AssetsTab';
 import PerformanceTab from '../components/portfolio/PerformanceTab';
+import Modal from '../components/Modal';
 import useAppConfig from '../hooks/useAppConfig';
 import useCountries from '../hooks/useCountries';
 import api from '../api/client';
-import { fmtCurrency, MASKED } from '../lib/checks';
+import { fmtCurrency, MASKED, apiData } from '../lib/checks';
 import * as workerDispatcher from '../lib/workerDispatcher';
 import { AAD_SNAPSHOT_META, AAD_SNAPSHOT_ENTRY } from '../lib/crypto';
 import { hasAnyIntegration, getIntegration, getIntegrationType } from '../integrations/helpers';
@@ -39,10 +39,19 @@ const TABS = [
 
 // Migration map for old sessionStorage tab keys
 const TAB_MIGRATION = { country: 'assets', account: 'assets', type: 'assets', currencies: 'assets', history: 'performance' };
+const MAX_SNAPSHOT_COMMENT_LENGTH = 500;
+
+function clampSnapshotComment(value) {
+  return String(value || '').slice(0, MAX_SNAPSHOT_COMMENT_LENGTH);
+}
+
+function normalizeSnapshotComment(value) {
+  const trimmed = clampSnapshotComment(value).trim();
+  return trimmed ? trimmed : null;
+}
 
 export default function PortfolioPage() {
-  const { isUnlocked, decrypt, encrypt, decryptWithFallback } = useEncryption();
-  const { decryptedCache } = useVaultEntries();
+  const { isUnlocked, encrypt, decryptWithFallback } = useEncryption();
   const { hideAmounts } = useHideAmounts();
   const {
     portfolio, loading, error, refetch,
@@ -60,7 +69,6 @@ export default function PortfolioPage() {
   const [assetsGroupBy, setAssetsGroupBy] = useState(() => sessionStorage.getItem('pv_portfolio_assets_group') || 'none');
   const [expandedGroups, setExpandedGroups] = useState({});
   const [snapshotSaving, setSnapshotSaving] = useState(false);
-  const [snapshotPrompt, setSnapshotPrompt] = useState(null); // { staleCount }
   const { config } = useAppConfig();
   const plaidEnabled = config?.plaid_enabled === 'true';
 
@@ -105,15 +113,30 @@ export default function PortfolioPage() {
     setExpandedGroups(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
+  const [snapshotModalOpen, setSnapshotModalOpen] = useState(false);
+  const [snapshotComment, setSnapshotComment] = useState('');
+  const [snapshotModalStaleCount, setSnapshotModalStaleCount] = useState(0);
+  const [snapshotReplacingToday, setSnapshotReplacingToday] = useState(false);
+  const [snapshotCheckingToday, setSnapshotCheckingToday] = useState(false);
+
+  const closeSnapshotModal = useCallback(() => {
+    if (snapshotSaving) return;
+    setSnapshotModalOpen(false);
+    setSnapshotComment('');
+    setSnapshotModalStaleCount(0);
+    setSnapshotReplacingToday(false);
+    setSnapshotCheckingToday(false);
+  }, [snapshotSaving]);
+
   // ── Save snapshot (split model v3) ──────────────────────────────
-  const doSaveSnapshot = async () => {
+  const doSaveSnapshot = async (commentInput = '') => {
     if (!portfolio) return;
     setSnapshotSaving(true);
-    setSnapshotPrompt(null);
     try {
       const meta = {
         base_currency: baseCurrency,
         date: new Date().toISOString(),
+        comment: normalizeSnapshotComment(commentInput),
       };
       const encryptedMeta = await encrypt(meta, AAD_SNAPSHOT_META);
 
@@ -129,6 +152,7 @@ export default function PortfolioPage() {
         encrypted_meta: encryptedMeta,
         entries,
       });
+      closeSnapshotModal();
       alert('Snapshot saved.');
     } catch (err) {
       alert(err.response?.data?.error || 'Failed to save snapshot.');
@@ -137,16 +161,33 @@ export default function PortfolioPage() {
     }
   };
 
-  const handleSaveSnapshot = () => {
+  const handleSaveSnapshot = async () => {
     if (!portfolio) return;
+    let staleCount = 0;
     try {
       const cached = JSON.parse(sessionStorage.getItem('pv_ticker_prices') || '{}');
       if (Object.keys(cached).length > 0) {
-        setSnapshotPrompt({ staleCount: Object.keys(cached).length });
-        return;
+        staleCount = Object.keys(cached).length;
       }
     } catch { /* ignore */ }
-    doSaveSnapshot();
+
+    setSnapshotComment('');
+    setSnapshotModalStaleCount(staleCount);
+    setSnapshotReplacingToday(false);
+    setSnapshotCheckingToday(true);
+    setSnapshotModalOpen(true);
+
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const { data: resp } = await api.get(`/snapshots.php?from=${today}&to=${today}`);
+      const body = apiData({ data: resp }, []);
+      const snapshots = Array.isArray(body) ? body : (body?.snapshots || []);
+      setSnapshotReplacingToday(snapshots.length > 0);
+    } catch {
+      setSnapshotReplacingToday(false);
+    } finally {
+      setSnapshotCheckingToday(false);
+    }
   };
 
   // ── Vault locked state ─────────────────────────────────────────
@@ -328,9 +369,64 @@ export default function PortfolioPage() {
         <>
           {activeTab === 'overview' && <OverviewTab portfolio={p} fmtD={fmtD} hideAmounts={hideAmounts} />}
           {activeTab === 'assets' && <AssetsTab portfolio={p} fmtD={fmtD} groupBy={assetsGroupBy} setGroupBy={setAssetsGroupBy} expandedGroups={expandedGroups} toggleGroup={toggleGroup} />}
-          {activeTab === 'performance' && <PerformanceTab decrypt={decrypt} fmtD={fmtD} hideAmounts={hideAmounts} currencies={currencies} countries={countries} displayCurrency={displayCurrency} baseCurrency={baseCurrency} snapshotPrompt={snapshotPrompt} setSnapshotPrompt={setSnapshotPrompt} doSaveSnapshot={doSaveSnapshot} snapshotSaving={snapshotSaving} decryptedCache={decryptedCache} portfolio={portfolio} isMobile={isMobile} />}
+          {activeTab === 'performance' && <PerformanceTab encrypt={encrypt} decryptWithFallback={decryptWithFallback} fmtD={fmtD} hideAmounts={hideAmounts} currencies={currencies} countries={countries} displayCurrency={displayCurrency} isMobile={isMobile} />}
         </>
       )}
+      <Modal
+        isOpen={snapshotModalOpen}
+        onClose={closeSnapshotModal}
+        title="Save Snapshot"
+        footer={(
+          <>
+            <button className="btn btn-outline" onClick={closeSnapshotModal} disabled={snapshotSaving}>Cancel</button>
+            <button className="btn btn-primary" onClick={() => doSaveSnapshot(snapshotComment)} disabled={snapshotSaving || snapshotCheckingToday}>
+              <Camera size={14} /> {snapshotSaving ? 'Saving...' : 'Save Snapshot'}
+            </button>
+          </>
+        )}
+      >
+        {snapshotModalStaleCount > 0 && (
+          <div className="alert alert-warning" style={{ marginBottom: 16 }}>
+            <AlertTriangle size={16} style={{ flexShrink: 0 }} />
+            <span>Some stock/crypto prices may not have been saved to your entries.</span>
+          </div>
+        )}
+        <div className="form-group">
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
+            <label className="form-label" htmlFor="snapshot-comment">Comment (optional)</label>
+            <span className="text-muted" style={{ fontSize: 12 }}>
+              {snapshotComment.length} / {MAX_SNAPSHOT_COMMENT_LENGTH}
+            </span>
+          </div>
+          <textarea
+            id="snapshot-comment"
+            className="form-control"
+            rows={4}
+            maxLength={MAX_SNAPSHOT_COMMENT_LENGTH}
+            placeholder="Add context for this snapshot"
+            value={snapshotComment}
+            onChange={(e) => setSnapshotComment(clampSnapshotComment(e.target.value))}
+          />
+          <div className="text-muted" style={{ fontSize: 13, marginTop: 8 }}>
+            This comment will be encrypted alongside the snapshot metadata.
+          </div>
+          {snapshotReplacingToday && (
+            <div className="text-muted" style={{ fontSize: 13, marginTop: 8 }}>
+              This will replace today&apos;s snapshot and any existing comment.
+            </div>
+          )}
+          {snapshotCheckingToday && (
+            <div className="text-muted" style={{ fontSize: 13, marginTop: 8 }}>
+              Checking whether a snapshot already exists for today.
+            </div>
+          )}
+          {snapshotModalStaleCount > 0 && (
+            <div className="text-muted" style={{ fontSize: 13, marginTop: 8 }}>
+              The snapshot will capture the values currently stored in your vault entries. To get the latest prices, cancel and run Refresh All first.
+            </div>
+          )}
+        </div>
+      </Modal>
       {refreshToast && (
         <SaveToast key={refreshToast.key} message={refreshToast.message} type={refreshToast.type} onDismiss={clearRefreshToast} />
       )}
