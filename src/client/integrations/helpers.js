@@ -1,31 +1,23 @@
 /**
  * Provider-agnostic integration data helpers.
  * Reads/writes integration metadata inside encrypted entry blobs.
- * Supports lazy migration from legacy `_plaid` to `integrations.plaid`.
  */
 
 /**
  * Get integration metadata for a specific provider.
- * Backward-compatible: reads `integrations[type]` first, falls back to `_plaid` for legacy entries.
  */
 export function getIntegration(data, type) {
   if (!data) return null;
-  const fromNew = data.integrations?.[type];
-  if (fromNew) return fromNew;
-  // Legacy fallback
-  if (type === 'plaid' && data._plaid) return data._plaid;
-  return null;
+  return data.integrations?.[type] ?? null;
 }
 
 /**
  * Get the integration type for an entry, or null if none.
- * Checks `integrations` keys first, falls back to `_plaid` detection.
  */
 export function getIntegrationType(data) {
   if (!data) return null;
   const keys = Object.keys(data.integrations || {});
   if (keys.length > 0) return keys[0];
-  if (data._plaid) return 'plaid';
   return null;
 }
 
@@ -38,13 +30,10 @@ export function hasAnyIntegration(data) {
 
 /**
  * Set integration metadata on an entry. Returns a new object (immutable).
- * Always writes the new `integrations` format. Strips legacy `_plaid` if present.
  */
 export function setIntegration(data, type, meta) {
   const result = { ...data };
   result.integrations = { ...(result.integrations || {}), [type]: meta };
-  // Strip legacy field
-  delete result._plaid;
   return result;
 }
 
@@ -57,8 +46,6 @@ export function removeIntegration(data, type) {
     const { [type]: _, ...rest } = result.integrations;
     result.integrations = Object.keys(rest).length > 0 ? rest : undefined;
   }
-  // Strip legacy field
-  if (type === 'plaid') delete result._plaid;
   return result;
 }
 

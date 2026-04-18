@@ -155,7 +155,7 @@ export function VaultDataProvider({ children }) {
     notifyOtherTabs();
   }, [notifyOtherTabs]);
 
-  // ── CRUD: Update local (for inline edits, Plaid refresh) ─────
+  // ── CRUD: Update local (for inline edits and integration sync) ─────
   const updateEntryLocal = useCallback(async (entryId, newDecryptedData) => {
     const blob = await encrypt(newDecryptedData, AAD_VAULT_ENTRY);
     await api.put(`/vault.php?id=${entryId}`, { encrypted_data: blob });

@@ -36,8 +36,6 @@ class InMemoryAdapter implements StorageAdapter {
     private array $users = [];
     private array $webauthnChallenges = [];
     private array $webauthnCredentials = [];
-    private array $plaidItems = [];
-
     /** @var array<string, int> Auto-increment counters per table */
     private int $entrySeq = 0;
     private int $shareSeq = 0;
@@ -2281,91 +2279,6 @@ class InMemoryAdapter implements StorageAdapter {
             && $this->webauthnCredentials[$credentialId]['user_id'] === $userId) {
             unset($this->webauthnCredentials[$credentialId]);
         }
-    }
-
-    // =========================================================================
-    // Plaid
-    // =========================================================================
-
-    public function upsertPlaidItem(int $userId, string $itemId, string $encryptedAccessToken): void {
-        // ON DUPLICATE KEY: dedup on (user_id, item_id)
-        foreach ($this->plaidItems as &$item) {
-            if ($item['user_id'] === $userId && $item['item_id'] === $itemId) {
-                $item['access_token'] = $encryptedAccessToken;
-                $item['status'] = 'active';
-                $item['updated_at'] = gmdate('Y-m-d H:i:s');
-                return;
-            }
-        }
-        unset($item);
-        $now = gmdate('Y-m-d H:i:s');
-        $this->plaidItems[] = [
-            'user_id'      => $userId,
-            'item_id'      => $itemId,
-            'access_token' => $encryptedAccessToken,
-            'status'       => 'active',
-            'created_at'   => $now,
-            'updated_at'   => $now,
-        ];
-    }
-
-    public function getPlaidItems(int $userId, array $itemIds): array {
-        if (empty($itemIds)) {
-            return [];
-        }
-        $results = [];
-        foreach ($this->plaidItems as $item) {
-            if ($item['user_id'] === $userId && in_array($item['item_id'], $itemIds, true)) {
-                $results[] = [
-                    'item_id'      => $item['item_id'],
-                    'access_token' => $item['access_token'],
-                ];
-            }
-        }
-        return $results;
-    }
-
-    public function updatePlaidItemStatus(string $itemId, int $userId, string $status): void {
-        foreach ($this->plaidItems as &$item) {
-            if ($item['item_id'] === $itemId && $item['user_id'] === $userId) {
-                $item['status'] = $status;
-                $item['updated_at'] = gmdate('Y-m-d H:i:s');
-                return;
-            }
-        }
-        unset($item);
-    }
-
-    public function getPlaidItem(int $userId, string $itemId): ?array {
-        foreach ($this->plaidItems as $item) {
-            if ($item['user_id'] === $userId && $item['item_id'] === $itemId) {
-                return ['access_token' => $item['access_token']];
-            }
-        }
-        return null;
-    }
-
-    public function deletePlaidItem(int $userId, string $itemId): void {
-        $this->plaidItems = array_values(array_filter($this->plaidItems, function ($item) use ($userId, $itemId) {
-            return !($item['user_id'] === $userId && $item['item_id'] === $itemId);
-        }));
-    }
-
-    public function getPlaidItemsByUser(int $userId): array {
-        $results = [];
-        foreach ($this->plaidItems as $item) {
-            if ($item['user_id'] === $userId) {
-                $results[] = [
-                    'item_id'    => $item['item_id'],
-                    'status'     => $item['status'],
-                    'created_at' => $item['created_at'],
-                    'updated_at' => $item['updated_at'],
-                ];
-            }
-        }
-        // ORDER BY created_at DESC
-        usort($results, fn($a, $b) => strcmp($b['created_at'], $a['created_at']));
-        return $results;
     }
 
     // =========================================================================

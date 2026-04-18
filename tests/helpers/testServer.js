@@ -48,7 +48,7 @@ async function truncateTestDb() {
     'audit_log', 'portfolio_snapshot_entries', 'portfolio_snapshots',
     'shared_items', 'vault_entries', 'user_vault_keys', 'user_preferences',
     'webauthn_challenges', 'user_credentials_webauthn', 'rate_limits',
-    'password_history', 'invite_requests', 'plaid_items',
+    'password_history', 'invite_requests',
     'ticker_prices', 'ticker_price_history', 'currency_rate_history',
     'system_settings', 'users',
   ];
