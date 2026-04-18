@@ -96,7 +96,20 @@ class TickerPrices {
         $marketState = $meta['marketState'] ?? '';
         $postTime = $meta['postMarketTime'] ?? 0;
         $regularTime = $meta['regularMarketTime'] ?? 0;
-        $useAfterHours = $post !== null
+
+        // After-hours preference is opt-in via system setting (default off).
+        // Citadel uses a once-per-day refresh model, so extended-hours quotes
+        // are relevant only when the admin explicitly enables them.
+        $preferAfterHours = false;
+        try {
+            $setting = Storage::adapter()->getSystemSetting('prefer_after_hours');
+            $preferAfterHours = ($setting === 'true' || $setting === '1');
+        } catch (Throwable $e) {
+            // Setting not present (pre-migration) → stay off.
+        }
+
+        $useAfterHours = $preferAfterHours
+            && $post !== null
             && in_array($marketState, ['POST', 'CLOSED'], true)
             && $postTime > $regularTime
             && abs($post - $regular) / max($regular, 0.01) < 0.30;
