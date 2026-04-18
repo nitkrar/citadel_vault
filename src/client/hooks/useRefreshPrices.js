@@ -2,8 +2,8 @@ import { useState, useCallback } from 'react';
 import { useVaultEntries } from '../contexts/VaultDataContext';
 import { useEncryption } from '../contexts/EncryptionContext';
 import useTemplates from './useTemplates';
-import api from '../api/client';
 import { getProvider } from '../integrations/modules';
+import { fetchTickerPrices } from '../lib/priceApi';
 
 const PRICE_CACHE_KEY = 'pv_ticker_prices';
 
@@ -49,8 +49,7 @@ export default function useRefreshPrices() {
 
     // Fetch from API
     const unique = [...new Set(tickerEntries.map(e => e.ticker))];
-    const { data: resp } = await api.post('/prices.php?action=refresh', { type: 'ticker', tickers: unique });
-    const prices = (resp?.data || resp)?.ticker?.prices || {};
+    const { prices } = await fetchTickerPrices(unique);
 
     // Apply to entries (encrypt → server → IndexedDB → React state)
     let count = 0;
