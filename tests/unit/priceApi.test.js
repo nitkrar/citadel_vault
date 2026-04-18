@@ -14,13 +14,18 @@ describe('priceApi', () => {
     vi.clearAllMocks();
   });
 
-  it('fetchTickerPrice returns the trimmed ticker price and error shape', async () => {
+  it('fetchTickerPrice returns canonicalTicker and afterHours alongside the trimmed ticker price', async () => {
     api.post.mockResolvedValue({
       data: {
         data: {
           ticker: {
             prices: {
-              AAPL: { price: 123.45, currency: 'USD' },
+              AAPL: {
+                price: 123.45,
+                currency: 'USD',
+                canonical_ticker: 'AAPL',
+                after_hours: true,
+              },
             },
             errors: {},
           },
@@ -29,8 +34,15 @@ describe('priceApi', () => {
     });
 
     await expect(fetchTickerPrice('  AAPL  ')).resolves.toEqual({
-      price: { price: 123.45, currency: 'USD' },
+      price: {
+        price: 123.45,
+        currency: 'USD',
+        canonical_ticker: 'AAPL',
+        after_hours: true,
+      },
       error: null,
+      canonicalTicker: 'AAPL',
+      afterHours: true,
     });
 
     expect(api.post).toHaveBeenCalledWith('/prices.php?action=refresh', {
@@ -54,6 +66,8 @@ describe('priceApi', () => {
     await expect(fetchTickerPrice('BAD')).resolves.toEqual({
       price: null,
       error: 'Ticker not found',
+      canonicalTicker: null,
+      afterHours: false,
     });
   });
 
@@ -63,8 +77,18 @@ describe('priceApi', () => {
         data: {
           ticker: {
             prices: {
-              AAPL: { price: 123.45, currency: 'USD' },
-              MSFT: { price: 234.56, currency: 'USD' },
+              AAPL: {
+                price: 123.45,
+                currency: 'USD',
+                canonical_ticker: 'AAPL',
+                after_hours: false,
+              },
+              MSFT: {
+                price: 234.56,
+                currency: 'USD',
+                canonical_ticker: 'MSFT',
+                after_hours: true,
+              },
             },
             errors: {
               MISS: 'Ticker not found',
@@ -76,8 +100,18 @@ describe('priceApi', () => {
 
     await expect(fetchTickerPrices(['  AAPL  ', 'MSFT', 'AAPL', 'MISS'])).resolves.toEqual({
       prices: {
-        AAPL: { price: 123.45, currency: 'USD' },
-        MSFT: { price: 234.56, currency: 'USD' },
+        AAPL: {
+          price: 123.45,
+          currency: 'USD',
+          canonical_ticker: 'AAPL',
+          after_hours: false,
+        },
+        MSFT: {
+          price: 234.56,
+          currency: 'USD',
+          canonical_ticker: 'MSFT',
+          after_hours: true,
+        },
       },
       errors: {
         MISS: 'Ticker not found',
