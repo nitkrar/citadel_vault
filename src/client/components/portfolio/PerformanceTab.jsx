@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { ChevronDown, ChevronRight, Settings, Clock, AlertTriangle, MoreVertical } from 'lucide-react';
+import { ChevronDown, ChevronRight, Settings, Clock, MoreVertical } from 'lucide-react';
 import { Line as CJSLine, Bar as CJSBar } from 'react-chartjs-2';
 import { Chart as ChartJS } from 'chart.js';
 import zoomPlugin from 'chartjs-plugin-zoom';
@@ -13,10 +13,31 @@ import { fmtCurrency, MASKED, apiData } from '../../lib/checks';
 import { buildRateMap, buildSymbolMap, recalculateSnapshot } from '../../lib/portfolioAggregator';
 import * as workerDispatcher from '../../lib/workerDispatcher';
 import {
-  CHART_COLORS, NET_WORTH_COLOR, POSITIVE_COLOR, NEGATIVE_COLOR,
+  NET_WORTH_COLOR, POSITIVE_COLOR, NEGATIVE_COLOR,
   getBreakdownColor, abbreviateNumber,
 } from '../../lib/chartColors';
-import { AAD_SNAPSHOT_ENTRY } from '../../lib/crypto';
+import { AAD_SNAPSHOT_ENTRY, AAD_SNAPSHOT_META } from '../../lib/crypto';
+
+const MAX_SNAPSHOT_COMMENT_LENGTH = 500;
+
+function clampSnapshotComment(value) {
+  return String(value || '').slice(0, MAX_SNAPSHOT_COMMENT_LENGTH);
+}
+
+function normalizeSnapshotComment(value) {
+  const trimmed = clampSnapshotComment(value).trim();
+  return trimmed ? trimmed : null;
+}
+
+function getSnapshotComment(snapshot) {
+  const comment = snapshot?._meta?.comment;
+  return typeof comment === 'string' && comment.trim() ? comment.trim() : null;
+}
+
+function truncateSnapshotComment(comment, maxLength = 40) {
+  if (!comment) return '—';
+  return comment.length > maxLength ? `${comment.slice(0, maxLength - 1)}…` : comment;
+}
 
 /**
  * Cross-chart hover sync plugin (instance-level, not global).
@@ -74,7 +95,7 @@ function getGroupTotals(summary, breakdown) {
   return {};
 }
 
-export default function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies, countries, displayCurrency, baseCurrency, snapshotPrompt, setSnapshotPrompt, doSaveSnapshot, snapshotSaving, decryptedCache, portfolio, isMobile }) {
+export default function PerformanceTab({ encrypt, decryptWithFallback, fmtD, hideAmounts, currencies, countries, displayCurrency, isMobile }) {
   const [snapshots, setSnapshots] = useState([]);
   const [loadingSnap, setLoadingSnap] = useState(true);
   const [rateMode, setRateMode] = useState('current'); // 'current' | 'snapshot'
@@ -97,6 +118,8 @@ export default function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies,
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState(null);
   const [showToolbarOverflow, setShowToolbarOverflow] = useState(false);
+  const [snapshotCommentDraft, setSnapshotCommentDraft] = useState('');
+  const [savingComment, setSavingComment] = useState(false);
   const heroChartRef = useRef(null);
   const deltaChartRef = useRef(null);
 
@@ -132,6 +155,9 @@ export default function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies,
       const decrypted = [];
       for (const s of raw) {
         if (!s.entries || s.entries.length === 0) continue;
+        const meta = s.data
+          ? await decryptWithFallback(s.data, AAD_SNAPSHOT_META)
+          : null;
         const entryBlobs = s.entries.map(e => e.encrypted_data);
         const decryptedEntries = await workerDispatcher.decryptBatch(entryBlobs, null, AAD_SNAPSHOT_ENTRY);
         const entries = [];
@@ -145,7 +171,7 @@ export default function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies,
           }
         }
 
-        decrypted.push({ ...s, _entries: entries });
+        decrypted.push({ ...s, _entries: entries, _meta: meta && typeof meta === 'object' ? meta : null });
       }
       if (append) {
         setSnapshots(prev => [...decrypted, ...prev]); // prepend older data
@@ -161,6 +187,10 @@ export default function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies,
 
   // Auto-load snapshots on mount
   useEffect(() => { loadSnapshots(); }, []);
+
+  useEffect(() => {
+    setSnapshotCommentDraft(getSnapshotComment(selectedSnapshot) || '');
+  }, [selectedSnapshot]);
 
   // Fetch historical rates for a specific date (cached)
   const fetchHistoricalRates = async (date) => {
@@ -206,6 +236,35 @@ export default function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies,
   };
 
   const hasSnapshots = snapshots.some(s => s._entries && s._entries.length > 0);
+
+  const handleSaveComment = async () => {
+    if (!selectedSnapshot?.id) return;
+
+    setSavingComment(true);
+    try {
+      const nextMeta = {
+        ...(selectedSnapshot._meta && typeof selectedSnapshot._meta === 'object' ? selectedSnapshot._meta : {}),
+        comment: normalizeSnapshotComment(snapshotCommentDraft),
+      };
+      const encryptedMeta = await encrypt(nextMeta, AAD_SNAPSHOT_META);
+
+      await api.put('/snapshots.php', {
+        snapshot_id: selectedSnapshot.id,
+        encrypted_meta: encryptedMeta,
+      });
+
+      setSnapshots(prev => prev.map((snapshot) => (
+        snapshot.id === selectedSnapshot.id
+          ? { ...snapshot, data: encryptedMeta, _meta: nextMeta }
+          : snapshot
+      )));
+      setSelectedSnapshot(prev => prev ? { ...prev, data: encryptedMeta, _meta: nextMeta } : prev);
+    } catch {
+      alert('Failed to update snapshot comment.');
+    } finally {
+      setSavingComment(false);
+    }
+  };
 
   // ── All useMemo hooks BEFORE early returns (React Rules of Hooks) ──
 
@@ -1044,6 +1103,7 @@ export default function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies,
               <thead>
                 <tr>
                   <th>Date</th>
+                  <th>Comment</th>
                   <th style={{ textAlign: 'right' }}>Net Worth</th>
                   <th style={{ textAlign: 'right' }}>Assets</th>
                   <th style={{ textAlign: 'right' }}>Liabilities</th>
@@ -1058,6 +1118,7 @@ export default function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies,
                   return (
                     <tr key={snapKey} style={{ cursor: 'pointer' }} onClick={() => { setSelectedSnapshot(s); setExpandedTypes({}); }}>
                       <td>{s.snapshot_date}</td>
+                      <td title={getSnapshotComment(s) || undefined}>{truncateSnapshotComment(getSnapshotComment(s))}</td>
                       <td style={{ textAlign: 'right', fontWeight: 500 }}>{fmtD(summary.net_worth)}</td>
                       <td style={{ textAlign: 'right' }}>{fmtD(summary.total_assets)}</td>
                       <td style={{ textAlign: 'right' }}>{fmtD(summary.total_liabilities)}</td>
@@ -1083,33 +1144,21 @@ export default function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies,
         )}
       </div>
 
-      {/* Snapshot stale price prompt */}
-      {snapshotPrompt && (
-        <div className="modal-overlay" onClick={() => setSnapshotPrompt(null)}>
-          <div className="modal-dialog" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3 className="modal-title">Prices May Be Outdated</h3>
-              <button className="modal-close-btn" onClick={() => setSnapshotPrompt(null)}>&times;</button>
-            </div>
-            <div className="modal-body">
-              <div className="alert alert-warning" style={{ marginBottom: 16 }}>
-                <AlertTriangle size={16} style={{ flexShrink: 0 }} />
-                <span>Some stock/crypto prices may not have been saved to your entries.</span>
-              </div>
-              <p className="text-muted" style={{ fontSize: 13 }}>The snapshot will capture the values currently stored in your vault entries. To get the latest prices, cancel and run Refresh All first.</p>
-            </div>
-            <div className="modal-footer" style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-              <button className="btn btn-outline" onClick={() => setSnapshotPrompt(null)}>Cancel</button>
-              <button className="btn btn-primary" onClick={doSaveSnapshot} disabled={snapshotSaving}>
-                {snapshotSaving ? 'Saving...' : 'Save with current values'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Snapshot Detail Modal */}
-      <Modal isOpen={!!selectedSnapshot} onClose={() => setSelectedSnapshot(null)} title={`Snapshot — ${selectedSnapshot?.snapshot_date || ''}`} size="lg">
+      <Modal
+        isOpen={!!selectedSnapshot}
+        onClose={() => setSelectedSnapshot(null)}
+        title={`Snapshot — ${selectedSnapshot?.snapshot_date || ''}`}
+        size="lg"
+        footer={selectedSnapshot ? (
+          <>
+            <button className="btn btn-outline" onClick={() => setSelectedSnapshot(null)} disabled={savingComment}>Close</button>
+            <button className="btn btn-primary" onClick={handleSaveComment} disabled={savingComment}>
+              {savingComment ? 'Saving...' : 'Save Comment'}
+            </button>
+          </>
+        ) : null}
+      >
         {selectedSnapshot && (() => {
           const summary = getSnapshotSummary(selectedSnapshot);
           if (!summary) return <p className="text-muted">No entry data available for this snapshot.</p>;
@@ -1135,6 +1184,24 @@ export default function PerformanceTab({ decrypt, fmtD, hideAmounts, currencies,
 
           return (
             <>
+              <div className="form-group" style={{ marginBottom: 20 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
+                  <label className="form-label" htmlFor="snapshot-detail-comment">Comment</label>
+                  <span className="text-muted" style={{ fontSize: 12 }}>
+                    {snapshotCommentDraft.length} / {MAX_SNAPSHOT_COMMENT_LENGTH}
+                  </span>
+                </div>
+                <textarea
+                  id="snapshot-detail-comment"
+                  className="form-control"
+                  rows={3}
+                  maxLength={MAX_SNAPSHOT_COMMENT_LENGTH}
+                  placeholder="Add context for this snapshot"
+                  value={snapshotCommentDraft}
+                  onChange={(e) => setSnapshotCommentDraft(clampSnapshotComment(e.target.value))}
+                />
+              </div>
+
               {/* Summary cards */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 12, marginBottom: 20 }}>
                 {[

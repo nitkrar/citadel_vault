@@ -667,7 +667,7 @@ class MariaDbAdapter implements StorageAdapter {
         }
     }
 
-    public function updateSnapshotEntries(int $userId, int $snapshotId, array $entries): int {
+    public function updateSnapshotEntries(int $userId, int $snapshotId, array $entries, ?string $encryptedMeta = null): int {
         // Verify snapshot belongs to user
         $stmt = $this->db->prepare('SELECT id FROM portfolio_snapshots WHERE id = ? AND user_id = ?');
         $stmt->execute([$snapshotId, $userId]);
@@ -676,12 +676,22 @@ class MariaDbAdapter implements StorageAdapter {
         }
 
         $updated = 0;
-        $stmt = $this->db->prepare(
-            'UPDATE portfolio_snapshot_entries SET encrypted_data = ? WHERE snapshot_id = ? AND entry_id = ?'
-        );
-        foreach ($entries as $entry) {
-            $stmt->execute([$entry['encrypted_data'], $snapshotId, $entry['entry_id']]);
+        if ($encryptedMeta !== null) {
+            $stmt = $this->db->prepare(
+                'UPDATE portfolio_snapshots SET encrypted_data = ? WHERE id = ? AND user_id = ?'
+            );
+            $stmt->execute([$encryptedMeta, $snapshotId, $userId]);
             $updated += $stmt->rowCount();
+        }
+
+        if (!empty($entries)) {
+            $stmt = $this->db->prepare(
+                'UPDATE portfolio_snapshot_entries SET encrypted_data = ? WHERE snapshot_id = ? AND entry_id = ?'
+            );
+            foreach ($entries as $entry) {
+                $stmt->execute([$entry['encrypted_data'], $snapshotId, $entry['entry_id']]);
+                $updated += $stmt->rowCount();
+            }
         }
         return $updated;
     }
