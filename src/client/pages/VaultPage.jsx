@@ -22,8 +22,7 @@ import ImportModal from '../components/ImportModal';
 import SaveToast from '../components/SaveToast';
 import SortTh from '../components/SortableTh';
 import { useHideAmounts } from '../components/Layout';
-import { usePlaidLink } from '../integrations/providers/plaid/PlaidConnect';
-import { getIntegration, getIntegrationType, setIntegration, removeIntegration } from '../integrations/helpers';
+import { getIntegration, getIntegrationType, removeIntegration } from '../integrations/helpers';
 import { getProvider, getProviderDisplayInfo } from '../integrations/modules';
 import * as cryptoLib from '../lib/crypto';
 import { extractValue, buildRateMap, convertCurrency } from '../lib/portfolioAggregator';
@@ -233,12 +232,9 @@ export default function VaultPage() {
   const [reEncryptEntry, setReEncryptEntry] = useState(null);
   const [reEncrypting, setReEncrypting] = useState(false);
 
-  // Plaid state
-  const [integrationMsg, setPlaidMsg] = useState('');
-  const [plaidLinkEntryId, setPlaidLinkEntryId] = useState(null); // entry id for "Link to Plaid" flow
-  const [plaidAccountPicker, setPlaidAccountPicker] = useState(null); // { accounts, itemId, metadata, entryId }
+  // Integration state
+  const [integrationMsg, setIntegrationMsg] = useState('');
   const [integrationRefreshing, setIntegrationRefreshing] = useState(false);
-  const plaidEnabled = config?.plaid_enabled === 'true';
 
   // Mobile overflow menus
   const [showActionOverflow, setShowActionOverflow] = useState(false);
@@ -251,133 +247,6 @@ export default function VaultPage() {
     window.addEventListener('vault:currency-toggle', handleCurrencyToggle);
     return () => window.removeEventListener('vault:currency-toggle', handleCurrencyToggle);
   }, []);
-
-
-  // ── Plaid Connect Bank success handler ─────────────────────────────
-  const handlePlaidConnectSuccess = useCallback(async ({ itemId, accounts, metadata }) => {
-    const institutionName = metadata?.institution?.name || 'Bank';
-    let created = 0;
-    for (const acct of accounts) {
-      try {
-        const plaidMeta = {
-          item_id: itemId,
-          account_id: acct.account_id,
-          institution_name: institutionName,
-          account_name: acct.name,
-          account_type: acct.type,
-          account_subtype: acct.subtype,
-          last_refreshed: new Date().toISOString(),
-        };
-
-        // Smart template mapping: match Plaid account type/subtype to Citadel template
-        // Ref: https://plaid.com/docs/api/accounts/
-        const plaidSubtype = acct.subtype || '';
-        const plaidType = acct.type || '';
-        const findAcctTpl = (subtype) => templates.find(t => t.template_key === 'account' && t.subtype === subtype && !t.owner_id);
-        const genericAcctTpl = templates.find(t => t.template_key === 'account' && !t.owner_id && !t.country_code && !t.subtype);
-        const RETIREMENT_SUBTYPES = ['401k', 'roth 401k', 'ira', 'roth', 'sep ira', 'simple ira', '403B', '457b',
-          'pension', 'keogh', 'profit sharing plan', 'thrift savings plan', '401a', 'sarsep', 'lira', 'lif',
-          'lrif', 'lrsp', 'rrsp', 'rrif', 'rdsp', 'resp', 'prif', 'rlif', 'tfsa', 'sipp'];
-
-        let acctTpl;
-        if (plaidType === 'credit') {
-          acctTpl = findAcctTpl('credit_card') || genericAcctTpl;
-        } else if (plaidSubtype === 'checking' || plaidSubtype === 'cash management') {
-          acctTpl = findAcctTpl('checking') || genericAcctTpl;
-        } else if (plaidSubtype === 'savings' || plaidSubtype === 'money market' || plaidSubtype === 'cd' || plaidSubtype === 'cash isa' || plaidSubtype === 'isa') {
-          acctTpl = findAcctTpl('savings') || genericAcctTpl;
-        } else if (plaidSubtype === 'prepaid' || plaidSubtype === 'ebt' || plaidSubtype === 'paypal') {
-          acctTpl = findAcctTpl('wallet') || genericAcctTpl;
-        } else if (RETIREMENT_SUBTYPES.includes(plaidSubtype)) {
-          acctTpl = findAcctTpl('401k') || genericAcctTpl;
-        } else if (plaidType === 'investment' || plaidSubtype === 'brokerage' || plaidSubtype === 'non-taxable brokerage account') {
-          acctTpl = findAcctTpl('brokerage') || genericAcctTpl;
-        } else {
-          acctTpl = genericAcctTpl;
-        }
-        const isLiability = plaidType === 'credit' || plaidType === 'loan';
-
-        const acctForm = setIntegration({
-          title: `${acct.name} (${institutionName})`,
-          institution: institutionName,
-          currency: acct.currency,
-        }, 'plaid', plaidMeta);
-        const acctEntry = await createEntry('account', acctTpl?.id || null, acctForm);
-        const acctId = acctEntry.id;
-
-        // Create linked Cash asset (negative value for credit/liability)
-        const cashTpl = templates.find(t => t.template_key === 'asset' && t.subtype === 'cash' && !t.owner_id);
-        const balanceValue = isLiability ? -Math.abs(acct.balance || 0) : (acct.balance || 0);
-        const cashForm = setIntegration({
-          title: `${acct.name} — Balance`,
-          linked_account_id: String(acctId),
-          value: String(balanceValue),
-          currency: acct.currency,
-        }, 'plaid', plaidMeta);
-        await createEntry('asset', cashTpl?.id || null, cashForm);
-        created += 2;
-      } catch {
-        // continue with next account
-      }
-    }
-    setPlaidMsg(`Created ${created} entries from ${institutionName}`);
-    setTimeout(() => setPlaidMsg(''), 5000);
-  }, [createEntry, templates]);
-
-  // ── Plaid Link Existing Entry handler ───────────────────────────────
-  const handlePlaidLinkExisting = useCallback(async ({ itemId, accounts, metadata }) => {
-    if (!plaidLinkEntryId) return;
-    setPlaidAccountPicker({ accounts, itemId, metadata, entryId: plaidLinkEntryId });
-    setPlaidLinkEntryId(null);
-  }, [plaidLinkEntryId]);
-
-  const confirmPlaidLink = useCallback(async (account) => {
-    if (!plaidAccountPicker) return;
-    const { itemId, metadata, entryId } = plaidAccountPicker;
-    const entry = entries.find(e => e.id === entryId);
-    const d = decryptedCache[entryId];
-    if (!entry || !d) return;
-
-    const plaidMeta = {
-      item_id: itemId,
-      account_id: account.account_id,
-      institution_name: metadata?.institution?.name || '',
-      account_name: account.name,
-      account_type: account.type,
-      account_subtype: account.subtype,
-      last_refreshed: new Date().toISOString(),
-    };
-
-    const updated = setIntegration({ ...d }, 'plaid', plaidMeta);
-    try {
-      await updateEntryLocal(entryId, updated);
-
-      // Also update linked Cash asset balance if one exists
-      const linkedAssets = entries.filter(e => {
-        const ad = decryptedCache[e.id];
-        return e.entry_type === 'asset' && ad && String(ad.linked_account_id) === String(entryId);
-      });
-      for (const asset of linkedAssets) {
-        const ad = decryptedCache[asset.id];
-        if (ad) {
-          const updatedAsset = setIntegration({ ...ad, value: String(account.balance || 0) }, 'plaid', plaidMeta);
-          await updateEntryLocal(asset.id, updatedAsset);
-        }
-      }
-
-      setPlaidMsg('Linked to Plaid successfully');
-      setTimeout(() => setPlaidMsg(''), 5000);
-    } catch (err) {
-      alert(err.response?.data?.error || 'Failed to link to Plaid');
-    }
-    setPlaidAccountPicker(null);
-  }, [plaidAccountPicker, entries, decryptedCache, updateEntryLocal]);
-
-  // Plaid hooks — one for connect, one for link existing
-  const { open: openPlaidConnect, loading: plaidConnectLoading, error: plaidConnectError } =
-    usePlaidLink({ onSuccess: handlePlaidConnectSuccess });
-  const { open: openPlaidLinkExisting, loading: plaidLinkLoading, error: plaidLinkError } =
-    usePlaidLink({ onSuccess: handlePlaidLinkExisting });
 
   // ── Formatted options for SearchableSelect ─────────────────────────
   const countryOptions = useMemo(() =>
@@ -1255,29 +1124,18 @@ export default function VaultPage() {
             <button className="btn btn-ghost btn-sm" onClick={loadDeleted}><Undo2 size={14} /> Recently Deleted</button>
             <button className="btn btn-secondary btn-sm" onClick={() => setShowImport(true)}><Upload size={14} /> Import</button>
             {(() => {
-              const plaidItemIds = plaidEnabled ? [...new Set(
-                entries.map(e => {
-                  const d = decryptedCache[e.id];
-                  return getIntegration(d, getIntegrationType(d))?.item_id;
-                }).filter(Boolean)
-              )] : [];
               const hasTickers = entries.some(e => {
                 const d = decryptedCache[e.id];
                 const tpl = templates.find(t => t.id === e.template_id) || e.template;
                 return (tpl?.subtype === 'stock' && d?.ticker) || (tpl?.subtype === 'crypto' && d?.coin);
               });
-              const canRefresh = plaidItemIds.length > 0 || hasTickers;
+              const canRefresh = hasTickers;
               return (
                 <>
                   {canRefresh && (
                     <button className="btn btn-secondary btn-sm" disabled={refreshAllInProgress}
-                      onClick={() => handleRefreshAll(plaidItemIds)}>
+                      onClick={() => handleRefreshAll()}>
                       <RefreshCw size={14} className={refreshAllInProgress ? 'spin' : ''} /> {refreshAllInProgress ? 'Refreshing...' : 'Refresh All'}
-                    </button>
-                  )}
-                  {plaidEnabled && (
-                    <button className="btn btn-secondary" onClick={openPlaidConnect} disabled={plaidConnectLoading}>
-                      <Landmark size={14} /> {plaidConnectLoading ? 'Connecting...' : 'Connect Bank'}
                     </button>
                   )}
                 </>
@@ -1364,18 +1222,12 @@ export default function VaultPage() {
           <div style={{ flex: 1 }} />
           {/* ... overflow menu */}
           {(() => {
-            const plaidItemIds = plaidEnabled ? [...new Set(
-              entries.map(e => {
-                const d = decryptedCache[e.id];
-                return getIntegration(d, getIntegrationType(d))?.item_id;
-              }).filter(Boolean)
-            )] : [];
             const hasTickers = entries.some(e => {
               const d = decryptedCache[e.id];
               const tpl = templates.find(t => t.id === e.template_id) || e.template;
               return (tpl?.subtype === 'stock' && d?.ticker) || (tpl?.subtype === 'crypto' && d?.coin);
             });
-            const canRefresh = plaidItemIds.length > 0 || hasTickers;
+            const canRefresh = hasTickers;
             return (
               <div style={{ position: 'relative', flexShrink: 0 }}>
                 <button className="btn btn-ghost btn-sm" onClick={() => setShowActionOverflow(v => !v)} aria-label="More actions">
@@ -1396,15 +1248,8 @@ export default function VaultPage() {
                       {canRefresh && (
                         <button className="btn btn-ghost btn-sm" style={{ width: '100%', justifyContent: 'flex-start', borderRadius: 0, padding: '10px 14px' }}
                           disabled={refreshAllInProgress}
-                          onClick={() => { handleRefreshAll(plaidItemIds); setShowActionOverflow(false); }}>
+                          onClick={() => { handleRefreshAll(); setShowActionOverflow(false); }}>
                           <RefreshCw size={14} className={refreshAllInProgress ? 'spin' : ''} /> {refreshAllInProgress ? 'Refreshing...' : 'Refresh All'}
-                        </button>
-                      )}
-                      {plaidEnabled && (
-                        <button className="btn btn-ghost btn-sm" style={{ width: '100%', justifyContent: 'flex-start', borderRadius: 0, padding: '10px 14px' }}
-                          disabled={plaidConnectLoading}
-                          onClick={() => { openPlaidConnect(); setShowActionOverflow(false); }}>
-                          <Landmark size={14} /> {plaidConnectLoading ? 'Connecting...' : 'Connect Bank'}
                         </button>
                       )}
                     </div>
@@ -1447,9 +1292,7 @@ export default function VaultPage() {
       {refreshToast && (
         <SaveToast key={refreshToast.key} message={refreshToast.message} type={refreshToast.type} onDismiss={clearRefreshToast} />
       )}
-      {/* Plaid messages */}
       {integrationMsg && <div className="alert alert-success mb-3"><Check size={16} /><span>{integrationMsg}</span></div>}
-      {(plaidConnectError || plaidLinkError) && <div className="alert alert-danger mb-3"><AlertTriangle size={16} /><span>{plaidConnectError || plaidLinkError}</span></div>}
 
       {/* Re-encrypt shared copies prompt (continuous shares only) */}
       {reEncryptEntry && (() => {
@@ -1519,9 +1362,10 @@ export default function VaultPage() {
                     const tpl = templates.find(t => t.id === entry.template_id) || entry.template;
                     const subtype = tpl?.subtype;
                     const integrationId = getIntegrationType(d);
+                    const integrationProvider = integrationId ? getProvider(integrationId) : null;
                     const hasIntegration = !!integrationId;
                     const hasTicker = (subtype === 'stock' && d?.ticker) || (subtype === 'crypto' && d?.coin);
-                    const canRefresh = hasIntegration || hasTicker;
+                    const canRefresh = (hasIntegration && !!integrationProvider?.refresh) || hasTicker;
                     const integrationInfo = integrationId ? getProviderDisplayInfo(integrationId, getIntegration(d, integrationId)) : null;
                     // Direct value field for inline amount editing (skip accounts and qty×price templates)
                     const tplFields = Array.isArray(fields) ? fields : [];
@@ -1585,11 +1429,11 @@ export default function VaultPage() {
                                 e.stopPropagation();
                                 try {
                                   if (hasIntegration) {
-                                    const provider = getProvider(integrationId);
                                     const meta = getIntegration(d, integrationId);
+                                    if (!integrationProvider?.refresh || !meta?.item_id) return;
                                     setIntegrationRefreshing(true);
                                     try {
-                                      await provider.refresh([meta.item_id], entries, decryptedCache, encrypt,
+                                      await integrationProvider.refresh([meta.item_id], entries, decryptedCache, encrypt,
                                         (id, data) => setDecryptedCache(prev => ({ ...prev, [id]: data })));
                                     } finally {
                                       setIntegrationRefreshing(false);
@@ -1928,6 +1772,7 @@ export default function VaultPage() {
           const integrationId = getIntegrationType(d);
           if (integrationId) {
             const meta = getIntegration(d, integrationId);
+            const provider = getProvider(integrationId);
             const integrationInfo = getProviderDisplayInfo(integrationId, meta);
             return (
               <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
@@ -1943,18 +1788,18 @@ export default function VaultPage() {
                     <button
                       className="btn btn-ghost btn-sm"
                       style={{ fontSize: 11, padding: '2px 8px' }}
-                      disabled={integrationRefreshing}
+                      disabled={integrationRefreshing || !provider?.refresh || !meta?.item_id}
                       onClick={async () => {
-                        const provider = getProvider(integrationId);
+                        if (!provider?.refresh || !meta?.item_id) return;
                         setIntegrationRefreshing(true);
                         try {
                           await provider.refresh([meta.item_id], entries, decryptedCache, encrypt,
                             (id, data) => setDecryptedCache(prev => ({ ...prev, [id]: data })));
-                          setPlaidMsg('Balance refreshed');
-                          setTimeout(() => setPlaidMsg(''), 3000);
+                          setIntegrationMsg('Integration refreshed');
+                          setTimeout(() => setIntegrationMsg(''), 3000);
                         } catch {
-                          setPlaidMsg('Refresh failed');
-                          setTimeout(() => setPlaidMsg(''), 5000);
+                          setIntegrationMsg('Refresh failed');
+                          setTimeout(() => setIntegrationMsg(''), 5000);
                         } finally {
                           setIntegrationRefreshing(false);
                         }
@@ -1965,10 +1810,11 @@ export default function VaultPage() {
                     <button
                       className="btn btn-ghost btn-sm text-danger"
                       style={{ fontSize: 11, padding: '2px 8px' }}
+                      disabled={!provider?.disconnect || !meta?.item_id}
                       onClick={async () => {
                         if (!confirm(`Disconnect this account from ${integrationInfo?.label || integrationId}? The entry will be kept but balance refresh will no longer work.`)) return;
                         try {
-                          const provider = getProvider(integrationId);
+                          if (!provider?.disconnect || !meta?.item_id) return;
                           await provider.disconnect(meta.item_id);
                           // Remove integration from this entry and linked assets
                           const updatedData = removeIntegration(d, integrationId);
@@ -1981,11 +1827,11 @@ export default function VaultPage() {
                               await updateEntryLocal(entry.id, cleanData);
                             }
                           }
-                          setPlaidMsg(`Disconnected from ${integrationInfo?.label || integrationId}`);
-                          setTimeout(() => setPlaidMsg(''), 3000);
+                          setIntegrationMsg(`Disconnected from ${integrationInfo?.label || integrationId}`);
+                          setTimeout(() => setIntegrationMsg(''), 3000);
                         } catch (err) {
-                          setPlaidMsg(err.response?.data?.error || 'Disconnect failed');
-                          setTimeout(() => setPlaidMsg(''), 5000);
+                          setIntegrationMsg(err.response?.data?.error || 'Disconnect failed');
+                          setTimeout(() => setIntegrationMsg(''), 5000);
                         }
                       }}
                     >
@@ -1993,19 +1839,6 @@ export default function VaultPage() {
                     </button>
                   </div>
                 </div>
-              </div>
-            );
-          }
-          if (plaidEnabled) {
-            return (
-              <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
-                <button
-                  className="btn btn-outline btn-sm"
-                  onClick={() => { setPlaidLinkEntryId(viewEntry.id); openPlaidLinkExisting(); }}
-                  disabled={plaidLinkLoading}
-                >
-                  <Link2 size={14} /> {plaidLinkLoading ? 'Connecting...' : 'Link to Plaid'}
-                </button>
               </div>
             );
           }
@@ -2151,38 +1984,6 @@ export default function VaultPage() {
             </div>
           );
         })()}
-      </Modal>
-
-      {/* Plaid Account Picker Modal */}
-      <Modal isOpen={!!plaidAccountPicker} onClose={() => setPlaidAccountPicker(null)} title="Select Account to Link">
-        {plaidAccountPicker && (
-          <div>
-            <p className="text-muted" style={{ fontSize: 13, marginBottom: 12 }}>
-              Choose which bank account to link to this entry:
-            </p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {plaidAccountPicker.accounts.map(acct => (
-                <button
-                  key={acct.account_id}
-                  className="btn btn-outline"
-                  style={{ textAlign: 'left', padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-                  onClick={() => confirmPlaidLink(acct)}
-                >
-                  <div>
-                    <div className="font-medium">{acct.name}</div>
-                    <div className="text-muted" style={{ fontSize: 12 }}>{acct.type} / {acct.subtype}</div>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <div className="font-medium">{hideAmounts ? MASKED : `${acct.currency} ${Number(acct.balance).toLocaleString()}`}</div>
-                  </div>
-                </button>
-              ))}
-            </div>
-            <div className="flex gap-2 mt-4">
-              <button className="btn btn-secondary" onClick={() => setPlaidAccountPicker(null)}>Cancel</button>
-            </div>
-          </div>
-        )}
       </Modal>
 
       {/* Import Modal */}
