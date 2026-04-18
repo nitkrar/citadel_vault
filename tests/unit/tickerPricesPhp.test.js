@@ -45,9 +45,13 @@ function buildPayload(meta) {
   })).toString('base64');
 }
 
-function parseResponse(meta, ticker = 'TEST') {
+function parseResponse(meta, ticker = 'TEST', { preferAfterHours = false } = {}) {
+  const setupSetting = preferAfterHours
+    ? `Storage::adapter()->setSystemSetting('prefer_after_hours', 'true');`
+    : '';
   return runPhpJson(
     phpBootstrap(`
+      ${setupSetting}
       $result = TickerPrices::parseResponse(getenv('TEST_TICKER'), base64_decode(getenv('TEST_PAYLOAD')));
       echo json_encode($result);
     `),
@@ -101,7 +105,7 @@ describe('TickerPrices PHP helpers', () => {
     });
   });
 
-  it('parseResponse prefers valid after-hours pricing', () => {
+  it('parseResponse ignores after-hours when prefer_after_hours is off (default)', () => {
     expect(parseResponse({
       regularMarketPrice: 100,
       postMarketPrice: 102,
@@ -112,6 +116,25 @@ describe('TickerPrices PHP helpers', () => {
       fullExchangeName: 'NasdaqGS',
       longName: 'Test Corp',
     })).toEqual({
+      price: 100,
+      currency: 'USD',
+      exchange: 'NasdaqGS',
+      name: 'Test Corp',
+      after_hours: false,
+    });
+  });
+
+  it('parseResponse prefers valid after-hours pricing when prefer_after_hours is enabled', () => {
+    expect(parseResponse({
+      regularMarketPrice: 100,
+      postMarketPrice: 102,
+      marketState: 'POST',
+      regularMarketTime: 1000,
+      postMarketTime: 1100,
+      currency: 'USD',
+      fullExchangeName: 'NasdaqGS',
+      longName: 'Test Corp',
+    }, 'TEST', { preferAfterHours: true })).toEqual({
       price: 102,
       currency: 'USD',
       exchange: 'NasdaqGS',
@@ -120,7 +143,7 @@ describe('TickerPrices PHP helpers', () => {
     });
   });
 
-  it('parseResponse ignores stale after-hours pricing', () => {
+  it('parseResponse ignores stale after-hours pricing (even when enabled)', () => {
     expect(parseResponse({
       regularMarketPrice: 100,
       postMarketPrice: 102,
@@ -130,7 +153,7 @@ describe('TickerPrices PHP helpers', () => {
       currency: 'USD',
       fullExchangeName: 'NasdaqGS',
       longName: 'Test Corp',
-    })).toEqual({
+    }, 'TEST', { preferAfterHours: true })).toEqual({
       price: 100,
       currency: 'USD',
       exchange: 'NasdaqGS',
@@ -139,7 +162,7 @@ describe('TickerPrices PHP helpers', () => {
     });
   });
 
-  it('parseResponse ignores after-hours pricing during regular trading', () => {
+  it('parseResponse ignores after-hours pricing during regular trading (even when enabled)', () => {
     expect(parseResponse({
       regularMarketPrice: 100,
       postMarketPrice: 102,
@@ -149,7 +172,7 @@ describe('TickerPrices PHP helpers', () => {
       currency: 'USD',
       fullExchangeName: 'NasdaqGS',
       longName: 'Test Corp',
-    })).toEqual({
+    }, 'TEST', { preferAfterHours: true })).toEqual({
       price: 100,
       currency: 'USD',
       exchange: 'NasdaqGS',
@@ -158,7 +181,7 @@ describe('TickerPrices PHP helpers', () => {
     });
   });
 
-  it('parseResponse ignores after-hours pricing with a large delta', () => {
+  it('parseResponse ignores after-hours pricing with a large delta (even when enabled)', () => {
     expect(parseResponse({
       regularMarketPrice: 100,
       postMarketPrice: 150,
@@ -168,7 +191,7 @@ describe('TickerPrices PHP helpers', () => {
       currency: 'USD',
       fullExchangeName: 'NasdaqGS',
       longName: 'Test Corp',
-    })).toEqual({
+    }, 'TEST', { preferAfterHours: true })).toEqual({
       price: 100,
       currency: 'USD',
       exchange: 'NasdaqGS',

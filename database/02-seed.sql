@@ -735,6 +735,7 @@ INSERT INTO `system_settings` (`setting_key`, `setting_value`, `type`, `category
     ('invite_expiry_days',          '7',              'config',     'invitations', 'Invite link expiry in days'),
     ('invite_requests_enabled',     'false',          'gatekeeper', 'invitations', 'Enable public invite request form'),
     ('ticker_price_ttl',            '86400',          'config',     'prices',      'Price cache TTL in seconds'),
+    ('prefer_after_hours',          'false',          'gatekeeper', 'prices',      'Prefer post-market quote over regular close when fetching prices'),
     ('cache_mode',                  'instant_unlock',  'config',    'vault',       'Vault cache mode'),
     ('cache_ttl_hours',             '0',              'config',     'vault',       'Vault cache TTL in hours'),
     ('default_vault_tab',           'account',        'config',     'vault',       'Default active tab on vault page'),
