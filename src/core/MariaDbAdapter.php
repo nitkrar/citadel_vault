@@ -2176,65 +2176,6 @@ class MariaDbAdapter implements StorageAdapter {
     }
 
     // =========================================================================
-    // Plaid
-    // =========================================================================
-
-    public function upsertPlaidItem(int $userId, string $itemId, string $encryptedAccessToken): void {
-        $stmt = $this->db->prepare(
-            'INSERT INTO plaid_items (user_id, item_id, access_token, status)
-             VALUES (?, ?, ?, "active")
-             ON DUPLICATE KEY UPDATE access_token = VALUES(access_token), status = "active"'
-        );
-        $stmt->execute([$userId, $itemId, $encryptedAccessToken]);
-    }
-
-    public function getPlaidItems(int $userId, array $itemIds): array {
-        if (empty($itemIds)) {
-            return [];
-        }
-        $placeholders = implode(',', array_fill(0, count($itemIds), '?'));
-        $stmt = $this->db->prepare(
-            "SELECT item_id, access_token FROM plaid_items
-             WHERE user_id = ? AND item_id IN ($placeholders)"
-        );
-        $stmt->execute(array_merge([$userId], $itemIds));
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    }
-
-    public function updatePlaidItemStatus(string $itemId, int $userId, string $status): void {
-        $stmt = $this->db->prepare(
-            'UPDATE plaid_items SET status = ? WHERE item_id = ? AND user_id = ?'
-        );
-        $stmt->execute([$status, $itemId, $userId]);
-    }
-
-    public function getPlaidItem(int $userId, string $itemId): ?array {
-        $stmt = $this->db->prepare(
-            'SELECT access_token FROM plaid_items WHERE user_id = ? AND item_id = ?'
-        );
-        $stmt->execute([$userId, $itemId]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        return $row ?: null;
-    }
-
-    public function deletePlaidItem(int $userId, string $itemId): void {
-        $stmt = $this->db->prepare(
-            'DELETE FROM plaid_items WHERE user_id = ? AND item_id = ?'
-        );
-        $stmt->execute([$userId, $itemId]);
-    }
-
-    public function getPlaidItemsByUser(int $userId): array {
-        $stmt = $this->db->prepare(
-            'SELECT item_id, status, created_at, updated_at
-             FROM plaid_items WHERE user_id = ?
-             ORDER BY created_at DESC'
-        );
-        $stmt->execute([$userId]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    }
-
-    // =========================================================================
     // Private Helpers
     // =========================================================================
 

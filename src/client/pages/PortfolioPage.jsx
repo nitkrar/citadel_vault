@@ -19,13 +19,11 @@ import usePortfolioData from '../hooks/usePortfolioData';
 import AssetsTab from '../components/portfolio/AssetsTab';
 import PerformanceTab from '../components/portfolio/PerformanceTab';
 import Modal from '../components/Modal';
-import useAppConfig from '../hooks/useAppConfig';
 import useCountries from '../hooks/useCountries';
 import api from '../api/client';
 import { fmtCurrency, MASKED, apiData } from '../lib/checks';
 import * as workerDispatcher from '../lib/workerDispatcher';
 import { AAD_SNAPSHOT_META, AAD_SNAPSHOT_ENTRY } from '../lib/crypto';
-import { hasAnyIntegration, getIntegration, getIntegrationType } from '../integrations/helpers';
 import { CHART_COLORS, getTypeColor, abbreviateNumber } from '../lib/chartColors';
 import { buildSnapshotBlobs } from '../lib/portfolioAggregator';
 
@@ -69,23 +67,10 @@ export default function PortfolioPage() {
   const [assetsGroupBy, setAssetsGroupBy] = useState(() => sessionStorage.getItem('pv_portfolio_assets_group') || 'none');
   const [expandedGroups, setExpandedGroups] = useState({});
   const [snapshotSaving, setSnapshotSaving] = useState(false);
-  const { config } = useAppConfig();
-  const plaidEnabled = config?.plaid_enabled === 'true';
 
   // Mobile overflow menus
   const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
   const [showActionOverflow, setShowActionOverflow] = useState(false);
-
-  // Plaid item IDs for the Refresh All handler
-  const plaidEntries = useMemo(() => {
-    if (!portfolio?.assets) return [];
-    return portfolio.assets.filter(a => hasAnyIntegration(a));
-  }, [portfolio]);
-
-  const plaidItemIds = useMemo(
-    () => plaidEnabled ? [...new Set(plaidEntries.map(e => getIntegration(e, getIntegrationType(e))?.item_id).filter(Boolean))] : [],
-    [plaidEnabled, plaidEntries]
-  );
 
   // Mobile header events
   useEffect(() => {
@@ -289,7 +274,7 @@ export default function PortfolioPage() {
                     <button className="btn btn-ghost btn-sm"
                       style={{ width: '100%', justifyContent: 'flex-start', borderRadius: 0, padding: '10px 14px' }}
                       disabled={refreshing || isEmpty}
-                      onClick={() => { handleRefreshAll(plaidItemIds); setShowActionOverflow(false); }}>
+                      onClick={() => { handleRefreshAll(); setShowActionOverflow(false); }}>
                       <RefreshCw size={14} className={refreshing ? 'spin' : ''} /> {refreshing ? 'Refreshing...' : 'Refresh All'}
                     </button>
                     <button className="btn btn-ghost btn-sm"
@@ -332,7 +317,7 @@ export default function PortfolioPage() {
                   ))}
                 </select>
               )}
-              <button className="btn btn-secondary" onClick={() => handleRefreshAll(plaidItemIds)} disabled={refreshing || isEmpty}>
+              <button className="btn btn-secondary" onClick={() => handleRefreshAll()} disabled={refreshing || isEmpty}>
                 <RefreshCw size={16} className={refreshing ? 'spin' : ''} /> {refreshing ? 'Refreshing...' : 'Refresh All'}
               </button>
               <button className="btn btn-primary" onClick={handleSaveSnapshot} disabled={snapshotSaving || isEmpty}>
