@@ -137,6 +137,21 @@ describe('Prices API — refresh with ticker list', () => {
     expect(priceCount + errorCount).toBe(2);
   });
 
+  it('returns requested ticker keys with canonical_ticker and after_hours fields', async () => {
+    const resp = await api.post('/prices.php?action=refresh', { json: { type: 'ticker', tickers: ['brk.b'] } });
+    expect(resp.status).toBe(200);
+    const data = await extractData(resp);
+    const priceData = data.ticker.prices['brk.b'];
+
+    if (!priceData) {
+      expect(data.ticker.errors).toHaveProperty('brk.b');
+      return;
+    }
+
+    expect(priceData.canonical_ticker).toBe('BRK-B');
+    expect(typeof priceData.after_hours).toBe('boolean');
+  });
+
   it('treats empty tickers array as stale refresh', async () => {
     const resp = await api.post('/prices.php?action=refresh', { json: { type: 'ticker', tickers: [] } });
     expect(resp.status).toBe(200);

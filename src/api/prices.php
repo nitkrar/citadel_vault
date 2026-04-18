@@ -244,8 +244,8 @@ if ($method === 'POST' && $action === 'refresh') {
 
         if (is_array($tickers) && !empty($tickers)) {
             // Specific tickers requested — cache-aware fetch (stale/missing only)
-            $tickers = array_slice(array_unique(array_map('trim', $tickers)), 0, 50);
-            $tickers = array_filter($tickers, fn($t) => preg_match('/^[A-Za-z0-9.\-^=]+$/', $t));
+            $tickers = array_values(array_slice(array_unique(array_map('trim', $tickers)), 0, 50));
+            $tickers = array_values(array_filter($tickers, fn($t) => preg_match('/^[A-Za-z0-9.\-^=]+$/', $t)));
 
             if (empty($tickers)) {
                 if ($isCronRefreshRequest) {
@@ -254,31 +254,57 @@ if ($method === 'POST' && $action === 'refresh') {
                 Response::error('No valid tickers provided.', 400);
             }
 
-            $ttl = (int)($storage->getSystemSetting('ticker_price_ttl') ?? 86400);
-            $cached = $storage->getCachedPrices(array_values($tickers), $ttl);
+            $requestedToCanonical = [];
+            $canonicalTickers = [];
+            foreach ($tickers as $requestedTicker) {
+                $canonicalTicker = TickerPrices::normalize($requestedTicker);
+                $requestedToCanonical[$requestedTicker] = $canonicalTicker;
+                $canonicalTickers[$canonicalTicker] = true;
+            }
 
-            $results = [];
+            $ttl = (int)($storage->getSystemSetting('ticker_price_ttl') ?? 86400);
+            $cached = $storage->getCachedPrices(array_keys($canonicalTickers), $ttl);
+
+            $canonicalResults = [];
             $cachedTickers = [];
             foreach ($cached as $row) {
-                $results[$row['ticker']] = [
-                    'price'    => (float)$row['price'],
-                    'currency' => $row['currency'],
-                    'exchange' => $row['exchange'],
-                    'name'     => $row['name'],
-                    'cached'   => true,
+                $canonicalResults[$row['ticker']] = [
+                    'price'            => (float)$row['price'],
+                    'currency'         => $row['currency'],
+                    'exchange'         => $row['exchange'],
+                    'name'             => $row['name'],
+                    'cached'           => true,
+                    'canonical_ticker' => $row['ticker'],
+                    'after_hours'      => false,
                 ];
                 $cachedTickers[] = $row['ticker'];
             }
 
-            $staleTickers = array_values(array_diff($tickers, $cachedTickers));
-            $errors = [];
+            $staleTickers = array_values(array_diff(array_keys($canonicalTickers), $cachedTickers));
+            $canonicalErrors = [];
 
             if (!empty($staleTickers)) {
                 $fetched = TickerPrices::fetch($staleTickers);
                 foreach ($fetched['results'] as $ticker => $data) {
-                    $results[$ticker] = $data + ['cached' => false];
+                    $canonicalResults[$ticker] = $data + [
+                        'cached' => false,
+                        'canonical_ticker' => $ticker,
+                    ];
                 }
-                $errors = $fetched['errors'];
+                $canonicalErrors = $fetched['errors'];
+            }
+
+            $results = [];
+            $errors = [];
+            foreach ($requestedToCanonical as $requestedTicker => $canonicalTicker) {
+                if (isset($canonicalResults[$canonicalTicker])) {
+                    $results[$requestedTicker] = $canonicalResults[$canonicalTicker];
+                    continue;
+                }
+
+                if (isset($canonicalErrors[$canonicalTicker])) {
+                    $errors[$requestedTicker] = $canonicalErrors[$canonicalTicker];
+                }
             }
 
             $response['ticker'] = [
@@ -309,7 +335,9 @@ if ($method === 'POST' && $action === 'refresh') {
 // GET cache — Admin: view cached ticker prices
 // ============================================================================
 if ($method === 'GET' && $action === 'cache') {
-    if (!$isSiteAdmin) Response::error('Admin access required.', 403);
+    if (!$isSiteAdmin) {
+        Response::error('Admin access required.', 403);
+    }
 
     Response::success($storage->getAllCachedPrices());
 }
@@ -318,7 +346,9 @@ if ($method === 'GET' && $action === 'cache') {
 // DELETE cache — Admin: clear price cache
 // ============================================================================
 if ($method === 'DELETE' && $action === 'cache') {
-    if (!$isSiteAdmin) Response::error('Admin access required.', 403);
+    if (!$isSiteAdmin) {
+        Response::error('Admin access required.', 403);
+    }
 
     $storage->clearPriceCache();
     Response::success(['cleared' => true]);

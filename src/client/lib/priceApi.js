@@ -7,9 +7,12 @@ export async function fetchTickerPrice(ticker) {
     tickers: [t],
   });
   const result = resp?.data || resp;
+  const price = result?.ticker?.prices?.[t] || null;
   return {
-    price: result?.ticker?.prices?.[t] || null,
+    price,
     error: result?.ticker?.errors?.[t] || null,
+    canonicalTicker: price?.canonical_ticker || null,
+    afterHours: Boolean(price?.after_hours),
   };
 }
 

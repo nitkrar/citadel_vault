@@ -7,6 +7,19 @@
 require_once __DIR__ . '/Storage.php';
 
 class TickerPrices {
+    private const TICKER_ALIASES = [
+        'BRK.B' => 'BRK-B', 'BRKB' => 'BRK-B',
+        'BF.B'  => 'BF-B',  'BFB'  => 'BF-B',
+        'FB'    => 'META',
+        'TWTR'  => 'X',
+        'HCN'   => 'WELL',
+    ];
+
+    public static function normalize(string $ticker): string {
+        $normalized = strtoupper(trim($ticker));
+        return self::TICKER_ALIASES[$normalized] ?? $normalized;
+    }
+
     private static function lockConnection(): ?PDO {
         static $pdo = null;
         static $connectFailed = false;
@@ -68,7 +81,7 @@ class TickerPrices {
 
     /**
      * Parse Yahoo Finance v8 chart API response.
-     * @return array{price:float,currency:string,exchange:string,name:string}|string — result or error string
+     * @return array{price:float,currency:string,exchange:string,name:string,after_hours:bool}|string — result or error string
      */
     public static function parseResponse(string $ticker, string $body): array|string {
         $data = json_decode($body, true);
@@ -78,7 +91,16 @@ class TickerPrices {
             return 'Ticker not found';
         }
 
-        $price = $meta['regularMarketPrice'];
+        $regular = $meta['regularMarketPrice'] ?? null;
+        $post = $meta['postMarketPrice'] ?? null;
+        $marketState = $meta['marketState'] ?? '';
+        $postTime = $meta['postMarketTime'] ?? 0;
+        $regularTime = $meta['regularMarketTime'] ?? 0;
+        $useAfterHours = $post !== null
+            && in_array($marketState, ['POST', 'CLOSED'], true)
+            && $postTime > $regularTime
+            && abs($post - $regular) / max($regular, 0.01) < 0.30;
+        $price = $useAfterHours ? $post : $regular;
         $currency = $meta['currency'] ?? 'USD';
         $exchange = $meta['fullExchangeName'] ?? $meta['exchangeName'] ?? '';
         $name = $meta['longName'] ?? $meta['shortName'] ?? $ticker;
@@ -90,10 +112,11 @@ class TickerPrices {
         }
 
         return [
-            'price'    => (float)$price,
-            'currency' => $currency,
-            'exchange' => $exchange,
-            'name'     => $name,
+            'price'       => (float)$price,
+            'currency'    => $currency,
+            'exchange'    => $exchange,
+            'name'        => $name,
+            'after_hours' => $useAfterHours,
         ];
     }
 
@@ -105,6 +128,7 @@ class TickerPrices {
      * @return array{results: array, errors: array}
      */
     public static function fetch(array $tickers): array {
+        $tickers = array_values(array_unique(array_map([self::class, 'normalize'], $tickers)));
         $results = [];
         $errors = [];
         $storage = Storage::adapter();
@@ -130,7 +154,9 @@ class TickerPrices {
 
             do {
                 $status = curl_multi_exec($mh, $active);
-                if ($active) curl_multi_select($mh);
+                if ($active) {
+                    curl_multi_select($mh);
+                }
             } while ($active && $status === CURLM_OK);
 
             foreach ($handles as $ticker => $ch) {
