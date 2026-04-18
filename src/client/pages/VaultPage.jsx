@@ -9,6 +9,7 @@ import { useEncryption } from '../contexts/EncryptionContext';
 import { useVaultEntries } from '../contexts/VaultDataContext';
 import { VALID_ENTRY_TYPES } from '../lib/defaults';
 import { apiData } from '../lib/checks';
+import { fetchTickerPrice } from '../lib/priceApi';
 import useCountries from '../hooks/useCountries';
 import useCurrencies from '../hooks/useCurrencies';
 import useTemplates from '../hooks/useTemplates';
@@ -544,10 +545,7 @@ export default function VaultPage() {
     if ((subtype === 'stock' || subtype === 'crypto') && form[tickerField]?.trim() && !tickerVerified) {
       setTickerVerifying(true);
       try {
-        const { data: resp } = await api.post('/prices.php?action=refresh', { type: 'ticker', tickers: [form[tickerField].trim()] });
-        const result = apiData({ data: resp });
-        const priceData = result?.ticker?.prices?.[form[tickerField].trim()];
-        const errorMsg = result?.ticker?.errors?.[form[tickerField].trim()];
+        const { price: priceData, error: errorMsg } = await fetchTickerPrice(form[tickerField]);
         if (!priceData) {
           setTickerResult({ success: false, error: errorMsg || 'Ticker not found' });
           setTickerVerifying(false);
@@ -609,10 +607,7 @@ export default function VaultPage() {
     if ((subtype === 'stock' || subtype === 'crypto') && form[tickerField]?.trim() && !tickerVerified) {
       setTickerVerifying(true);
       try {
-        const { data: resp } = await api.post('/prices.php?action=refresh', { type: 'ticker', tickers: [form[tickerField].trim()] });
-        const result = apiData({ data: resp });
-        const priceData = result?.ticker?.prices?.[form[tickerField].trim()];
-        const errorMsg = result?.ticker?.errors?.[form[tickerField].trim()];
+        const { price: priceData, error: errorMsg } = await fetchTickerPrice(form[tickerField]);
         if (!priceData) {
           setTickerResult({ success: false, error: errorMsg || 'Ticker not found' });
           setTickerVerifying(false);
@@ -987,10 +982,7 @@ export default function VaultPage() {
     setTickerVerifying(true);
     setTickerResult(null);
     try {
-      const { data: resp } = await api.post('/prices.php?action=refresh', { type: 'ticker', tickers: [tickerValue.trim()] });
-      const result = apiData({ data: resp });
-      const priceData = result?.ticker?.prices?.[tickerValue.trim()];
-      const errorMsg = result?.ticker?.errors?.[tickerValue.trim()];
+      const { price: priceData, error: errorMsg } = await fetchTickerPrice(tickerValue);
       if (priceData) {
         setTickerResult({ success: true, ...priceData });
         setTickerVerified(true);
@@ -1604,9 +1596,7 @@ export default function VaultPage() {
                                     }
                                   } else if (hasTicker) {
                                     const ticker = subtype === 'crypto' ? d.coin : d.ticker;
-                                    const { data: resp } = await api.post('/prices.php?action=refresh', { type: 'ticker', tickers: [ticker] });
-                                    const result = apiData({ data: resp });
-                                    const priceData = result?.ticker?.prices?.[ticker];
+                                    const { price: priceData } = await fetchTickerPrice(ticker);
                                     if (priceData) {
                                       const priceKey = subtype === 'crypto' ? 'price_per_unit' : 'price_per_share';
                                       const updated = { ...d, [priceKey]: String(priceData.price), currency: priceData.currency };
@@ -2205,4 +2195,3 @@ export default function VaultPage() {
     </div>
   );
 }
-
