@@ -2,9 +2,7 @@
  * Integration provider registry.
  * Import available providers here. Adding/removing a provider = one line change.
  */
-import plaid from './providers/plaid/module';
-
-const providers = { plaid };
+const providers = {};
 
 /** Get a provider module by ID. Returns null if not found. */
 export function getProvider(id) {

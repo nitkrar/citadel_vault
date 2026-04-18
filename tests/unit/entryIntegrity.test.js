@@ -29,7 +29,7 @@ const STOCK_ENTRY = {
   updated_at: '2026-03-15T10:00:00Z',
 };
 
-const PLAID_CASH_ENTRY = {
+const INTEGRATED_CASH_ENTRY = {
   id: 15,
   entry_type: 'asset',
   template_id: 25,
@@ -114,7 +114,7 @@ describe('Entry shape preservation on update', () => {
 describe('Entry shape preservation for different entry types', () => {
   const entries = [
     { name: 'stock entry', entry: STOCK_ENTRY, expectedSubtype: 'stock' },
-    { name: 'plaid cash entry', entry: PLAID_CASH_ENTRY, expectedSubtype: 'cash' },
+    { name: 'integrated cash entry', entry: INTEGRATED_CASH_ENTRY, expectedSubtype: 'cash' },
     { name: 'account entry', entry: ACCOUNT_ENTRY, expectedSubtype: null },
   ];
 
@@ -166,17 +166,19 @@ describe('Decrypted data shape (what goes inside encrypted_data)', () => {
     currency: 'USD',
   };
 
-  const DECRYPTED_PLAID_CASH = {
+  const DECRYPTED_INTEGRATED_CASH = {
     title: 'HSBC Current — Cash',
     linked_account_id: '14',
     value: '2450',
     currency: 'GBP',
-    _plaid: {
-      item_id: 'item_xyz',
-      account_id: 'acc_1',
-      institution_name: 'HSBC',
-      account_name: 'Current Account',
-      last_refreshed: '2026-03-15T14:30:00Z',
+    integrations: {
+      bank_sync: {
+        item_id: 'item_xyz',
+        account_id: 'acc_1',
+        institution_name: 'HSBC',
+        account_name: 'Current Account',
+        last_refreshed: '2026-03-15T14:30:00Z',
+      },
     },
   };
 
@@ -190,30 +192,35 @@ describe('Decrypted data shape (what goes inside encrypted_data)', () => {
     expect(updated.price_per_share).toBe('190.00');
   });
 
-  it('balance refresh updates only value and _plaid.last_refreshed', () => {
+  it('integration refresh updates only value and integration metadata', () => {
     const updated = {
-      ...DECRYPTED_PLAID_CASH,
+      ...DECRYPTED_INTEGRATED_CASH,
       value: '2500',
-      _plaid: { ...DECRYPTED_PLAID_CASH._plaid, last_refreshed: '2026-03-16T10:00:00Z' },
+      integrations: {
+        bank_sync: {
+          ...DECRYPTED_INTEGRATED_CASH.integrations.bank_sync,
+          last_refreshed: '2026-03-16T10:00:00Z',
+        },
+      },
     };
     expect(updated.title).toBe('HSBC Current — Cash');
     expect(updated.linked_account_id).toBe('14');
     expect(updated.currency).toBe('GBP');
     expect(updated.value).toBe('2500');
-    expect(updated._plaid.item_id).toBe('item_xyz');
-    expect(updated._plaid.account_id).toBe('acc_1');
-    expect(updated._plaid.institution_name).toBe('HSBC');
+    expect(updated.integrations.bank_sync.item_id).toBe('item_xyz');
+    expect(updated.integrations.bank_sync.account_id).toBe('acc_1');
+    expect(updated.integrations.bank_sync.institution_name).toBe('HSBC');
   });
 
-  it('_plaid metadata is preserved through spread', () => {
-    const original = { ...DECRYPTED_PLAID_CASH };
+  it('integration metadata is preserved through spread', () => {
+    const original = { ...DECRYPTED_INTEGRATED_CASH };
     const updated = { ...original, value: '999' };
-    expect(updated._plaid).toEqual(DECRYPTED_PLAID_CASH._plaid);
+    expect(updated.integrations).toEqual(DECRYPTED_INTEGRATED_CASH.integrations);
   });
 
-  it('_plaid is not added to non-plaid entries', () => {
+  it('integration metadata is not added to unrelated entries', () => {
     const updated = { ...DECRYPTED_STOCK, price_per_share: '200' };
-    expect(updated._plaid).toBeUndefined();
+    expect(updated.integrations).toBeUndefined();
   });
 });
 

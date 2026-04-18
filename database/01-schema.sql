@@ -33,7 +33,6 @@ DROP TABLE IF EXISTS `webauthn_challenges`;
 DROP TABLE IF EXISTS `user_credentials_webauthn`;
 DROP TABLE IF EXISTS `rate_limits`;
 DROP TABLE IF EXISTS `password_history`;
-DROP TABLE IF EXISTS `plaid_items`;
 DROP TABLE IF EXISTS `ticker_price_history`;
 DROP TABLE IF EXISTS `ticker_prices`;
 DROP TABLE IF EXISTS `exchanges`;
@@ -356,24 +355,6 @@ CREATE TABLE `ticker_price_history` (
     `recorded_at` DATE NOT NULL,
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_ticker_date` (`ticker`, `recorded_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- =============================================================================
--- PLAID INTEGRATION
--- =============================================================================
-
--- Plaid Items — one row per bank connection per user
-CREATE TABLE `plaid_items` (
-    `id`                INT UNSIGNED NOT NULL AUTO_INCREMENT,
-    `user_id`           INT UNSIGNED NOT NULL,
-    `item_id`           VARCHAR(100) NOT NULL,
-    `access_token`      TEXT NOT NULL,
-    `status`            ENUM('active', 'error', 'reauth_required') NOT NULL DEFAULT 'active',
-    `created_at`        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    `updated_at`        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_user_item` (`user_id`, `item_id`),
-    CONSTRAINT `fk_plaid_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================================================

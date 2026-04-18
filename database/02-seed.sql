@@ -734,7 +734,6 @@ INSERT INTO `system_settings` (`setting_key`, `setting_value`, `type`, `category
     ('lockout_tier3_duration',      '7776000',        'config',     'auth',        'Tier 3 lockout duration in seconds (90 days)'),
     ('invite_expiry_days',          '7',              'config',     'invitations', 'Invite link expiry in days'),
     ('invite_requests_enabled',     'false',          'gatekeeper', 'invitations', 'Enable public invite request form'),
-    ('plaid_enabled',               'false',          'gatekeeper', 'integrations','Enable Plaid bank integration'),
     ('ticker_price_ttl',            '86400',          'config',     'prices',      'Price cache TTL in seconds'),
     ('cache_mode',                  'instant_unlock',  'config',    'vault',       'Vault cache mode'),
     ('cache_ttl_hours',             '0',              'config',     'vault',       'Vault cache TTL in hours'),
