@@ -88,7 +88,11 @@ tests/
 └── .venv/               Python scratchpad (gitignored)
 ```
 
-Config files at repo root: `vitest.config.js`, `vitest.api.config.js`, `vitest.integration.config.js`, `playwright.config.js`.
+Config files for each runner:
+- `vite.config.js` — also hosts the **vitest unit/component** config (the `test:` block: includes `tests/unit/**` and `tests/component/**`, sets up jsdom matchers via `tests/setup.js`). `npm run test:unit` runs `vitest run` with no `--config` flag, so it picks this up.
+- `vitest.api.config.js` — `npm run test:api`. Runs `tests/api-js/**`, sets `TEST_API_URL=http://localhost:8083/src/api`, points `globalSetup` at `tests/helpers/apiTestServer.js`.
+- `vitest.integration.config.js` — `npm run test:integration`. Runs `tests/integration/**`.
+- `playwright.config.js` — `npm run test:e2e`.
 
 ## Critical rules
 
