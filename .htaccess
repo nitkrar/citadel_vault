@@ -1,4 +1,5 @@
 DirectoryIndex index.php
+AddType application/manifest+json .webmanifest
 
 RewriteEngine On
 RewriteBase /
@@ -21,6 +22,11 @@ RewriteRule ^src/core/ - [F,L]
 RewriteRule ^version\.json$ dist/version.json [END]
 RewriteRule ^registerSW\.js$ dist/registerSW.js [END]
 RewriteRule ^sw\.js$ dist/sw.js [END]
+RewriteRule ^(workbox-[\w-]+\.js)$ dist/$1 [END]
+RewriteRule ^manifest\.webmanifest$ dist/manifest.webmanifest [END]
+RewriteRule ^(favicon(-\d+)?\.svg|icon-[\w-]+\.png)$ dist/$1 [END]
+# Root index.html is the Vite dev entry; the service worker precaches /index.html as its navigation fallback
+RewriteRule ^index\.html$ index.php [END]
 
 # Allow robots.txt through
 RewriteRule ^robots\.txt$ - [L]
